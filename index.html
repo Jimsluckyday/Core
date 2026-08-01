@@ -9522,10 +9522,36 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     return best;
   }
 
+  // Converts a pasted date to YYYY-MM-DD without ever going through a Date
+  // object -- a round-trip through Date/toISOString can shift the calendar
+  // day depending on the browser's local timezone (the exact class of bug
+  // already found and fixed in the fetch script's UTC/Eastern handling), so
+  // this stays pure string manipulation instead. Already-ISO input passes
+  // through unchanged; M/D/YYYY (or M/D/YY) gets zero-padded and reordered;
+  // anything else is left alone (already-invalid dates are caught by the
+  // Date.parse check above this).
+  function normalizeDateStr(raw) {
+    const s = (raw || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const [, mo, da, yr] = m;
+      return `${yr}-${mo.padStart(2, '0')}-${da.padStart(2, '0')}`;
+    }
+    return s;
+  }
+
   function validateBulkRow(row) {
     const errors = [];
     const date = row.date || '';
     if (!date || isNaN(Date.parse(date))) errors.push('missing/invalid date');
+    // Used everywhere downstream that needs to compare against Supabase's
+    // own stored dates (duplicate detection, schedule/roster checks) --
+    // without this, a pasted "6/7/2026" never equals a stored "2026-06-07"
+    // even though they're the same day, so those checks silently miss
+    // every real match (confirmed directly: existing picks already in the
+    // database went completely unflagged as duplicates because of this).
+    const normalizedDate = normalizeDateStr(date);
 
     const capper = findByNameCI(cappers, row.capper);
     if (!capper) errors.push(`capper "${row.capper || ''}" not found`);
@@ -9576,7 +9602,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     // tournament that week runs Fri-Sun.
     let autoEventName = null;
     if (sport && date && !isNaN(Date.parse(date))) {
-      const tournamentCheck = checkTournamentDate(date, sport.id);
+      const tournamentCheck = checkTournamentDate(normalizedDate, sport.id);
       if (tournamentCheck) {
         errors.push(`event_date ${date} doesn't fall within any known ${sport.name} tournament window -- closest registered is "${tournamentCheck.closest.name}" (${tournamentCheck.closest.start_date} to ${tournamentCheck.closest.end_date}). Double-check the date, or add the correct tournament in Setup first if this one is missing.`);
       } else if (!row.event_name) {
@@ -9586,7 +9612,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // guess here is far more useful than an empty field, and much
         // faster to correct later (one pick) than to leave blank now and
         // have to revisit every tennis/golf/soccer pick individually.
-        const matched = findMatchingTournament(date, sport.id);
+        const matched = findMatchingTournament(normalizedDate, sport.id);
         if (matched) autoEventName = matched.name;
       }
     }
@@ -9595,7 +9621,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       raw: row,
       errors,
       resolved: errors.length === 0 ? {
-        event_date: date,
+        event_date: normalizedDate,
         capper_id: capper.id,
         sport_id: sport.id,
         bet_type_id: betType.id,
@@ -9785,8 +9811,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const sport = findByNameCI(sports, v.raw.sport);
       const betType = findByNameCI(betTypes, v.raw.bet_type || v.raw.bettype);
       if (!sport || (betType && betType.uses_prop_fields) || !v.raw.selection) continue;
-      const key = `${v.raw.date}|${sport.name}`;
-      if (!groups.has(key)) groups.set(key, { date: v.raw.date, sport: sport.name, items: [] });
+      const key = `${v.resolved.event_date}|${sport.name}`;
+      if (!groups.has(key)) groups.set(key, { date: v.resolved.event_date, sport: sport.name, items: [] });
       const [teamA, teamB] = v.raw.selection.includes('/')
         ? v.raw.selection.split('/').map(s => s.trim())
         : [v.raw.selection, undefined];
@@ -9850,8 +9876,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     for (const v of candidates) {
       const playerName = v.raw.prop_player || v.raw.selection;
       if (!playerName) continue;
-      if (!groups.has(v.raw.date)) groups.set(v.raw.date, []);
-      groups.get(v.raw.date).push({ v, playerName });
+      if (!groups.has(v.resolved.event_date)) groups.set(v.resolved.event_date, []);
+      groups.get(v.resolved.event_date).push({ v, playerName });
     }
 
     for (const [date, items] of groups.entries()) {
@@ -9919,7 +9945,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 161; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 162; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
