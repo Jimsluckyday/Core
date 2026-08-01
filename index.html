@@ -6922,8 +6922,22 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       </table>`;
   }
 
-  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper) {
+  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper, legRows) {
     const overall = totalAndUnique(picks);
+
+    // A capper who calls one straight bet and one 10-leg parlay has made two
+    // BETS, not eleven picks -- but grading him 1-1 on that hides that the
+    // parlay might have gone 9-for-10 on the individual games. Split the
+    // single-capper overview into three genuinely different things: real
+    // standalone bets, the parlay bet itself (did the WHOLE combo cash), and
+    // the individual games inside every parlay (did THAT game hit, separate
+    // from whether the full parlay did). legRows is a second, separate query
+    // (is_parlay_leg=eq.true) -- the main `picks` array here already excludes
+    // legs entirely, same as every other capper-facing report, so parlay
+    // legs never pollute a capper's real bet-type breakdown below.
+    const straightBets = picks.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
+    const parlayBets = picks.filter(p => p.bet_types && p.bet_types.name === 'Parlay');
+    const parlayGamesStats = tallyRows(legRows || []);
 
     const bySport = {};
     picks.forEach(p => {
@@ -6952,8 +6966,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       ? `<p class="stub-title" style="margin-bottom:8px;">Overall</p>
          <table class="picks-table" style="margin-bottom:20px;">
            <thead><tr><th></th><th>Picks / Bets</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
-           <tbody>${statsRowHtml('Total', overall.total)}</tbody>
-         </table>`
+           <tbody>
+             ${statsRowHtml('Straight bets', tallyRows(straightBets))}
+             ${statsRowHtml('Parlay bets (whole combo)', tallyRows(parlayBets))}
+             ${statsRowHtml('Parlay games (individual legs)', parlayGamesStats)}
+           </tbody>
+         </table>
+         <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
+           "Parlay bets" grades the whole combo as one bet (all-or-nothing). "Parlay games" grades each individual game inside every parlay separately -- a capper who goes 9-for-10 on a losing parlay shows 1 parlay loss AND 9 parlay-game wins, so heavy parlay volume with weak parlay-bet record but strong parlay-game record means the underlying picks are sound even though the combo rarely cashes.
+         </div>`
       : `<p class="stub-title" style="margin-bottom:8px;">Overall: total vs. unique</p>
          <table class="picks-table" style="margin-bottom:20px;">
            <thead><tr><th></th><th>Picks / Bets</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
@@ -7008,7 +7029,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     try {
       const picks = await restAllPages(query);
       if (!picks.length) { alert('No picks match these filters.'); return; }
-      openCapperAnalysisTab(picks, filterSummary, !!capperFilter);
+      let legRows = null;
+      if (capperFilter) {
+        let legQuery = `picks?select=result&capper_id=eq.${capperFilter}&is_parlay_leg=eq.true`;
+        if (sportFilter) legQuery += `&sport_id=eq.${sportFilter}`;
+        if (from) legQuery += `&event_date=gte.${from}`;
+        if (to) legQuery += `&event_date=lte.${to}`;
+        legRows = await restAllPages(legQuery);
+      }
+      openCapperAnalysisTab(picks, filterSummary, !!capperFilter, legRows);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -7043,7 +7072,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     try {
       const picks = await restAllPages(query);
       if (!picks.length) { alert(`No picks match these filters for ${capperName}.`); return; }
-      openCapperAnalysisTab(picks, filterSummary, true);
+      let legQuery = `picks?select=result&capper_id=eq.${capperId}&is_parlay_leg=eq.true`;
+      if (sportFilter) legQuery += `&sport_id=eq.${sportFilter}`;
+      if (from) legQuery += `&event_date=gte.${from}`;
+      if (to) legQuery += `&event_date=lte.${to}`;
+      const legRows = await restAllPages(legQuery);
+      openCapperAnalysisTab(picks, filterSummary, true, legRows);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -9885,7 +9919,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 160; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 161; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
