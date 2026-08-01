@@ -5541,7 +5541,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     }
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
     try {
-      const picks = await restAllPages(`picks?select=result,event_date,id&capper_id=eq.${capperId}&result=in.(win,loss,push)&order=event_date.asc,id.asc`);
+      const picks = await restAllPages(`picks?select=result,event_date,id&capper_id=eq.${capperId}&is_parlay_leg=eq.false&result=in.(win,loss,push)&order=event_date.asc,id.asc`);
       const streaks = computeAllStreaks(picks);
       if (!streaks.length) {
         wrap.innerHTML = '<div class="empty-state">No graded picks yet for this capper.</div>';
@@ -5568,7 +5568,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const wrap = $('allTimeStreaksWrap');
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
     try {
-      const picks = await restAllPages(`picks?select=result,event_date,id,capper_id,cappers(name)&result=in.(win,loss,push)&order=capper_id.asc,event_date.asc,id.asc`);
+      const picks = await restAllPages(`picks?select=result,event_date,id,capper_id,cappers(name)&is_parlay_leg=eq.false&result=in.(win,loss,push)&order=capper_id.asc,event_date.asc,id.asc`);
       const byCapper = new Map();
       picks.forEach(p => {
         if (!byCapper.has(p.capper_id)) byCapper.set(p.capper_id, { name: p.cappers ? p.cappers.name : '—', picks: [] });
@@ -6175,7 +6175,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const filterSummary = summaryParts.join(' · ');
 
     try {
-      let query = 'picks?select=capper_id,bet_type_id,result,event_date,cappers(name),bet_types(name)';
+      let query = 'picks?select=capper_id,bet_type_id,result,event_date,cappers(name),bet_types(name)&is_parlay_leg=eq.false';
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
@@ -6253,7 +6253,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
 
     try {
-      let query = 'picks?select=capper_id,pick_tier,result,cappers(name)&result=in.(win,loss,push)';
+      let query = 'picks?select=capper_id,pick_tier,result,cappers(name)&is_parlay_leg=eq.false&result=in.(win,loss,push)';
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
@@ -6342,7 +6342,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // Streaks need each capper's full pick history in order, so this
       // always pulls raw picks rather than the pre-aggregated view —
       // a bit more work per run, but the only way to know a streak.
-      let query = 'picks?select=capper_id,result,event_date,created_at,cappers(name)';
+      let query = 'picks?select=capper_id,result,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
@@ -6667,7 +6667,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' · ');
 
-    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,event_date,created_at,cappers(name)';
+    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
@@ -6803,7 +6803,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' · ');
 
-    let query = 'picks?select=capper_id,result,event_date,created_at,cappers(name)';
+    let query = 'picks?select=capper_id,result,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
@@ -6998,7 +6998,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     summaryParts.push(from || to ? `${from || 'earliest'} \u2192 ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' \u00b7 ');
 
-    let query = 'picks?select=capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)';
+    let query = 'picks?select=capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
     if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
@@ -7033,7 +7033,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     summaryParts.push(from || to ? `${from || 'earliest'} \u2192 ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' \u00b7 ');
 
-    let query = 'picks?select=capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)';
+    let query = 'picks?select=capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
     query += `&capper_id=eq.${capperId}`;
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
@@ -7076,7 +7076,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const wrap = $('dupWrap');
     wrap.innerHTML = '<div class="empty-state">Scanning...</div>';
 
-    let query = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,result,created_at,cappers(name),sports(name),bet_types(name)';
+    let query = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,result,created_at,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
     if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
@@ -9885,7 +9885,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 159; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 160; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
