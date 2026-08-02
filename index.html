@@ -4442,15 +4442,27 @@
       const links = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${parlayId}`);
       const legIds = links.map(l => l.leg_pick_id);
       let legsHtml;
+      let legs = [];
       if (!legIds.length) {
         legsHtml = '<div style="color:var(--ink-soft);font-style:italic;">No legs linked yet.</div>';
       } else {
-        const legs = await rest(`picks?select=selection,line,opening_odds,result,bet_types(name)&id=in.(${legIds.join(',')})`);
-        legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;">' + legs.map(leg => {
+        legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,bet_types(name)&id=in.(${legIds.join(',')})`);
+        legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;list-style:none;">' + legs.map(leg => {
           const bt = leg.bet_types ? leg.bet_types.name : '';
           const lineTxt = leg.line !== null && leg.line !== undefined ? ` (${leg.line > 0 ? '+' : ''}${leg.line})` : '';
           const oddsTxt = leg.opening_odds !== null && leg.opening_odds !== undefined ? ` @ ${leg.opening_odds > 0 ? '+' : ''}${leg.opening_odds}` : '';
-          return `<li>${escapeHtml(leg.selection)}${lineTxt} — ${escapeHtml(bt)}${oddsTxt} — ${stampHtml(leg.result)}</li>`;
+          // Grade right here rather than only in the main Pending Picks list --
+          // that's a separate row elsewhere in a long list, easy to lose track
+          // of which game belongs to which parlay. This is the visually
+          // obvious place to do it.
+          const gradeHtml = leg.result === 'pending'
+            ? `<span class="grade-btns" style="display:inline-flex;vertical-align:middle;">
+                 <button class="mini win" data-leg-grade="${leg.id}" data-result="win">Win</button>
+                 <button class="mini loss" data-leg-grade="${leg.id}" data-result="loss">Loss</button>
+                 <button class="mini push" data-leg-grade="${leg.id}" data-result="push">Push</button>
+               </span>`
+            : stampHtml(leg.result);
+          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}</li>`;
         }).join('') + '</ul>';
       }
       const row = document.createElement('tr');
@@ -4463,6 +4475,36 @@
       row.innerHTML = `<td colspan="${colspan}" style="background:rgba(35,77,53,0.06);font-size:11px;">${legsHtml}</td>`;
       parentRow.insertAdjacentElement('afterend', row);
       btn.innerHTML = '&#9652; legs';
+
+      row.querySelectorAll('button[data-leg-grade]').forEach(gbtn => {
+        gbtn.addEventListener('click', async () => {
+          const legId = gbtn.getAttribute('data-leg-grade');
+          const result = gbtn.getAttribute('data-result');
+          const leg = legs.find(l => String(l.id) === String(legId));
+          const span = gbtn.closest('.grade-btns');
+          span.querySelectorAll('button').forEach(b => b.disabled = true);
+          try {
+            await rest(`picks?id=eq.${legId}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ result, graded_at: new Date().toISOString() })
+            });
+            span.outerHTML = stampHtml(result);
+            await cascadeGradeMatchingPending({
+              id: legId,
+              event_date: parentRow.getAttribute('data-cascade-event-date'),
+              sport_id: leg.sport_id,
+              bet_type_id: leg.bet_type_id,
+              selection: leg.selection,
+              line: leg.line,
+              prop_player: leg.prop_player,
+              prop_stat: leg.prop_stat
+            }, result);
+          } catch (e) {
+            alert('Could not update result: ' + e.message);
+            span.querySelectorAll('button').forEach(b => b.disabled = false);
+          }
+        });
+      });
     } catch (e) {
       alert('Could not load parlay legs: ' + e.message);
       btn.innerHTML = '&#9662; legs';
@@ -5366,15 +5408,23 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const links = await op.rest('parlay_legs?select=leg_pick_id&parlay_pick_id=eq.' + parlayId);
         const legIds = links.map(l => l.leg_pick_id);
         let legsHtml;
+        let legs = [];
         if (!legIds.length) {
           legsHtml = '<div style="color:#55584d;font-style:italic;">No legs linked yet.</div>';
         } else {
-          const legs = await op.rest('picks?select=selection,line,opening_odds,result,bet_types(name)&id=in.(' + legIds.join(',') + ')');
-          legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;">' + legs.map(function(leg) {
+          legs = await op.rest('picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,bet_types(name)&id=in.(' + legIds.join(',') + ')');
+          legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;list-style:none;">' + legs.map(function(leg) {
             const bt = leg.bet_types ? leg.bet_types.name : '';
             const lineTxt = (leg.line !== null && leg.line !== undefined) ? ' (' + (leg.line > 0 ? '+' : '') + leg.line + ')' : '';
             const oddsTxt = (leg.opening_odds !== null && leg.opening_odds !== undefined) ? ' @ ' + (leg.opening_odds > 0 ? '+' : '') + leg.opening_odds : '';
-            return '<li>' + escLocal(leg.selection) + lineTxt + ' — ' + escLocal(bt) + oddsTxt + ' — <span class="stamp ' + leg.result + '">' + leg.result + '</span></li>';
+            const gradeHtml = leg.result === 'pending'
+              ? '<span class="grade-btns" style="display:inline-flex;vertical-align:middle;">' +
+                  '<button class="mini win" data-leg-grade="' + leg.id + '" data-result="win">Win</button>' +
+                  '<button class="mini loss" data-leg-grade="' + leg.id + '" data-result="loss">Loss</button>' +
+                  '<button class="mini push" data-leg-grade="' + leg.id + '" data-result="push">Push</button>' +
+                '</span>'
+              : '<span class="stamp ' + leg.result + '">' + leg.result + '</span>';
+            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml + '</li>';
           }).join('') + '</ul>';
         }
         const tr = document.createElement('tr');
@@ -5382,6 +5432,40 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         tr.innerHTML = '<td colspan="' + parentRow.children.length + '" style="background:#f2eee0;font-size:11px;">' + legsHtml + '</td>';
         parentRow.insertAdjacentElement('afterend', tr);
         btn.innerHTML = '&#9652; legs';
+
+        tr.querySelectorAll('button[data-leg-grade]').forEach(function(gbtn) {
+          gbtn.addEventListener('click', async () => {
+            const op2 = opener();
+            if (!op2) return;
+            const legId = gbtn.getAttribute('data-leg-grade');
+            const result = gbtn.getAttribute('data-result');
+            const leg = legs.find(function(l) { return String(l.id) === String(legId); });
+            const span = gbtn.closest('.grade-btns');
+            span.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+            try {
+              await op2.rest('picks?id=eq.' + legId, {
+                method: 'PATCH',
+                body: JSON.stringify({ result: result, graded_at: new Date().toISOString() })
+              });
+              span.outerHTML = '<span class="stamp ' + result + '">' + result + '</span>';
+              if (typeof op2.cascadeGradeMatchingPending === 'function') {
+                await op2.cascadeGradeMatchingPending({
+                  id: legId,
+                  event_date: parentRow.getAttribute('data-cascade-event-date'),
+                  sport_id: leg.sport_id,
+                  bet_type_id: leg.bet_type_id,
+                  selection: leg.selection,
+                  line: leg.line,
+                  prop_player: leg.prop_player,
+                  prop_stat: leg.prop_stat
+                }, result);
+              }
+            } catch (e) {
+              alert('Could not update result: ' + e.message);
+              span.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
+            }
+          });
+        });
       } catch (e) {
         alert('Could not load parlay legs: ' + e.message);
         btn.innerHTML = '&#9662; legs';
@@ -10497,7 +10581,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 165; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 166; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
