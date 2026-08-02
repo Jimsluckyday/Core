@@ -1227,6 +1227,10 @@
             <label>Hot Pick threshold (win streak)</label>
             <input id="fsHotThreshold" type="number" min="1" step="1" />
           </div>
+          <div class="field">
+            <label>Parlay leg weight (%)</label>
+            <input id="fsParlayLegWeight" type="number" min="0" max="100" step="1" />
+          </div>
         </div>
         <p class="stub-title" style="margin-bottom:8px;">Pick tier bonuses (flat points, Tier 0 is always 0)</p>
         <div class="row">
@@ -1248,7 +1252,7 @@
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:14px;">
-          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Tier bonuses</strong> are flat points added to a pick's score based on which tier the capper marked it as (Tier 0 never gets a bonus) — each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier above 0, since one tier being worth it doesn't mean they all are.
+          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are flat points added to a pick's score based on which tier the capper marked it as (Tier 0 never gets a bonus) — each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier above 0, since one tier being worth it doesn't mean they all are.
         </div>
         <button id="saveFormulaSettingsBtn" class="btn-danger">Save Formula Changes</button>
         <button class="ghost" id="resetFormulaSettingsBtn">Reset to Defaults</button>
@@ -8987,7 +8991,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   let scoringConfig = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
-    tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0
+    tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    parlayLegWeight: 0.5
   };
 
   async function loadScoringConfig() {
@@ -9008,7 +9013,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           tier1BonusPoints: num(r.tier1_bonus_points),
           tier2BonusPoints: num(r.tier2_bonus_points),
           tier3BonusPoints: num(r.tier3_bonus_points),
-          tier4BonusPoints: num(r.tier4_bonus_points)
+          tier4BonusPoints: num(r.tier4_bonus_points),
+          parlayLegWeight: r.parlay_leg_weight !== null && r.parlay_leg_weight !== undefined ? Number(r.parlay_leg_weight) : 0.5
         };
       }
     } catch (e) {
@@ -9081,16 +9087,24 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     };
   }
 
-  // agreeingOverallAdjs = adjusted overall win% (0-1) for every OTHER
-  // capper who independently picked this exact same game/selection/line.
-  // Centered on a neutral 50%: an agreeing capper above 50% helps the score,
-  // one below 50% actively hurts it -- the worse (and larger) their losing
-  // record, the more it drags the score down, same philosophy as Streak.
+  // agreeing = [{ adj, weight }] -- adj is the adjusted overall win% (0-1)
+  // for every OTHER capper who independently picked this exact same
+  // game/selection/line; weight is 1 for a standalone call, or
+  // parlayLegWeight for one that's only a parlay leg -- a capper who only
+  // bundled a game into a parlay wasn't confident enough to call it alone,
+  // so his agreement counts for less both in how much it moves the score
+  // AND in how much "headcount" it contributes (two leg-only agreements
+  // together count the same as one standalone agreement). Centered on a
+  // neutral 50%: an agreeing capper above 50% helps the score, one below
+  // 50% actively hurts it -- the worse (and larger) their losing record,
+  // the more it drags the score down, same philosophy as Streak.
   // Multiplier reaches full strength at the configured agreeing-capper cap.
-  function confluencePoints(agreeingOverallAdjs) {
-    if (!agreeingOverallAdjs.length) return 0;
-    const avgSignedFactor = agreeingOverallAdjs.reduce((sum, adj) => sum + (adj - 0.5) * 2, 0) / agreeingOverallAdjs.length; // -1 to +1
-    const countMultiplier = Math.min(agreeingOverallAdjs.length, scoringConfig.confluenceCapCappers) / scoringConfig.confluenceCapCappers;
+  function confluencePoints(agreeing) {
+    if (!agreeing.length) return 0;
+    const totalWeight = agreeing.reduce((sum, a) => sum + a.weight, 0);
+    if (totalWeight <= 0) return 0;
+    const avgSignedFactor = agreeing.reduce((sum, a) => sum + (a.adj - 0.5) * 2 * a.weight, 0) / totalWeight; // -1 to +1
+    const countMultiplier = Math.min(totalWeight, scoringConfig.confluenceCapCappers) / scoringConfig.confluenceCapCappers;
     return avgSignedFactor * 100 * scoringConfig.confluenceWeight * countMultiplier;
   }
 
@@ -9109,41 +9123,64 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // bet type. This intentionally ignores the sport/date filters below --
       // a capper's track record should reflect their whole history, not
       // just whatever window you're choosing pending picks from.
-      const gradedQuery = "picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at&result=in.(win,loss,push)&order=id.asc";
-      const graded = await restAllPages(gradedQuery);
+      //
+      // A parlay's own bundled result (bet_type "Parlay") never counts
+      // toward anything here -- it's the same correlated outcome as its
+      // legs, just wrapped, and would double-count right alongside them.
+      // Each individual leg DOES count, but only at parlayLegWeight (not a
+      // full 1.0) -- a capper who only offered a game as part of a parlay
+      // wasn't confident enough to call it standalone, so it's real
+      // evidence, just weaker evidence. Straight bets count at full weight.
+      const gradedQuery = "picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at,is_parlay_leg,bet_types(name)&result=in.(win,loss,push)&order=id.asc";
+      const gradedRaw = await restAllPages(gradedQuery);
+      const graded = gradedRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
 
       const overallByCapper = {}; // capper_id -> { wins, losses, history:[] }
       const byCapperBetType = {}; // "capperId::betTypeId" -> { wins, losses } (all sports combined)
       const byCapperSportBetType = {}; // "capperId::sportId::betTypeId" -> { wins, losses } (this exact sport)
       graded.forEach(p => {
+        const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
         if (!overallByCapper[p.capper_id]) overallByCapper[p.capper_id] = { wins: 0, losses: 0, history: [] };
         const o = overallByCapper[p.capper_id];
-        if (p.result === 'win') o.wins++;
-        else if (p.result === 'loss') o.losses++;
+        if (p.result === 'win') o.wins += w;
+        else if (p.result === 'loss') o.losses += w;
+        // Unweighted here -- streak is about win/loss SEQUENCE, not
+        // magnitude, so a leg breaks or extends a streak the same as any
+        // other graded pick would (he called the game either way).
         o.history.push({ result: p.result, event_date: p.event_date, created_at: p.created_at });
 
         const btKey = `${p.capper_id}::${p.bet_type_id}`;
         if (!byCapperBetType[btKey]) byCapperBetType[btKey] = { wins: 0, losses: 0 };
-        if (p.result === 'win') byCapperBetType[btKey].wins++;
-        else if (p.result === 'loss') byCapperBetType[btKey].losses++;
+        if (p.result === 'win') byCapperBetType[btKey].wins += w;
+        else if (p.result === 'loss') byCapperBetType[btKey].losses += w;
 
         const sbtKey = `${p.capper_id}::${p.sport_id}::${p.bet_type_id}`;
         if (!byCapperSportBetType[sbtKey]) byCapperSportBetType[sbtKey] = { wins: 0, losses: 0 };
-        if (p.result === 'win') byCapperSportBetType[sbtKey].wins++;
-        else if (p.result === 'loss') byCapperSportBetType[sbtKey].losses++;
+        if (p.result === 'win') byCapperSportBetType[sbtKey].wins += w;
+        else if (p.result === 'loss') byCapperSportBetType[sbtKey].losses += w;
       });
       const streakByCapper = {};
       Object.keys(overallByCapper).forEach(id => { streakByCapper[id] = computeStreak(overallByCapper[id].history); });
 
-      // Pass 2: the actual candidates -- currently-pending picks, filtered
-      // by whatever sport/date window you're choosing from. Confluence is
-      // checked against this same filtered set, since "who else picked this"
-      // only makes sense among picks you're actually looking at right now.
-      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
+      // Pass 2: currently-pending picks, filtered by whatever sport/date
+      // window you're choosing from. Confluence is checked against this
+      // same filtered set, since "who else picked this" only makes sense
+      // among picks you're actually looking at right now.
+      //
+      // Parlay summary rows are excluded entirely (never a candidate, never
+      // confluence evidence -- same reasoning as Pass 1). Legs ARE kept in
+      // the broader pool so they can still serve as (half-weight) confluence
+      // evidence for other cappers -- a capper would never publish a leg by
+      // itself (it was never his standalone call), so legs never become
+      // their own scored/publishable candidate row, but the fact that he
+      // called it at all is still real signal for everyone else.
+      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
       if (sportFilter) pendingQuery += `&sport_id=eq.${sportFilter}`;
       if (from) pendingQuery += `&event_date=gte.${from}`;
       if (to) pendingQuery += `&event_date=lte.${to}`;
-      const allPending = await restAllPages(pendingQuery);
+      const allPendingRaw = await restAllPages(pendingQuery);
+      const confluencePool = allPendingRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
+      const allPending = confluencePool.filter(p => !p.is_parlay_leg);
 
       // A pending pick whose event has already happened would otherwise
       // keep getting a fresh, changing score every time this list loads --
@@ -9156,8 +9193,11 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // What changes is purely which section they're grouped into below.
       const today = new Date().toISOString().slice(0, 10);
 
-      // Build the base three components first (no confluence yet).
-      const withBase = allPending.map(p => {
+      // Build the base three components for the FULL confluence pool
+      // (candidates + legs) -- a leg needs its own overallAdj etc. computed
+      // so it can serve as evidence for other cappers, even though it's
+      // never rendered as its own candidate row below.
+      const withBaseAll = confluencePool.map(p => {
         const o = overallByCapper[p.capper_id] || { wins: 0, losses: 0 };
         const bt = byCapperBetType[`${p.capper_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 }; // this bet type, all sports
         const sbt = byCapperSportBetType[`${p.capper_id}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 }; // this exact sport + bet type
@@ -9169,12 +9209,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // prior (not a flat 50%) -- so "2-0 in Tennis Spreads" leans on
         // "60% in Spreads overall" until enough Tennis-specific picks pile up.
         const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
+        const fmt = (n) => Math.round(n * 10) / 10; // weighted sums can be fractional (e.g. legs at 0.5)
         return {
           pick: p,
-          overallRecord: `${o.wins}-${o.losses}`,
+          isLeg: !!p.is_parlay_leg,
+          overallRecord: `${fmt(o.wins)}-${fmt(o.losses)}`,
           overallAdj,
           overallAdjPct: Math.round(overallAdj * 1000) / 10,
-          betTypeRecord: `${sbt.wins}-${sbt.losses}`, // sport-specific record shown to the user
+          betTypeRecord: `${fmt(sbt.wins)}-${fmt(sbt.losses)}`, // sport-specific record shown to the user
           broadBetTypeAdjPct: Math.round(broadBetTypeAdj * 1000) / 10, // all-sport rate used as the fallback prior
           betTypeAdjPct: Math.round(betTypeAdj * 1000) / 10, // final blended %, this is what's actually scored
           streak,
@@ -9188,16 +9230,21 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // event dates), so scoring them together here is safe -- it never
       // mixes the two.
       const groups = {};
-      withBase.forEach(entry => {
+      withBaseAll.forEach(entry => {
         const key = confluenceKey(entry.pick);
         if (!groups[key]) groups[key] = [];
         groups[key].push(entry);
       });
 
-      const allScored = withBase.map(entry => {
+      // Only genuine standalone calls are ever scored/rendered as their own
+      // candidate -- legs exist in withBaseAll purely to feed confluence for
+      // everyone else.
+      const candidateEntries = withBaseAll.filter(e => !e.isLeg);
+
+      const allScored = candidateEntries.map(entry => {
         const group = groups[confluenceKey(entry.pick)];
         const others = group.filter(o => o.pick.capper_id !== entry.pick.capper_id);
-        const confPts = confluencePoints(others.map(o => o.overallAdj));
+        const confPts = confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: o.isLeg ? scoringConfig.parlayLegWeight : 1 })));
         const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + confPts;
         return {
           ...entry,
@@ -9206,7 +9253,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             overallRecord: o.overallRecord,
             overallAdjPct: o.overallAdjPct,
             betTypeRecord: o.betTypeRecord, // this same sport+bet-type combo, for their capper
-            betTypeAdjPct: o.betTypeAdjPct
+            betTypeAdjPct: o.betTypeAdjPct,
+            isLeg: o.isLeg
           })),
           score: {
             total: Math.round(total * 10) / 10,
@@ -9268,7 +9316,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           <div class="pr-confluence-header">Confluence — ${s.agreeingCappers.length} other capper${s.agreeingCappers.length === 1 ? '' : 's'} independently picked this same game (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
           ${s.agreeingCappers.map(c => `
             <div class="pr-agreeing-row">
-              <span class="pr-agreeing-name">${escapeHtml(c.name)}</span>
+              <span class="pr-agreeing-name">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);font-weight:normal;">(parlay leg — half weight)</span>' : ''}</span>
               <span>Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</span>
               <span>${escapeHtml(betTypeName)} in ${escapeHtml(p.sports ? p.sports.name : 'this sport')}: ${c.betTypeRecord} (${c.betTypeAdjPct}% blended)</span>
             </div>`).join('')}
@@ -9687,11 +9735,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     await loadScoringConfig(); // always backtest whatever formula is currently saved
 
     try {
-      let query = "picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,created_at,result,pick_tier&result=in.(win,loss,push)&order=event_date.asc,created_at.asc";
+      let query = "picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,created_at,result,pick_tier,is_parlay_leg,bet_types(name)&result=in.(win,loss,push)&order=event_date.asc,created_at.asc";
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
-      const picks = await restAllPages(query);
+      const picksRaw = await restAllPages(query);
+      // A parlay's own bundled result never gets backtested on its own --
+      // same reasoning as Publish Ranking: it's the same correlated outcome
+      // as its legs, and would never be published standalone anyway.
+      const picks = picksRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
 
       if (!picks.length) {
         wrap.innerHTML = '<div class="empty-state">No graded picks match these filters.</div>';
@@ -9707,6 +9759,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
       const scored = picks.map(p => {
         const cap = p.capper_id;
+        const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
         const o = overallByCapper[cap] || { wins: 0, losses: 0 };
         const bbt = broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
         const sbt = sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
@@ -9725,19 +9778,23 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
         // NOW fold this pick's own result into the running stats, so it
         // only ever affects picks that come AFTER it, never itself or
-        // anything earlier.
+        // anything earlier. Legs fold in at parlayLegWeight, not a full 1 --
+        // his win/loss record isn't independent of how confidently each
+        // pick was actually called.
         overallByCapper[cap] = {
-          wins: o.wins + (p.result === 'win' ? 1 : 0),
-          losses: o.losses + (p.result === 'loss' ? 1 : 0)
+          wins: o.wins + (p.result === 'win' ? w : 0),
+          losses: o.losses + (p.result === 'loss' ? w : 0)
         };
         broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] = {
-          wins: bbt.wins + (p.result === 'win' ? 1 : 0),
-          losses: bbt.losses + (p.result === 'loss' ? 1 : 0)
+          wins: bbt.wins + (p.result === 'win' ? w : 0),
+          losses: bbt.losses + (p.result === 'loss' ? w : 0)
         };
         sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] = {
-          wins: sbt.wins + (p.result === 'win' ? 1 : 0),
-          losses: sbt.losses + (p.result === 'loss' ? 1 : 0)
+          wins: sbt.wins + (p.result === 'win' ? w : 0),
+          losses: sbt.losses + (p.result === 'loss' ? w : 0)
         };
+        // Unweighted -- streak is sequence/status, not magnitude, so a leg
+        // breaks or extends it the same as any other graded pick.
         historyByCapper[cap] = [...hist, { result: p.result, event_date: p.event_date, created_at: p.created_at }];
 
         return entry;
@@ -9745,17 +9802,23 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
       // Confluence: for each pick, other cappers' picks on the same game,
       // using THEIR OWN point-in-time overall adjusted % (computed above,
-      // not their current record).
+      // not their current record). A leg counts as half a confluence
+      // agreement, same as in Publish Ranking.
       const byGameKey = {};
       scored.forEach(e => {
         if (!byGameKey[e.gameKey]) byGameKey[e.gameKey] = [];
         byGameKey[e.gameKey].push(e);
       });
 
-      const finalScored = scored.map(e => {
+      // Only standalone-caliber picks are actually backtested/bucketed below
+      // -- legs are never something that would be published on their own,
+      // so validating "does a higher score predict a leg's own outcome"
+      // isn't the question this tool answers. They still fed the running
+      // stats and confluence above, same as they would in Publish Ranking.
+      const finalScored = scored.filter(e => !e.pick.is_parlay_leg).map(e => {
         const group = byGameKey[e.gameKey];
         const others = group.filter(o => o.pick.capper_id !== e.pick.capper_id);
-        const confPts = confluencePoints(others.map(o => o.overallAdj));
+        const confPts = confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: o.pick.is_parlay_leg ? scoringConfig.parlayLegWeight : 1 })));
         const total = e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + confPts;
         return {
           pick: e.pick,
@@ -9880,7 +9943,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   const FORMULA_DEFAULTS = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
-    tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0
+    tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    parlayLegWeight: 0.5
   };
 
   function populateFormulaSettingsForm(cfg) {
@@ -9896,6 +9960,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     $('fsTier2Bonus').value = cfg.tier2BonusPoints;
     $('fsTier3Bonus').value = cfg.tier3BonusPoints;
     $('fsTier4Bonus').value = cfg.tier4BonusPoints;
+    $('fsParlayLegWeight').value = Math.round(cfg.parlayLegWeight * 100);
     updateWeightTotal();
   }
 
@@ -9939,7 +10004,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       tier1BonusPoints: Number($('fsTier1Bonus').value),
       tier2BonusPoints: Number($('fsTier2Bonus').value),
       tier3BonusPoints: Number($('fsTier3Bonus').value),
-      tier4BonusPoints: Number($('fsTier4Bonus').value)
+      tier4BonusPoints: Number($('fsTier4Bonus').value),
+      parlayLegWeight: Number($('fsParlayLegWeight').value) / 100
     };
     if (Object.values(newCfg).some(v => isNaN(v))) {
       alert('One or more fields are blank or not a number — fill in every field before saving.');
@@ -9974,6 +10040,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           tier2_bonus_points: newCfg.tier2BonusPoints,
           tier3_bonus_points: newCfg.tier3BonusPoints,
           tier4_bonus_points: newCfg.tier4BonusPoints,
+          parlay_leg_weight: newCfg.parlayLegWeight,
           updated_at: new Date().toISOString()
         })
       });
@@ -10764,7 +10831,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 168; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 169; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
