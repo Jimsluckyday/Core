@@ -3947,6 +3947,9 @@
         method: 'PATCH',
         body: JSON.stringify({ result, graded_at: new Date().toISOString() })
       });
+      for (const id of ids) {
+        await maybeAutoGradeParlaysForLeg(id);
+      }
     } catch (e) {
       alert('Graded that one pick, but could not check/apply to matching picks: ' + e.message);
     }
@@ -3954,6 +3957,60 @@
   // Exposed so the popped-out "All Picks" tab can trigger the same
   // cascade-grading check via window.opener.
   window.cascadeGradeMatchingPending = cascadeGradeMatchingPending;
+
+  // Any leg already lost -> the whole parlay is a loss, full stop, even
+  // with other legs still pending (real sports betting rule -- no need to
+  // wait out the rest of the slate). Otherwise, only resolve once every
+  // leg is in: a real win anywhere -> win, all pushes -> push. Anything
+  // still pending (and no loss yet) means genuinely wait -- return null so
+  // the caller leaves the parlay alone rather than grading it early.
+  function rollupParlayResult(legResults) {
+    if (legResults.some(r => r === 'loss')) return 'loss';
+    if (legResults.some(r => r !== 'win' && r !== 'push')) return null;
+    return legResults.some(r => r === 'win') ? 'win' : 'push';
+  }
+
+  // Re-checks every parlay a just-graded leg belongs to (a leg can be
+  // shared across more than one parlay, e.g. the same team offered in two
+  // combos that day) and auto-grades any that are now fully resolved --
+  // so grading the last leg of a parlay by hand can never leave it
+  // silently pending, or get accidentally graded as the wrong result by a
+  // human doing the win/loss math themselves. Never overwrites a parlay
+  // that's already been graded some other way (only acts while it's still
+  // 'pending'), and this is a no-op (cheap, harmless) for any pick id that
+  // isn't actually a parlay leg at all -- safe to call after grading ANY
+  // pick, not just ones known in advance to be legs.
+  async function maybeAutoGradeParlaysForLeg(legId) {
+    try {
+      const links = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${legId}`);
+      for (const link of links) {
+        await maybeAutoGradeParlay(link.parlay_pick_id);
+      }
+    } catch (e) {
+      console.warn('Could not check parlay auto-grade:', e.message);
+    }
+  }
+
+  async function maybeAutoGradeParlay(parlayId) {
+    const parlayRows = await rest(`picks?select=id,result&id=eq.${parlayId}`);
+    if (!parlayRows.length || parlayRows[0].result !== 'pending') return;
+    const links = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${parlayId}`);
+    if (!links.length) return;
+    const legIds = links.map(l => l.leg_pick_id);
+    const legs = await rest(`picks?select=result&id=in.(${legIds.join(',')})`);
+    const rollup = rollupParlayResult(legs.map(l => l.result));
+    if (!rollup) return;
+    await rest(`picks?id=eq.${parlayId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ result: rollup, graded_at: new Date().toISOString() })
+    });
+    // Reflect it immediately if that parlay's row happens to be visible in
+    // whichever table is currently on screen -- harmless no-op otherwise,
+    // since the DB write above is what actually matters.
+    const cell = document.querySelector(`[data-result-cell="${parlayId}"]`);
+    if (cell) cell.innerHTML = stampHtml(rollup);
+  }
+  window.maybeAutoGradeParlaysForLeg = maybeAutoGradeParlaysForLeg;
 
   // ---------- Find & edit a pick (search box next to the form) ----------
   let pickSearchCache = null;
@@ -4499,6 +4556,7 @@
               prop_player: leg.prop_player,
               prop_stat: leg.prop_stat
             }, result);
+            await maybeAutoGradeParlaysForLeg(legId);
           } catch (e) {
             alert('Could not update result: ' + e.message);
             span.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -4598,7 +4656,7 @@
         <td>${isProp ? escapeHtml(p.prop_stat || '—') : '—'}</td>
         <td>${detail}</td>
         <td>${oddsCell}</td>
-        <td>${grading}</td>
+        <td data-result-cell="${p.id}">${grading}</td>
         <td>${escapeHtml(p.source_image || '—')}</td>
         <td>
           <button class="small" data-edit-pick="${p.id}">Edit pick</button>
@@ -4706,6 +4764,7 @@
             };
             await cascadeGradeMatchingPending(gradedPick, result);
           }
+          await maybeAutoGradeParlaysForLeg(id);
           await refreshPicksList();
           await runPickSearch();
         } catch (e) {
@@ -4844,7 +4903,8 @@
         // same reasoning as odds/result below, which also separate what's
         // sorted/filtered from what's displayed.
         const sortVal = i === 8 ? p.result : (i === 7 ? oddsStatus : (i === 1 ? capperName : String(c)));
-        return `<td data-value="${escapeHtml(sortVal).toLowerCase()}">${c}</td>`;
+        const extraAttr = i === 8 ? ` data-result-cell="${p.id}"` : '';
+        return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
       const gradeBtns = p.result === 'pending'
         ? `<span class="grade-btns" data-id="${p.id}">
@@ -5368,6 +5428,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           };
           await op.cascadeGradeMatchingPending(gradedPick, result);
         }
+        if (typeof op.maybeAutoGradeParlaysForLeg === 'function') {
+          await op.maybeAutoGradeParlaysForLeg(id);
+        }
       } catch (e) {
         alert('Could not update result: ' + e.message);
         btn.closest('.grade-btns').querySelectorAll('button').forEach(b => b.disabled = false);
@@ -5459,6 +5522,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
                   prop_player: leg.prop_player,
                   prop_stat: leg.prop_stat
                 }, result);
+              }
+              if (typeof op2.maybeAutoGradeParlaysForLeg === 'function') {
+                await op2.maybeAutoGradeParlaysForLeg(legId);
               }
             } catch (e) {
               alert('Could not update result: ' + e.message);
@@ -10698,7 +10764,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 167; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 168; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
