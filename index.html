@@ -5954,10 +5954,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
       const streak = r.streak || { type: null, len: 0 };
       const streakColor = streak.type === 'win' ? '#2d6a4f' : (streak.type === 'loss' ? '#8a2f3a' : '#55584d');
+      const straightCount = r.total_picks - (r.parlay_count || 0);
       return `<tr>
         <td data-value="${rankVal}">${rank || '—'}</td>
         <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
         <td data-value="${r.total_picks}">${r.total_picks}</td>
+        <td data-value="${r.parlay_count || 0}">${straightCount}/${r.parlay_count || 0}</td>
         <td data-value="${r.wins}">${r.wins}</td>
         <td data-value="${r.losses}">${r.losses}</td>
         <td data-value="${r.pushes}">${r.pushes}</td>
@@ -5974,7 +5976,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const body = qualified.map((r, i) => row(r, i + 1)).join('') + unqualified.map(r => row(r, null)).join('');
     const cols = [
       { label: 'Rank', type: 'num' }, { label: 'Capper', type: 'str' },
-      { label: 'Total picks', type: 'num' }, { label: 'Wins', type: 'num' },
+      { label: 'Total picks', type: 'num' }, { label: 'Straight/Parlay', type: 'num' },
+      { label: 'Wins', type: 'num' },
       { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' },
       { label: 'Pending', type: 'num' }, { label: 'Win %', type: 'num' },
       { label: 'Streak', type: 'num' }
@@ -5993,7 +5996,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         <tbody>${body}</tbody>
       </table>
       <div style="font-size:10px;color:var(--ink-soft);margin-top:8px;">
-        Ranked purely by win % — cappers below the rank line either have fewer than ${minPicks} graded picks or are at 0%, both too small/extreme a sample to rank meaningfully, and are listed by volume just for reference. Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. Click the arrow on any column to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the report.
+        Ranked purely by win % — cappers below the rank line either have fewer than ${minPicks} graded picks or are at 0%, both too small/extreme a sample to rank meaningfully, and are listed by volume just for reference. Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. Straight/Parlay shows how many of Total picks were the capper's own standalone bets vs. whole combined parlays (e.g. "9/1") — individual parlay legs are never counted separately here. Wins/Losses/Pushes stay combined across both — a parlay counts as one win, loss, or push against its own overall result, same as any straight bet. Click the arrow on any column to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the report.
       </div>`;
   }
 
@@ -6679,21 +6682,30 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // Streaks need each capper's full pick history in order, so this
       // always pulls raw picks rather than the pre-aggregated view —
       // a bit more work per run, but the only way to know a streak.
-      let query = 'picks?select=capper_id,result,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
+      // bet_type_id added so straight bets and whole parlays (never
+      // individual legs -- those are excluded by is_parlay_leg=eq.false
+      // above, same as everywhere else) can be tallied separately for the
+      // Straight/Parlay column, while wins/losses/pushes stay combined
+      // across both, same as before -- a parlay counts as ONE win/loss/
+      // push against its own overall result, not broken into its legs.
+      let query = 'picks?select=capper_id,result,event_date,created_at,bet_type_id,cappers(name)&is_parlay_leg=eq.false';
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
       query += '&order=id.asc';
 
       const picks = await restAllPages(query);
+      const parlayBetType = findByNameCI(betTypes, 'Parlay');
+      const parlayBetTypeId = parlayBetType ? String(parlayBetType.id) : null;
       const byCapper = {};
       for (const p of picks) {
         const id = p.capper_id;
         if (!byCapper[id]) {
-          byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, history: [] };
+          byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, parlay_count: 0, history: [] };
         }
         const b = byCapper[id];
         b.total_picks++;
+        if (parlayBetTypeId && String(p.bet_type_id) === parlayBetTypeId) b.parlay_count++;
         if (p.result === 'win') b.wins++;
         else if (p.result === 'loss') b.losses++;
         else if (p.result === 'push') b.pushes++;
@@ -10469,7 +10481,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 163; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 164; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
