@@ -7344,6 +7344,65 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     </tr>`;
   }
 
+  // Adds two tallies together (e.g. straight bets + parlay-as-one-unit) so
+  // a running "total bets" number doesn't require the reader to do the
+  // addition by hand as volume grows.
+  function combineTallies(a, b) {
+    const t = {
+      picks: a.picks + b.picks,
+      wins: a.wins + b.wins,
+      losses: a.losses + b.losses,
+      pushes: a.pushes + b.pushes,
+      pending: a.pending + b.pending
+    };
+    t.win_pct = (t.wins + t.losses) > 0 ? Math.round((1000 * t.wins) / (t.wins + t.losses)) / 10 : null;
+    return t;
+  }
+
+  function groupRowsBy(rowList, keyFn, labelFn) {
+    const map = {};
+    rowList.forEach(r => {
+      const key = keyFn(r) ?? 'none';
+      if (!map[key]) map[key] = { label: labelFn(r), rows: [] };
+      map[key].rows.push(r);
+    });
+    return map;
+  }
+
+  // Per-sport / per-bet-type breakdown for a single capper, with a
+  // bold group-header row followed by 1-4 indented sub-rows (Total bets,
+  // Straight bets, Parlay bets, Parlay games) -- same idea as statsRowHtml's
+  // Overall section, just repeated once per group instead of blended.
+  function groupedBreakdownTableHtml(title, colLabel, groups) {
+    if (!groups.length) {
+      return `
+        <p class="stub-title" style="margin-bottom:8px;">${title}</p>
+        <table class="picks-table" style="margin-bottom:20px;">
+          <thead><tr><th>${colLabel}</th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
+          <tbody><tr><td colspan="7">No data.</td></tr></tbody>
+        </table>`;
+    }
+    const body = groups.map(g => {
+      const header = `<tr><td colspan="7" style="font-weight:bold;background:rgba(35,77,53,0.06);">${escapeHtml(g.label)}</td></tr>`;
+      const sub = g.subRows.map(sr => `<tr>
+        <td style="padding-left:20px;color:#55584d;">${sr.label}</td>
+        <td>${sr.stats.picks}</td>
+        <td>${sr.stats.wins}</td>
+        <td>${sr.stats.losses}</td>
+        <td>${sr.stats.pushes}</td>
+        <td>${sr.stats.pending}</td>
+        <td>${sr.stats.win_pct !== null ? sr.stats.win_pct + '%' : '—'}</td>
+      </tr>`).join('');
+      return header + sub;
+    }).join('');
+    return `
+      <p class="stub-title" style="margin-bottom:8px;">${title}</p>
+      <table class="picks-table" style="margin-bottom:20px;">
+        <thead><tr><th>${colLabel}</th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>`;
+  }
+
   function breakdownTableHtml(title, groups, showUnique) {
     const rows = groups.map(g => showUnique ? `<tr>
       <td>${escapeHtml(g.label)}</td>
@@ -7383,28 +7442,85 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     // from whether the full parlay did). legRows is a second, separate query
     // (is_parlay_leg=eq.true) -- the main `picks` array here already excludes
     // legs entirely, same as every other capper-facing report, so parlay
-    // legs never pollute a capper's real bet-type breakdown below.
+    // legs never pollute a capper's real bet-type breakdown below. A leg
+    // shared across more than one parlay that day (same game, offered in
+    // two combos) is still only one row in the database, so it's counted
+    // once here too -- never once per parlay it's linked to.
     const straightBets = picks.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
     const parlayBets = picks.filter(p => p.bet_types && p.bet_types.name === 'Parlay');
-    const parlayGamesStats = tallyRows(legRows || []);
+    const legs = legRows || [];
+    const straightStats = tallyRows(straightBets);
+    const parlayStats = tallyRows(parlayBets);
+    const parlayGamesStats = tallyRows(legs);
+    const totalBetsStats = combineTallies(straightStats, parlayStats);
 
-    const bySport = {};
-    picks.forEach(p => {
-      const key = p.sport_id || 'none';
-      if (!bySport[key]) bySport[key] = { label: p.sports ? p.sports.name : 'Unknown', rows: [] };
-      bySport[key].rows.push(p);
-    });
-    const sportGroups = Object.values(bySport).map(g => ({ label: g.label, ...totalAndUnique(g.rows) }))
-      .sort((a, b) => b.total.picks - a.total.picks);
+    let sportSectionHtml, typeSectionHtml;
 
-    const byType = {};
-    picks.forEach(p => {
-      const key = p.bet_type_id || 'none';
-      if (!byType[key]) byType[key] = { label: p.bet_types ? p.bet_types.name : 'Unknown', rows: [] };
-      byType[key].rows.push(p);
-    });
-    const typeGroups = Object.values(byType).map(g => ({ label: g.label, ...totalAndUnique(g.rows) }))
-      .sort((a, b) => b.total.picks - a.total.picks);
+    if (isSingleCapper) {
+      // Same straight/parlay/leg split as the Overall section above, but
+      // broken out per sport and per real bet type instead of blended --
+      // otherwise "5 MLB picks" hides that 2 of those were parlays built
+      // from 3 distinct games (one team reused across both), each of which
+      // grades on its own and matters for judging pick quality by type.
+      const straightBySport = groupRowsBy(straightBets, p => p.sport_id, p => p.sports ? p.sports.name : 'Unknown');
+      const parlayBySport = groupRowsBy(parlayBets, p => p.sport_id, p => p.sports ? p.sports.name : 'Unknown');
+      const legsBySport = groupRowsBy(legs, p => p.sport_id, p => p.sports ? p.sports.name : 'Unknown');
+      const sportKeys = new Set([...Object.keys(straightBySport), ...Object.keys(parlayBySport), ...Object.keys(legsBySport)]);
+      const sportGroupDefs = Array.from(sportKeys).map(key => {
+        const label = (straightBySport[key] || parlayBySport[key] || legsBySport[key]).label;
+        const s = tallyRows(straightBySport[key] ? straightBySport[key].rows : []);
+        const p = tallyRows(parlayBySport[key] ? parlayBySport[key].rows : []);
+        const l = tallyRows(legsBySport[key] ? legsBySport[key].rows : []);
+        return {
+          label, sortKey: s.picks + p.picks,
+          subRows: [
+            { label: 'Total bets (straight + parlay)', stats: combineTallies(s, p) },
+            { label: 'Straight bets', stats: s },
+            { label: 'Parlay bets (whole combo)', stats: p },
+            { label: 'Parlay games (individual legs)', stats: l }
+          ]
+        };
+      }).sort((a, b) => b.sortKey - a.sortKey);
+      sportSectionHtml = groupedBreakdownTableHtml('By Sport', 'Sport', sportGroupDefs);
+
+      // "Parlay" itself is its own real bet_type_id on the summary rows --
+      // it gets its own group with just the whole-combo line, since
+      // "straight Parlay bets" and "Parlay games inside a Parlay" aren't
+      // meaningful concepts. Every OTHER bet type shows straight bets next
+      // to the individual parlay-leg games of that same type.
+      const straightByType = groupRowsBy(straightBets, p => p.bet_type_id, p => p.bet_types ? p.bet_types.name : 'Unknown');
+      const legsByType = groupRowsBy(legs, p => p.bet_type_id, p => p.bet_types ? p.bet_types.name : 'Unknown');
+      const typeKeys = new Set([...Object.keys(straightByType), ...Object.keys(legsByType)]);
+      const typeGroupDefs = Array.from(typeKeys).map(key => {
+        const label = (straightByType[key] || legsByType[key]).label;
+        const s = tallyRows(straightByType[key] ? straightByType[key].rows : []);
+        const l = tallyRows(legsByType[key] ? legsByType[key].rows : []);
+        return {
+          label, sortKey: s.picks + l.picks,
+          subRows: [
+            { label: 'Straight bets', stats: s },
+            { label: 'Parlay games (individual legs)', stats: l }
+          ]
+        };
+      });
+      if (parlayStats.picks > 0) {
+        typeGroupDefs.push({
+          label: 'Parlay', sortKey: parlayStats.picks,
+          subRows: [{ label: 'Parlay bets (whole combo)', stats: parlayStats }]
+        });
+      }
+      typeGroupDefs.sort((a, b) => b.sortKey - a.sortKey);
+      typeSectionHtml = groupedBreakdownTableHtml('By Bet Type', 'Bet type', typeGroupDefs);
+    } else {
+      const bySport = groupRowsBy(picks, p => p.sport_id, p => p.sports ? p.sports.name : 'Unknown');
+      const sportGroups = Object.values(bySport).map(g => ({ label: g.label, ...totalAndUnique(g.rows) }))
+        .sort((a, b) => b.total.picks - a.total.picks);
+      const byType = groupRowsBy(picks, p => p.bet_type_id, p => p.bet_types ? p.bet_types.name : 'Unknown');
+      const typeGroups = Object.values(byType).map(g => ({ label: g.label, ...totalAndUnique(g.rows) }))
+        .sort((a, b) => b.total.picks - a.total.picks);
+      sportSectionHtml = breakdownTableHtml('By Sport', sportGroups, true);
+      typeSectionHtml = breakdownTableHtml('By Bet Type', typeGroups, true);
+    }
 
     const win = window.open('', '_blank');
     if (!win) {
@@ -7416,13 +7532,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
          <table class="picks-table" style="margin-bottom:20px;">
            <thead><tr><th></th><th>Picks / Bets</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
            <tbody>
-             ${statsRowHtml('Straight bets', tallyRows(straightBets))}
-             ${statsRowHtml('Parlay bets (whole combo)', tallyRows(parlayBets))}
+             ${statsRowHtml('Total bets (straight + parlay)', totalBetsStats)}
+             ${statsRowHtml('Straight bets', straightStats)}
+             ${statsRowHtml('Parlay bets (whole combo)', parlayStats)}
              ${statsRowHtml('Parlay games (individual legs)', parlayGamesStats)}
            </tbody>
          </table>
          <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
-           "Parlay bets" grades the whole combo as one bet (all-or-nothing). "Parlay games" grades each individual game inside every parlay separately -- a capper who goes 9-for-10 on a losing parlay shows 1 parlay loss AND 9 parlay-game wins, so heavy parlay volume with weak parlay-bet record but strong parlay-game record means the underlying picks are sound even though the combo rarely cashes.
+           "Total bets" is straight bets plus parlays counted as one bet each (matches the Leaderboard's Straight/Parlay split), so it grows with volume without needing to be added up by hand. "Parlay bets" grades the whole combo as one bet (all-or-nothing). "Parlay games" is a separate lens: every individual game inside every parlay, graded on its own -- a shared game used in more than one parlay that day is still counted once, not once per parlay. A capper who goes 9-for-10 on a losing parlay shows 1 parlay loss AND 9 parlay-game wins, so heavy parlay volume with a weak parlay-bet record but a strong parlay-game record means the underlying picks are sound even though the combo rarely cashes.
          </div>`
       : `<p class="stub-title" style="margin-bottom:8px;">Overall: total vs. unique</p>
          <table class="picks-table" style="margin-bottom:20px;">
@@ -7450,8 +7567,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
 
   ${overallSection}
-  ${breakdownTableHtml('By Sport', sportGroups, !isSingleCapper)}
-  ${breakdownTableHtml('By Bet Type', typeGroups, !isSingleCapper)}
+  ${sportSectionHtml}
+  ${typeSectionHtml}
 </body></html>`);
     win.document.close();
   }
@@ -7480,7 +7597,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       if (!picks.length) { alert('No picks match these filters.'); return; }
       let legRows = null;
       if (capperFilter) {
-        let legQuery = `picks?select=result&capper_id=eq.${capperFilter}&is_parlay_leg=eq.true`;
+        let legQuery = `picks?select=result,sport_id,bet_type_id,sports(name),bet_types(name)&capper_id=eq.${capperFilter}&is_parlay_leg=eq.true`;
         if (sportFilter) legQuery += `&sport_id=eq.${sportFilter}`;
         if (from) legQuery += `&event_date=gte.${from}`;
         if (to) legQuery += `&event_date=lte.${to}`;
@@ -7521,7 +7638,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     try {
       const picks = await restAllPages(query);
       if (!picks.length) { alert(`No picks match these filters for ${capperName}.`); return; }
-      let legQuery = `picks?select=result&capper_id=eq.${capperId}&is_parlay_leg=eq.true`;
+      let legQuery = `picks?select=result,sport_id,bet_type_id,sports(name),bet_types(name)&capper_id=eq.${capperId}&is_parlay_leg=eq.true`;
       if (sportFilter) legQuery += `&sport_id=eq.${sportFilter}`;
       if (from) legQuery += `&event_date=gte.${from}`;
       if (to) legQuery += `&event_date=lte.${to}`;
@@ -10581,7 +10698,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 166; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 167; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
