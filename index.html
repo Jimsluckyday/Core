@@ -929,6 +929,14 @@
             <select id="btbSport"><option value="">All sports</option></select>
           </div>
           <div class="field">
+            <label>Pick type</label>
+            <select id="btbPickType">
+              <option value="">Straight + Parlays</option>
+              <option value="straight">Straight only</option>
+              <option value="parlay">Parlays only</option>
+            </select>
+          </div>
+          <div class="field">
             <label>From date</label>
             <input id="btbFrom" type="date" />
           </div>
@@ -944,7 +952,7 @@
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Each row is one capper's record within a single bet type (e.g. "King Cap · Spread"), not their overall record — so a capper who's mediocre overall can still show up strong on one bet type. Sorted by win % within each qualifying row, same minimum-picks logic as the leaderboard. Use this to decide which of a capper's bet types are actually worth publishing, rather than promoting or hiding a capper wholesale.
+          Each row is one capper's record within a single bet type (e.g. "King Cap · Spread"), not their overall record — so a capper who's mediocre overall can still show up strong on one bet type. Sorted by win % within each qualifying row, same minimum-picks logic as the leaderboard. Pick type is a separate filter from bet type: "Straight only" hides the Parlay row for every capper, "Parlays only" shows just that row, and "Straight + Parlays" (default) shows both — sort or filter the Capper column to line a capper's straight bet-type rows up next to their Parlay row for a side-by-side comparison. Use this to decide which of a capper's bet types are actually worth publishing, rather than promoting or hiding a capper wholesale.
         </div>
         <div id="btbWrap"></div>
       </div>
@@ -6506,19 +6514,26 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   async function runBetTypeBreakdown() {
     const minPicks = Math.max(1, Number($('btbMinPicks').value) || 2);
     const sportFilter = $('btbSport').value;
+    const pickType = $('btbPickType').value; // '' = both, 'straight', 'parlay'
     const from = $('btbFrom').value;
     const to = $('btbTo').value;
 
     const sportName = sportFilter ? ($('btbSport').selectedOptions[0]?.textContent || '') : 'All sports';
-    const summaryParts = [sportName];
+    const pickTypeName = pickType === 'straight' ? 'Straight only' : pickType === 'parlay' ? 'Parlays only' : 'Straight + Parlays';
+    const summaryParts = [sportName, pickTypeName];
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' · ');
 
     try {
+      const parlayBetType = findByNameCI(betTypes, 'Parlay');
+      const parlayBetTypeId = parlayBetType ? String(parlayBetType.id) : null;
+
       let query = 'picks?select=capper_id,bet_type_id,result,event_date,cappers(name),bet_types(name)&is_parlay_leg=eq.false';
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
+      if (pickType === 'parlay' && parlayBetTypeId) query += `&bet_type_id=eq.${parlayBetTypeId}`;
+      else if (pickType === 'straight' && parlayBetTypeId) query += `&bet_type_id=neq.${parlayBetTypeId}`;
       query += '&order=id.asc';
 
       const picks = await restAllPages(query);
@@ -6557,6 +6572,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   $('allTimeBetTypeBreakdownBtn').addEventListener('click', () => {
     $('btbMinPicks').value = 2;
     $('btbSport').value = '';
+    $('btbPickType').value = '';
     $('btbFrom').value = '';
     $('btbTo').value = '';
     runBetTypeBreakdown();
@@ -10481,7 +10497,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 164; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 165; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
