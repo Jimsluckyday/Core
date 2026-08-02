@@ -558,6 +558,25 @@
           <label>Bet type</label>
           <select id="pickType"></select>
         </div>
+        <div class="field">
+          <label>Part of a parlay? <span style="font-weight:normal;color:var(--ink-soft);">(optional)</span></label>
+          <select id="pickParlayNumber">
+            <option value="">— No, this is a standalone bet —</option>
+            <option value="1">Parlay 1</option>
+            <option value="2">Parlay 2</option>
+            <option value="3">Parlay 3</option>
+            <option value="4">Parlay 4</option>
+            <option value="5">Parlay 5</option>
+            <option value="6">Parlay 6</option>
+            <option value="7">Parlay 7</option>
+            <option value="8">Parlay 8</option>
+            <option value="9">Parlay 9</option>
+            <option value="10">Parlay 10</option>
+          </select>
+          <div id="pickParlayHint" style="font-size:10px;color:var(--ink-soft);margin-top:4px;">
+            If this same selection is ALSO their own standalone bet (not just a parlay leg), save it twice — once with this left blank, once with the parlay number set. Numbers are just YOUR local labels for today's parlays from this capper, e.g. "their first parlay" — reused automatically if you pick the same number again for another leg today.
+          </div>
+        </div>
       </div>
 
       <div class="row" id="propRow" style="display:none;">
@@ -1709,11 +1728,13 @@
       </p>
       <div id="bulkImportPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Paste rows copied from a spreadsheet (or built here in chat) — first row must be column headers. Required columns: <strong>date, capper, sport, bet type, selection</strong>. Optional: <strong>line, home_away, odds, prop_player, prop_stat (or just "stat"), prop_team, confidence, notes, published</strong>. For player props, if you don't include a separate <strong>prop_player</strong> column, the player's name is automatically taken from <strong>selection</strong>. <strong>prop_team</strong> is shown to customers alongside the player's name on the public page so casual fans don't have to look up who they play for — leave it blank if unknown, since it's not required for grading. Capper/sport/bet type must already exist in this tool (added via the Cappers/Sports/Bet Types section above) — unmatched names get flagged instead of guessed at.
+          Paste rows copied from a spreadsheet (or built here in chat) — first row must be column headers. Required columns: <strong>date, capper, sport, bet type, selection</strong>. Optional: <strong>line, home_away, odds, prop_player, prop_stat (or just "stat"), prop_team, confidence, notes, published, parlay</strong>. For player props, if you don't include a separate <strong>prop_player</strong> column, the player's name is automatically taken from <strong>selection</strong>. <strong>prop_team</strong> is shown to customers alongside the player's name on the public page so casual fans don't have to look up who they play for — leave it blank if unknown, since it's not required for grading. <strong>parlay</strong> is a plain number (1, 2, 3…), your own local label for that capper's parlays that day — leave every standalone pick blank, and if the same selection belongs to more than one parlay, just paste it again on its own row with the other number rather than trying to combine numbers in one cell. The combined parlay summary row is created automatically from whichever rows share a number — you never type it yourself. Capper/sport/bet type must already exist in this tool (added via the Cappers/Sports/Bet Types section above) — unmatched names get flagged instead of guessed at.
         </div>
-        <textarea id="bulkImportText" placeholder="date&#9;capper&#9;sport&#9;bet type&#9;selection&#9;line
-2026-07-08&#9;Dave&#9;MLB&#9;Moneyline&#9;Yankees&#9;
-2026-07-08&#9;Dave&#9;MLB&#9;Spread&#9;Yankees&#9;-1.5" style="min-height:120px;width:100%;font-family:monospace;font-size:12px;"></textarea>
+        <textarea id="bulkImportText" placeholder="date&#9;capper&#9;sport&#9;bet type&#9;selection&#9;line&#9;odds&#9;parlay
+2026-07-08&#9;Dave&#9;MLB&#9;Moneyline&#9;Yankees&#9;&#9;&#9;
+2026-07-08&#9;Dave&#9;MLB&#9;Spread&#9;Yankees&#9;-1.5&#9;&#9;
+2026-07-08&#9;Dave&#9;NHL&#9;Moneyline&#9;Hurricanes&#9;&#9;+2015&#9;1
+2026-07-08&#9;Dave&#9;MLB&#9;Moneyline&#9;Pirates&#9;&#9;+2015&#9;1" style="min-height:120px;width:100%;font-family:monospace;font-size:12px;"></textarea>
         <div class="row" style="margin-top:8px;">
           <button id="parseBulkImportBtn">Parse & preview</button>
         </div>
@@ -3407,6 +3428,117 @@
   }
 
   // ---------- Main app: save pick (add or edit) ----------
+  // ---------- Parlay leg linking (Add Pick) ----------
+  // Same dedupe-by-natural-key principle already verified end-to-end in the
+  // CSV pipeline: a leg is identified by capper+date+sport+bet_type+selection
+  // +line+prop_player+prop_stat, regardless of how many parlays reference it
+  // or how many times it gets re-entered under a different parlay number.
+  // There is never more than one is_parlay_leg row for the same natural key
+  // -- this is what keeps cross-capper consensus counts correct without any
+  // separate dedup logic anywhere else, backed by a DB-level unique index
+  // (uniq_parlay_leg_per_capper_day) as a hard guarantee, not just app trust.
+  function eqOrNullFilter(field, value) {
+    if (value === null || value === undefined || value === '') return `${field}=is.null`;
+    return `${field}=eq.${encodeURIComponent(value)}`;
+  }
+
+  async function findExistingLeg(payload) {
+    const filters = [
+      `capper_id=eq.${payload.capper_id}`,
+      `event_date=eq.${payload.event_date}`,
+      `bet_type_id=eq.${payload.bet_type_id}`,
+      `selection=eq.${encodeURIComponent(payload.selection)}`,
+      'is_parlay_leg=eq.true',
+      eqOrNullFilter('sport_id', payload.sport_id),
+      eqOrNullFilter('line', payload.line),
+      eqOrNullFilter('prop_player', payload.prop_player),
+      eqOrNullFilter('prop_stat', payload.prop_stat),
+    ];
+    const rows = await rest(`picks?select=id,opening_odds,pick_tier&${filters.join('&')}`);
+    return rows[0] || null;
+  }
+
+  // Re-derives a combined Parlay row's selection label and odds from
+  // whichever legs are currently linked to it. Called every time a leg is
+  // added -- unlike the CSV pipeline's one-shot batch synthesis, Add Pick
+  // entries can arrive minutes or days apart, so this has to be safe to
+  // re-run repeatedly, not just once.
+  async function refreshParlaySummary(summaryId) {
+    const links = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${summaryId}`);
+    const legIds = links.map(l => l.leg_pick_id);
+    if (!legIds.length) return;
+    const legs = await rest(`picks?select=id,opening_odds&id=in.(${legIds.join(',')})`);
+
+    // Same odds-collapsing rule as the pipeline: if EVERY leg has odds
+    // entered and they're all identical, that's the combined parlay price
+    // copy-pasted onto each leg, not each leg's own separate price -- move
+    // it to the summary row and clear it off the individual legs. Any
+    // other pattern (blank, or genuinely different per-leg prices) is left
+    // exactly as entered.
+    const oddsValues = legs.map(l => l.opening_odds).filter(v => v !== null && v !== undefined);
+    const allHaveOdds = oddsValues.length === legs.length && legs.length > 0;
+    const allSame = allHaveOdds && oddsValues.every(v => v === oddsValues[0]);
+
+    const patch = { selection: `${legs.length}-Leg Parlay` };
+    if (allSame) {
+      patch.opening_odds = oddsValues[0];
+      for (const leg of legs) {
+        if (leg.opening_odds !== null) {
+          await rest(`picks?id=eq.${leg.id}`, { method: 'PATCH', body: JSON.stringify({ opening_odds: null }) });
+        }
+      }
+    } else {
+      patch.opening_odds = null;
+    }
+    await rest(`picks?id=eq.${summaryId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  }
+
+  // Finds (or creates) the combined Parlay row for this capper's local
+  // parlay number on this date, links the given leg to it, then refreshes
+  // the summary. parlay_local_number is what makes "Parlay 3" findable
+  // again later, from a completely separate save action -- the CSV
+  // pipeline's parlay_id never needed this since a whole image uploads in
+  // one atomic run, but Add Pick entries don't have that guarantee.
+  async function linkLegToParlay(capperId, eventDate, sportId, parlayNumber, legId) {
+    const parlayBetType = findByNameCI(betTypes, 'Parlay');
+    if (!parlayBetType) throw new Error('No "Parlay" bet type is registered -- add it in Setup first.');
+
+    let summaryId;
+    const existingSummary = await rest(
+      `picks?select=id&capper_id=eq.${capperId}&event_date=eq.${eventDate}` +
+      `&parlay_local_number=eq.${parlayNumber}&bet_type_id=eq.${parlayBetType.id}`
+    );
+    if (existingSummary.length) {
+      summaryId = existingSummary[0].id;
+    } else {
+      const inserted = await rest('picks', {
+        method: 'POST', headers: { Prefer: 'return=representation' },
+        body: JSON.stringify([{
+          capper_id: capperId, sport_id: sportId || null, bet_type_id: parlayBetType.id,
+          selection: '1-Leg Parlay', event_date: eventDate, is_parlay_leg: false,
+          parlay_local_number: parlayNumber, pick_tier: 0, result: 'pending', is_published: false
+        }])
+      });
+      summaryId = inserted[0].id;
+    }
+
+    try {
+      await rest('parlay_legs', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify({ parlay_pick_id: summaryId, leg_pick_id: legId })
+      });
+    } catch (e) {
+      // Tolerated -- the link may already exist, or (before the SQL for
+      // parlay_legs has been run) the table may not exist yet at all.
+      // Either way this must never block saving the pick itself.
+      console.warn('Could not create parlay_legs link:', e.message);
+    }
+
+    await refreshParlaySummary(summaryId);
+    return summaryId;
+  }
+
   async function savePick() {
     const capper_id = $('pickCapper').value;
     const sport_id = $('pickSport').value;
@@ -3421,6 +3553,7 @@
     const pickTierVal = $('pickTier').value;
     const gameStartTimeVal = $('pickGameStartTime').value; // datetime-local string, or ''
     const editingId = $('editingPickId').value;
+    const parlayNumberVal = $('pickParlayNumber').value; // '' = standalone, else '1'-'10'
 
     let selection, line;
     if (isProp) {
@@ -3460,7 +3593,8 @@
       prop_player: isProp ? ($('propPlayer').value.trim() || null) : null,
       prop_stat: isProp ? ($('propStat').value.trim() || null) : null,
       prop_team: isProp ? ($('propTeam').value.trim() || null) : null,
-      game_start_time: gameStartTimeVal ? new Date(gameStartTimeVal).toISOString() : null
+      game_start_time: gameStartTimeVal ? new Date(gameStartTimeVal).toISOString() : null,
+      is_parlay_leg: !!parlayNumberVal
     };
     // If someone manually sets/edits the start time by hand here, treat that
     // as authoritative -- mark it matched so the sync job (which only
@@ -3474,8 +3608,65 @@
     try {
       if (editingId) {
         await rest(`picks?id=eq.${editingId}`, { method: 'PATCH', body: JSON.stringify(payload) });
-        showMsg($('pickMsg'), 'Pick updated.', 'ok');
+        let msg = 'Pick updated.';
+        if (parlayNumberVal) {
+          await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, editingId);
+          msg += ` Linked to Parlay ${parlayNumberVal}.`;
+        }
+        showMsg($('pickMsg'), msg, 'ok');
         exitPickEditMode();
+      } else if (parlayNumberVal) {
+        // Dedupe against an existing leg with this exact natural key before
+        // ever inserting -- re-entering the same pick under a different
+        // parlay number links it instead of creating a duplicate row. See
+        // the PARLAY LEG LINKING block above for why this matters (keeps
+        // cross-capper consensus counts correct with zero extra logic
+        // anywhere else, since there's only ever one row per unique leg).
+        const existingLeg = await findExistingLeg(payload);
+        let legId, msg;
+        if (existingLeg) {
+          legId = existingLeg.id;
+          const newOdds = payload.opening_odds;
+          const oddsConflict = newOdds !== null && existingLeg.opening_odds !== null && newOdds !== existingLeg.opening_odds;
+          const tierConflict = payload.pick_tier !== existingLeg.pick_tier;
+          msg = `Matched an existing leg for this capper/date/selection -- linked to Parlay ${parlayNumberVal} instead of creating a duplicate.`;
+          if (oddsConflict || tierConflict) {
+            msg += ` NOTE: what you just typed (odds ${newOdds ?? '—'}, tier ${payload.pick_tier}) doesn't match ` +
+                   `the existing leg (odds ${existingLeg.opening_odds ?? '—'}, tier ${existingLeg.pick_tier}) -- ` +
+                   `nothing was overwritten; use Find & Edit if the existing one needs correcting.`;
+          }
+        } else {
+          const inserted = await rest('picks', {
+            method: 'POST',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify([{ ...payload, is_published: false }])
+          });
+          legId = inserted[0].id;
+          msg = `Pick saved and linked to Parlay ${parlayNumberVal}.`;
+        }
+        await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, legId);
+        showMsg($('pickMsg'), msg, 'ok');
+        // Deliberately NOT resetting capper/sport/pick_type/date, so entering
+        // a dozen picks from the same capper for the same slate is fast.
+        // Parlay # IS reset -- leaving it set risks silently tagging the
+        // NEXT (unrelated) pick as a parlay leg by accident, which would
+        // wrongly exclude a real standalone bet from that capper's own
+        // accountable record.
+        $('pickSelection').value = '';
+        $('pickLine').value = '';
+        $('pickOpeningOdds').value = '';
+        $('pickClosingOdds').value = '';
+        $('pickHomeAway').value = '';
+        $('pickEventName').value = '';
+        $('pickNotes').value = '';
+        $('propPlayer').value = '';
+        $('propStat').value = '';
+        $('propTeam').value = '';
+        $('pickTier').value = '0';
+        $('pickGameStartTime').value = '';
+        $('pickScheduleSyncNote').textContent = '';
+        $('pickParlayNumber').value = '';
+        $('pickSelection').focus();
       } else {
         // New picks always start unpublished -- publishing only ever
         // happens through Publish Ranking, which is what guarantees every
@@ -3501,6 +3692,7 @@
         $('pickTier').value = '0';
         $('pickGameStartTime').value = '';
         $('pickScheduleSyncNote').textContent = '';
+        $('pickParlayNumber').value = '';
         $('pickSelection').focus();
       }
       await refreshPicksList();
@@ -3578,6 +3770,7 @@
     $('unpublishFromEditBtn').style.display = 'none';
     $('pickGameStartTime').value = '';
     $('pickScheduleSyncNote').textContent = '';
+    $('pickParlayNumber').value = '';
   }
   $('cancelPickEditBtn').addEventListener('click', exitPickEditMode);
 
@@ -3659,6 +3852,22 @@
     populatePropStatDropdown();
     $('propStat').value = p.prop_stat || '';
     $('propTeam').value = p.prop_team || '';
+    // Show which parlay (if any) this leg is currently linked to, so
+    // editing doesn't silently lose or misrepresent that link.
+    $('pickParlayNumber').value = '';
+    if (p.is_parlay_leg) {
+      try {
+        const links = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${p.id}`);
+        if (links.length) {
+          const parlay = await rest(`picks?select=parlay_local_number&id=eq.${links[0].parlay_pick_id}`);
+          if (parlay.length && parlay[0].parlay_local_number) {
+            $('pickParlayNumber').value = String(parlay[0].parlay_local_number);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not look up existing parlay link:', e.message);
+      }
+    }
     $('editResult').value = p.result || 'pending';
     // datetime-local inputs need "YYYY-MM-DDTHH:MM" in LOCAL time, not the
     // raw UTC ISO string the database stores.
@@ -4197,6 +4406,58 @@
     if (panel && !panel.contains(e.target) && btn && !btn.contains(e.target)) closeMsfPanel();
   });
 
+  // Shared by every picks table that shows a Parlay row -- expands to a
+  // sub-row listing its linked legs (via parlay_legs), collapses back on a
+  // second click. `colspan` matches whatever table it's called from, since
+  // different picks tables have different column counts.
+  async function toggleParlayLegsRow(btn, colspan) {
+    const parlayId = btn.getAttribute('data-parlay-id');
+    const parentRow = btn.closest('tr');
+    if (!parentRow) return;
+    const existing = parentRow.nextElementSibling;
+    if (existing && existing.getAttribute('data-parlay-legs-for') === parlayId) {
+      existing.remove();
+      btn.innerHTML = '&#9662; legs';
+      return;
+    }
+    // Only one expanded at a time per table -- collapse any other open one
+    // first so the list doesn't grow unboundedly as someone clicks around.
+    const table = parentRow.closest('table');
+    if (table) {
+      table.querySelectorAll('tr[data-parlay-legs-for]').forEach(r => r.remove());
+      table.querySelectorAll('button.parlay-legs-toggle').forEach(b => { b.innerHTML = '&#9662; legs'; });
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = 'loading…';
+    try {
+      const links = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${parlayId}`);
+      const legIds = links.map(l => l.leg_pick_id);
+      let legsHtml;
+      if (!legIds.length) {
+        legsHtml = '<div style="color:var(--ink-soft);font-style:italic;">No legs linked yet.</div>';
+      } else {
+        const legs = await rest(`picks?select=selection,line,opening_odds,result,bet_types(name)&id=in.(${legIds.join(',')})`);
+        legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;">' + legs.map(leg => {
+          const bt = leg.bet_types ? leg.bet_types.name : '';
+          const lineTxt = leg.line !== null && leg.line !== undefined ? ` (${leg.line > 0 ? '+' : ''}${leg.line})` : '';
+          const oddsTxt = leg.opening_odds !== null && leg.opening_odds !== undefined ? ` @ ${leg.opening_odds > 0 ? '+' : ''}${leg.opening_odds}` : '';
+          return `<li>${escapeHtml(leg.selection)}${lineTxt} — ${escapeHtml(bt)}${oddsTxt} — ${stampHtml(leg.result)}</li>`;
+        }).join('') + '</ul>';
+      }
+      const row = document.createElement('tr');
+      row.setAttribute('data-parlay-legs-for', parlayId);
+      row.innerHTML = `<td colspan="${colspan}" style="background:var(--field);font-size:11px;">${legsHtml}</td>`;
+      parentRow.insertAdjacentElement('afterend', row);
+      btn.innerHTML = '&#9652; legs';
+    } catch (e) {
+      alert('Could not load parlay legs: ' + e.message);
+      btn.innerHTML = '&#9662; legs';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   function renderPicksRows(picks, batchEditMode) {
     const wrap = $('picksListWrap');
     const rows = picks.map(p => {
@@ -4211,6 +4472,12 @@
       if (p.line_flagged_for_review) detail += ` <span style="color:var(--stamp-amber);" title="${escapeHtml(p.line_flag_note || 'Flagged for a later look -- not blocking, grading proceeds normally against the entered line.')}">&#9873; line flagged</span>`;
       if (p.pick_tier > 0) detail += ` <span style="color:var(--stamp-amber);font-weight:bold;">&#11088; Tier ${p.pick_tier}</span>`;
       if (!p.is_published) detail += ' <span style="color:var(--stamp-amber);">· draft</span>';
+      // Collapsed by default -- clicking fetches and inserts this parlay's
+      // linked legs as a sub-row right underneath, so the summary view
+      // stays uncluttered but the detail is one click away.
+      if (betTypeName.toLowerCase() === 'parlay') {
+        detail += ` <button type="button" class="ghost small parlay-legs-toggle" data-parlay-id="${p.id}" style="padding:1px 6px;font-size:10px;">&#9662; legs</button>`;
+      }
 
       // Start time filled in by the schedule sync job (or blank if it
       // hasn't run yet, or couldn't confidently match this pick).
@@ -4339,6 +4606,10 @@
 
     wrap.querySelectorAll('button[data-edit-pick]').forEach(btn => {
       btn.addEventListener('click', () => enterPickEditMode(btn.getAttribute('data-edit-pick')));
+    });
+
+    wrap.querySelectorAll('button.parlay-legs-toggle').forEach(btn => {
+      btn.addEventListener('click', () => toggleParlayLegsRow(btn, 12));
     });
 
     wrap.querySelectorAll('button[data-delete-pick]').forEach(btn => {
@@ -4475,6 +4746,9 @@
       if (p.line !== null && p.line !== undefined) pickText += isProp ? ` (${p.line})` : ` (${p.line > 0 ? '+' : ''}${p.line})`;
       if (p.event_name) pickText += ` — ${escapeHtml(p.event_name)}`;
       if (p.pick_tier > 0) pickText += ` &#11088;T${p.pick_tier}`;
+      if (betTypeName.toLowerCase() === 'parlay') {
+        pickText += ` <button type="button" class="mini parlay-legs-toggle" data-parlay-id="${p.id}" style="padding:1px 6px;font-size:10px;">&#9662; legs</button>`;
+      }
       const hasOpening = p.opening_odds !== null && p.opening_odds !== undefined;
       const hasClosing = p.closing_odds !== null && p.closing_odds !== undefined;
       const oddsParts = [
@@ -5042,6 +5316,64 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       } catch (e) {
         alert('Could not update result: ' + e.message);
         btn.closest('.grade-btns').querySelectorAll('button').forEach(b => b.disabled = false);
+      }
+    });
+  });
+
+  document.querySelectorAll('button.parlay-legs-toggle').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const parlayId = btn.getAttribute('data-parlay-id');
+      const parentRow = btn.closest('tr');
+      if (!parentRow) return;
+      const existing = parentRow.nextElementSibling;
+      if (existing && existing.getAttribute('data-parlay-legs-for') === parlayId) {
+        existing.remove();
+        btn.innerHTML = '&#9662; legs';
+        return;
+      }
+      document.querySelectorAll('tr[data-parlay-legs-for]').forEach(r => r.remove());
+      document.querySelectorAll('button.parlay-legs-toggle').forEach(b => { b.innerHTML = '&#9662; legs'; });
+
+      // This popup is a fully separate document (written via
+      // document.write, not a live DOM node in the main app), so it can't
+      // call the main window's escapeHtml/rest by name directly -- only
+      // window.opener.rest (via the existing opener() helper already used
+      // throughout this popup's own script) and a small local escape.
+      function escLocal(s) {
+        const d = document.createElement('div');
+        d.textContent = s === null || s === undefined ? '' : String(s);
+        return d.innerHTML;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = 'loading…';
+      try {
+        const op = opener();
+        if (!op) { btn.disabled = false; btn.innerHTML = '&#9662; legs'; return; }
+        const links = await op.rest('parlay_legs?select=leg_pick_id&parlay_pick_id=eq.' + parlayId);
+        const legIds = links.map(l => l.leg_pick_id);
+        let legsHtml;
+        if (!legIds.length) {
+          legsHtml = '<div style="color:#55584d;font-style:italic;">No legs linked yet.</div>';
+        } else {
+          const legs = await op.rest('picks?select=selection,line,opening_odds,result,bet_types(name)&id=in.(' + legIds.join(',') + ')');
+          legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;">' + legs.map(function(leg) {
+            const bt = leg.bet_types ? leg.bet_types.name : '';
+            const lineTxt = (leg.line !== null && leg.line !== undefined) ? ' (' + (leg.line > 0 ? '+' : '') + leg.line + ')' : '';
+            const oddsTxt = (leg.opening_odds !== null && leg.opening_odds !== undefined) ? ' @ ' + (leg.opening_odds > 0 ? '+' : '') + leg.opening_odds : '';
+            return '<li>' + escLocal(leg.selection) + lineTxt + ' — ' + escLocal(bt) + oddsTxt + ' — <span class="stamp ' + leg.result + '">' + leg.result + '</span></li>';
+          }).join('') + '</ul>';
+        }
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-parlay-legs-for', parlayId);
+        tr.innerHTML = '<td colspan="' + parentRow.children.length + '" style="background:#f2eee0;font-size:11px;">' + legsHtml + '</td>';
+        parentRow.insertAdjacentElement('afterend', tr);
+        btn.innerHTML = '&#9652; legs';
+      } catch (e) {
+        alert('Could not load parlay legs: ' + e.message);
+        btn.innerHTML = '&#9662; legs';
+      } finally {
+        btn.disabled = false;
       }
     });
   });
@@ -9567,6 +9899,22 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const homeAway = (row.home_away || '').toLowerCase();
     if (homeAway && homeAway !== 'home' && homeAway !== 'away') errors.push('home_away must be "home", "away", or blank');
 
+    // "Parlay" column -- a plain number, not yes/no. The SAME selection can
+    // legitimately appear on more than one row with a different number here
+    // (one pick belonging to more than one parlay) -- that gets collapsed
+    // into a single linked leg by processParlayGroups() after validation,
+    // not treated as a duplicate-pick error.
+    const parlayRaw = (row.parlay || '').trim();
+    let parlayNumber = null;
+    if (parlayRaw) {
+      const n = parseInt(parlayRaw, 10);
+      if (!Number.isInteger(n) || n < 1 || String(n) !== parlayRaw) {
+        errors.push(`parlay column must be blank or a whole number like 1, 2, 3 (got "${parlayRaw}")`);
+      } else {
+        parlayNumber = n;
+      }
+    }
+
     const isPropBet = betType && betType.uses_prop_fields;
     const propStatRaw = row.prop_stat || row.stat || '';
     // For player props, the player's name is already the row's Selection —
@@ -9620,6 +9968,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     return {
       raw: row,
       errors,
+      parlayNumber, // working field only -- never sent to the DB directly, see processParlayGroups()
       resolved: errors.length === 0 ? {
         event_date: normalizedDate,
         capper_id: capper.id,
@@ -9636,9 +9985,123 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         confidence: row.confidence ? Number(row.confidence) : null,
         notes: row.notes || null,
         is_published: ['yes', 'true', '1'].includes((row.published || '').toLowerCase()),
-        result: 'pending'
+        result: 'pending',
+        is_parlay_leg: !!parlayNumber
       } : null
     };
+  }
+
+  // Same dedupe-by-natural-key principle already verified end-to-end in the
+  // CSV pipeline, adapted for paste-in entry: rather than one cell
+  // referencing several parlay numbers, the SAME pick is deliberately
+  // re-typed once per parlay it belongs to (capper's own design choice --
+  // fewer columns, more explicit rows). Two passes:
+  //   1. Collapse rows that share every field except the parlay number into
+  //      one leg, carrying forward every number it was tagged with.
+  //   2. For each distinct parlay number, synthesize its combined summary
+  //      row from whichever (now-deduped) legs reference it, applying the
+  //      same odds-collapsing rule as Add Pick: identical odds across every
+  //      leg in a group is the combined price, not each leg's own.
+  function processParlayGroups(validated) {
+    const parlayRows = validated.filter(v => v.errors.length === 0 && v.resolved && v.parlayNumber);
+    if (!parlayRows.length) return validated;
+
+    const legKey = v => [v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id,
+      v.resolved.bet_type_id, v.resolved.selection, v.resolved.line,
+      v.resolved.prop_player, v.resolved.prop_stat].join('|');
+    const groups = new Map();
+    for (const v of parlayRows) {
+      const key = legKey(v);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(v);
+    }
+
+    const toDrop = new Set();
+    for (const entries of groups.values()) {
+      const canonical = entries[0];
+      canonical.parlayMemberships = entries.map(v => ({ number: v.parlayNumber, odds: v.resolved.opening_odds }));
+      if (entries.length > 1) {
+        // Everything about a repeated leg should agree except odds (each
+        // repeat's odds is really THAT parlay's price, not this leg's own
+        // -- resolved below) and the parlay number itself.
+        const mismatch = entries.find(v =>
+          v.resolved.pick_tier !== canonical.resolved.pick_tier ||
+          (v.resolved.notes || '') !== (canonical.resolved.notes || ''));
+        if (mismatch) {
+          const numbers = entries.map(e => e.parlayNumber).join('/');
+          for (const v of entries) {
+            v.errors.push(`Same pick repeated across parlay tags ${numbers} with a conflicting tier or notes value -- make every repeat agree, then re-paste.`);
+          }
+          continue;
+        }
+        for (let i = 1; i < entries.length; i++) toDrop.add(entries[i]);
+        // Belongs to more than one parlay -- its own odds was only ever
+        // contributed toward each parlay's own collapsing check below,
+        // never really "its own" price.
+        canonical.resolved.opening_odds = null;
+      }
+    }
+    validated = validated.filter(v => !toDrop.has(v));
+
+    const survivingLegs = validated.filter(v => v.errors.length === 0 && v.parlayMemberships);
+    const byNumber = new Map();
+    for (const v of survivingLegs) {
+      for (const m of v.parlayMemberships) {
+        if (!byNumber.has(m.number)) byNumber.set(m.number, []);
+        byNumber.get(m.number).push({ v, odds: m.odds });
+      }
+    }
+
+    const parlayBetType = findByNameCI(betTypes, 'Parlay');
+    const summaries = [];
+    for (const [number, members] of byNumber) {
+      const oddsValues = members.map(m => m.odds).filter(o => o !== null && o !== undefined);
+      const allSame = oddsValues.length === members.length && members.length > 0 && oddsValues.every(o => o === oddsValues[0]);
+      if (allSame) {
+        for (const m of members) {
+          // Only clear a single-membership leg here -- a multi-membership
+          // leg was already blanked in the pass above.
+          if (m.v.parlayMemberships.length === 1) m.v.resolved.opening_odds = null;
+        }
+      }
+      const template = members[0].v.resolved;
+      const capperName = (cappers.find(c => String(c.id) === String(template.capper_id)) || {}).name || '';
+      const sportName = (sports.find(s => String(s.id) === String(template.sport_id)) || {}).name || '';
+      if (!parlayBetType) {
+        for (const m of members) m.v.errors.push('No "Parlay" bet type is registered -- add it in Setup first, then re-paste.');
+        continue;
+      }
+      summaries.push({
+        raw: { date: template.event_date, capper: capperName, sport: sportName, bet_type: 'Parlay',
+               selection: `Parlay ${number} (${members.length} legs, auto-generated)` },
+        errors: [],
+        parlayNumber: null,
+        isSynthesizedParlaySummary: true,
+        parlayLocalNumber: number,
+        resolved: {
+          event_date: template.event_date,
+          capper_id: template.capper_id,
+          sport_id: template.sport_id,
+          bet_type_id: parlayBetType.id,
+          selection: `${members.length}-Leg Parlay`,
+          line: null,
+          home_away: null,
+          opening_odds: allSame ? oddsValues[0] : null,
+          event_name: null,
+          prop_player: null,
+          prop_stat: null,
+          prop_team: null,
+          confidence: null,
+          notes: null,
+          is_published: false,
+          result: 'pending',
+          is_parlay_leg: false,
+          parlay_local_number: number
+        }
+      });
+    }
+
+    return [...validated, ...summaries];
   }
 
   function renderBulkImportPreview(validated, scheduleCheckFailures) {
@@ -9684,8 +10147,18 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const eventDisplay = eventName
         ? (v.raw.event_name ? escapeHtml(eventName) : `<span style="font-style:italic;color:var(--ink-soft);" title="Auto-filled from a registered tournament matching this sport and date -- not typed in the pasted data">${escapeHtml(eventName)} (auto)</span>`)
         : '';
-      return `<tr style="${v.dupWarning ? 'background:rgba(200,150,20,0.08);' : ''}">
-        <td>${isValid ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${v.dupWarning ? '' : 'checked'} />` : '✗'}</td>
+      // Synthesized parlay summary rows are preview-only -- the real
+      // summary row is found-or-created automatically as its legs get
+      // linked at import time, so checking/unchecking this box has no
+      // effect. Shown unchecked and marked as informational rather than
+      // offered as something to opt in or out of.
+      const checkboxCell = v.isSynthesizedParlaySummary
+        ? '<span title="Auto-created when its legs are imported below -- nothing to check here">—</span>'
+        : (isValid ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${v.dupWarning ? '' : 'checked'} />` : '✗');
+      const summaryNote = v.isSynthesizedParlaySummary
+        ? '<div style="color:var(--ink-soft);font-style:italic;">Preview only -- created automatically from its legs at import time.</div>' : '';
+      return `<tr style="${v.dupWarning ? 'background:rgba(200,150,20,0.08);' : ''}${v.isSynthesizedParlaySummary ? 'background:rgba(100,100,100,0.06);' : ''}">
+        <td>${checkboxCell}</td>
         <td>${escapeHtml(v.raw.date || '')}</td>
         <td>${escapeHtml(v.raw.capper || '')}</td>
         <td>${escapeHtml(v.raw.sport || '')}</td>
@@ -9693,7 +10166,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         <td>${escapeHtml(v.raw.selection || '')}</td>
         <td>${escapeHtml(v.raw.line || '')}</td>
         <td>${eventDisplay}</td>
-        <td style="color:var(--stamp-red);font-size:11px;">${v.errors.join('; ')}${dupNote}</td>
+        <td style="color:var(--stamp-red);font-size:11px;">${v.errors.join('; ')}${dupNote}${summaryNote}</td>
       </tr>`;
     }
 
@@ -9737,12 +10210,52 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         btn.disabled = true;
         btn.textContent = 'Importing...';
         try {
-          await rest('picks', {
-            method: 'POST',
-            headers: { Prefer: 'return=minimal' },
-            body: JSON.stringify(toImport.map(v => v.resolved))
-          });
-          alert(`Imported ${toImport.length} pick${toImport.length === 1 ? '' : 's'}.`);
+          // Synthesized "N-Leg Parlay" preview rows are display-only -- the
+          // real summary row is found-or-created by linkLegToParlay() below
+          // as each of its actual legs gets linked, which also recomputes
+          // the combined-odds collapsing authoritatively (a leg checked here
+          // might belong to a parlay whose OTHER legs were left unchecked as
+          // duplicates already in the database, so the preview's guess at
+          // the final odds can't be treated as final).
+          const plainRows = toImport.filter(v => !v.parlayMemberships && !v.isSynthesizedParlaySummary);
+          const legRows = toImport.filter(v => v.parlayMemberships);
+
+          let importedCount = 0;
+          if (plainRows.length) {
+            await rest('picks', {
+              method: 'POST',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify(plainRows.map(v => v.resolved))
+            });
+            importedCount += plainRows.length;
+          }
+
+          for (const v of legRows) {
+            // Dedupe against Supabase itself, not just this pasted batch --
+            // same natural-key principle as Add Pick, so a leg already
+            // entered some other way (an earlier Bulk Import, Add Pick, or
+            // the AI pipeline) gets linked to this new parlay number
+            // instead of creating a second row for the same real bet.
+            const existingLeg = await findExistingLeg(v.resolved);
+            let legId;
+            if (existingLeg) {
+              legId = existingLeg.id;
+            } else {
+              const inserted = await rest('picks', {
+                method: 'POST',
+                headers: { Prefer: 'return=representation' },
+                body: JSON.stringify([v.resolved])
+              });
+              legId = inserted[0].id;
+              importedCount++;
+            }
+            for (const m of v.parlayMemberships) {
+              await linkLegToParlay(v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id, m.number, legId);
+            }
+          }
+
+          alert(`Imported ${importedCount} pick${importedCount === 1 ? '' : 's'}` +
+                (legRows.length ? ` (${legRows.length} parlay leg(s) linked, summary rows created/updated automatically).` : '.'));
           $('bulkImportText').value = '';
           $('bulkImportPreview').innerHTML = '';
           await refreshPicksList();
@@ -9810,7 +10323,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     for (const v of candidates) {
       const sport = findByNameCI(sports, v.raw.sport);
       const betType = findByNameCI(betTypes, v.raw.bet_type || v.raw.bettype);
-      if (!sport || (betType && betType.uses_prop_fields) || !v.raw.selection) continue;
+      // A combined Parlay row's own "selection" is a summary label like
+      // "3-Leg Parlay", never a real team name -- checking it against the
+      // day's schedule would always and incorrectly fail. Same reasoning
+      // as excluding prop bets just below.
+      const isParlayBetType = betType && normalizeForMatch(betType.name) === 'parlay';
+      if (!sport || (betType && betType.uses_prop_fields) || isParlayBetType || !v.raw.selection) continue;
       const key = `${v.resolved.event_date}|${sport.name}`;
       if (!groups.has(key)) groups.set(key, { date: v.resolved.event_date, sport: sport.name, items: [] });
       const [teamA, teamB] = v.raw.selection.includes('/')
@@ -9917,7 +10435,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       $('bulkImportPreview').innerHTML = '<div class="empty-state">Nothing to parse — paste headers plus at least one row.</div>';
       return;
     }
-    const validated = rows.map(validateBulkRow);
+    let validated = rows.map(validateBulkRow);
+    validated = processParlayGroups(validated);
     $('bulkImportPreview').innerHTML = '<div class="empty-state">Checking for duplicates...</div>';
     await checkForDuplicates(validated);
     $('bulkImportPreview').innerHTML = '<div class="empty-state">Checking today\'s actual schedule for team-based picks...</div>';
@@ -9945,7 +10464,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 162; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 163; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
