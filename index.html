@@ -4447,7 +4447,12 @@
       }
       const row = document.createElement('tr');
       row.setAttribute('data-parlay-legs-for', parlayId);
-      row.innerHTML = `<td colspan="${colspan}" style="background:var(--field);font-size:11px;">${legsHtml}</td>`;
+      // NOT var(--field) -- that variable is the dark green brand accent
+      // used for buttons (#234d35), not a light background. Using it here
+      // put dark inherited text on a dark green cell, unreadable. This
+      // matches the light, subtle tint already used elsewhere in this file
+      // (e.g. the batch-edit banner) instead.
+      row.innerHTML = `<td colspan="${colspan}" style="background:rgba(35,77,53,0.06);font-size:11px;">${legsHtml}</td>`;
       parentRow.insertAdjacentElement('afterend', row);
       btn.innerHTML = '&#9652; legs';
     } catch (e) {
