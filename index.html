@@ -1232,7 +1232,7 @@
             <input id="fsParlayLegWeight" type="number" min="0" max="100" step="1" />
           </div>
         </div>
-        <p class="stub-title" style="margin-bottom:8px;">Pick tier bonuses (flat points, Tier 0 is always 0)</p>
+        <p class="stub-title" style="margin-bottom:8px;">Pick tier bonuses (nominal/maximum points, Tier 0 is always 0)</p>
         <div class="row">
           <div class="field">
             <label>Tier 1 bonus</label>
@@ -1252,7 +1252,7 @@
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:14px;">
-          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are flat points added to a pick's score based on which tier the capper marked it as (Tier 0 never gets a bonus) — each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier above 0, since one tier being worth it doesn't mean they all are.
+          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier above 0, since one tier being worth it doesn't mean they all are.
         </div>
         <button id="saveFormulaSettingsBtn" class="btn-danger">Save Formula Changes</button>
         <button class="ghost" id="resetFormulaSettingsBtn">Reset to Defaults</button>
@@ -9064,26 +9064,41 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   // capper piling on barely moves it, but two strong cappers agreeing adds
   // real weight. It never goes negative -- no agreement is just neutral.
   // tier is 0-4 (0 = base pick, 4 = a capper's highest-confidence pick,
-  // however they brand it). Each tier 1-4 has its own configurable flat
-  // point bonus -- Tier 0 always gets 0. All default to 0 (no effect at
-  // all) until backtesting shows a real reason to trust a given tier as a
-  // meaningful signal.
-  function tierBonusPoints(tier) {
-    switch (Number(tier) || 0) {
-      case 1: return scoringConfig.tier1BonusPoints;
-      case 2: return scoringConfig.tier2BonusPoints;
-      case 3: return scoringConfig.tier3BonusPoints;
-      case 4: return scoringConfig.tier4BonusPoints;
-      default: return 0;
-    }
+  // however they brand it). Each tier 1-4 has its own configurable NOMINAL
+  // (maximum) point bonus -- Tier 0 always gets 0. The bonus a pick actually
+  // earns is that nominal value scaled by THIS capper's own sample-size-
+  // adjusted win% within that specific tier (tierAdjWinPct) -- a capper who
+  // tags a lot of Tier 3 picks but isn't genuinely any better in them than
+  // his base rate shouldn't get full credit just for marking confidence. A
+  // capper with no tier-specific history yet starts at the neutral 50%
+  // (half credit, same starting point as every other adjusted rate in this
+  // formula) and moves toward the real nominal bonus -- or below it -- as
+  // real tier-specific results accumulate. Same smoothing as everything
+  // else means a literal 10-0 record in a tier still won't reach the full
+  // nominal amount; that's consistent with the rest of the formula, not a
+  // bug. All nominal bonuses default to 0 (no effect at all) until
+  // backtesting shows a real reason to trust a given tier as a meaningful
+  // signal.
+  function tierBonusPoints(tier, tierAdjWinPct) {
+    const nominal = (() => {
+      switch (Number(tier) || 0) {
+        case 1: return scoringConfig.tier1BonusPoints;
+        case 2: return scoringConfig.tier2BonusPoints;
+        case 3: return scoringConfig.tier3BonusPoints;
+        case 4: return scoringConfig.tier4BonusPoints;
+        default: return 0;
+      }
+    })();
+    if (!nominal) return 0;
+    return nominal * tierAdjWinPct;
   }
 
-  function scorePickBase(overallAdj, betTypeAdj, streak, tier) {
+  function scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct) {
     return {
       overallPts: overallAdj * 100 * scoringConfig.overallWeight,
       betTypePts: betTypeAdj * 100 * scoringConfig.betTypeWeight,
       streakPts: streakFactor(streak) * 100 * scoringConfig.streakWeight,
-      tierPts: tierBonusPoints(tier)
+      tierPts: tierBonusPoints(tier, tierAdjWinPct)
     };
   }
 
@@ -9131,13 +9146,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // full 1.0) -- a capper who only offered a game as part of a parlay
       // wasn't confident enough to call it standalone, so it's real
       // evidence, just weaker evidence. Straight bets count at full weight.
-      const gradedQuery = "picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at,is_parlay_leg,bet_types(name)&result=in.(win,loss,push)&order=id.asc";
+      const gradedQuery = "picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at,is_parlay_leg,pick_tier,bet_types(name)&result=in.(win,loss,push)&order=id.asc";
       const gradedRaw = await restAllPages(gradedQuery);
       const graded = gradedRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
 
       const overallByCapper = {}; // capper_id -> { wins, losses, history:[] }
       const byCapperBetType = {}; // "capperId::betTypeId" -> { wins, losses } (all sports combined)
       const byCapperSportBetType = {}; // "capperId::sportId::betTypeId" -> { wins, losses } (this exact sport)
+      const byCapperTier = {}; // "capperId::tier" -> { wins, losses } (this capper's own record AT this tier)
       graded.forEach(p => {
         const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
         if (!overallByCapper[p.capper_id]) overallByCapper[p.capper_id] = { wins: 0, losses: 0, history: [] };
@@ -9158,6 +9174,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         if (!byCapperSportBetType[sbtKey]) byCapperSportBetType[sbtKey] = { wins: 0, losses: 0 };
         if (p.result === 'win') byCapperSportBetType[sbtKey].wins += w;
         else if (p.result === 'loss') byCapperSportBetType[sbtKey].losses += w;
+
+        const tier = Number(p.pick_tier) || 0;
+        if (tier > 0) {
+          const tKey = `${p.capper_id}::${tier}`;
+          if (!byCapperTier[tKey]) byCapperTier[tKey] = { wins: 0, losses: 0 };
+          if (p.result === 'win') byCapperTier[tKey].wins += w;
+          else if (p.result === 'loss') byCapperTier[tKey].losses += w;
+        }
       });
       const streakByCapper = {};
       Object.keys(overallByCapper).forEach(id => { streakByCapper[id] = computeStreak(overallByCapper[id].history); });
@@ -9209,6 +9233,13 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // prior (not a flat 50%) -- so "2-0 in Tennis Spreads" leans on
         // "60% in Spreads overall" until enough Tennis-specific picks pile up.
         const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
+        // How good is THIS capper specifically at THIS tier -- scales the
+        // tier bonus below. No tier-specific history yet lands at a neutral
+        // 50% (half credit), same starting point as every other adjusted
+        // rate here, until real results accumulate.
+        const tier = Number(p.pick_tier) || 0;
+        const t = byCapperTier[`${p.capper_id}::${tier}`] || { wins: 0, losses: 0 };
+        const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
         const fmt = (n) => Math.round(n * 10) / 10; // weighted sums can be fractional (e.g. legs at 0.5)
         return {
           pick: p,
@@ -9219,8 +9250,10 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           betTypeRecord: `${fmt(sbt.wins)}-${fmt(sbt.losses)}`, // sport-specific record shown to the user
           broadBetTypeAdjPct: Math.round(broadBetTypeAdj * 1000) / 10, // all-sport rate used as the fallback prior
           betTypeAdjPct: Math.round(betTypeAdj * 1000) / 10, // final blended %, this is what's actually scored
+          tierRecord: `${fmt(t.wins)}-${fmt(t.losses)}`, // this capper's own record specifically AT this tier
+          tierAdjWinPctPct: Math.round(tierAdjWinPct * 1000) / 10,
           streak,
-          base: scorePickBase(overallAdj, betTypeAdj, streak, p.pick_tier)
+          base: scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct)
         };
       });
 
@@ -9326,7 +9359,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const tierStatBox = p.pick_tier > 0 ? `
           <div class="pr-stat">
             <div class="pr-stat-label">Tier</div>
-            <div class="pr-stat-value" style="color:var(--stamp-amber);">Tier ${p.pick_tier}</div>
+            <div class="pr-stat-value" style="color:var(--stamp-amber);">Tier ${p.pick_tier} <span style="font-weight:normal;color:var(--ink-soft);">(${s.tierRecord}, ${s.tierAdjWinPctPct}% adj)</span></div>
+            <div class="pr-stat-sub">his own record specifically at this tier -- scales the nominal bonus</div>
             <div class="pr-stat-pts">${s.score.tierPts >= 0 ? '+' : ''}${s.score.tierPts}pt</div>
           </div>` : '';
 
@@ -9755,21 +9789,25 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const overallByCapper = {};       // capperId -> { wins, losses }
       const broadBetTypeByCapper = {};  // "capperId::betTypeId" -> { wins, losses }
       const sportBetTypeByCapper = {};  // "capperId::sportId::betTypeId" -> { wins, losses }
+      const tierByCapper = {};          // "capperId::tier" -> { wins, losses }
       const historyByCapper = {};       // capperId -> [{ result, event_date, created_at }]
 
       const scored = picks.map(p => {
         const cap = p.capper_id;
         const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
+        const tier = Number(p.pick_tier) || 0;
         const o = overallByCapper[cap] || { wins: 0, losses: 0 };
         const bbt = broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
         const sbt = sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+        const t = tierByCapper[`${cap}::${tier}`] || { wins: 0, losses: 0 };
         const hist = historyByCapper[cap] || [];
 
         const overallAdj = adjustedWinPct(o.wins, o.losses);
         const broadBetTypeAdj = adjustedWinPct(bbt.wins, bbt.losses);
         const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
+        const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
         const streak = computeStreak(hist);
-        const base = scorePickBase(overallAdj, betTypeAdj, streak, p.pick_tier);
+        const base = scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct);
 
         const entry = {
           pick: p, overallAdj, betTypeAdj, base,
@@ -9793,6 +9831,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           wins: sbt.wins + (p.result === 'win' ? w : 0),
           losses: sbt.losses + (p.result === 'loss' ? w : 0)
         };
+        if (tier > 0) {
+          tierByCapper[`${cap}::${tier}`] = {
+            wins: t.wins + (p.result === 'win' ? w : 0),
+            losses: t.losses + (p.result === 'loss' ? w : 0)
+          };
+        }
         // Unweighted -- streak is sequence/status, not magnitude, so a leg
         // breaks or extends it the same as any other graded pick.
         historyByCapper[cap] = [...hist, { result: p.result, event_date: p.event_date, created_at: p.created_at }];
@@ -10831,7 +10875,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 169; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 170; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
