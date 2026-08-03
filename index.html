@@ -7664,7 +7664,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       </table>`;
   }
 
-  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper, legRows) {
+  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper, legRows, legLinks) {
     const overall = totalAndUnique(picks);
 
     // A capper who calls one straight bet and one 10-leg parlay has made two
@@ -7696,14 +7696,53 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // otherwise "5 MLB picks" hides that 2 of those were parlays built
       // from 3 distinct games (one team reused across both), each of which
       // grades on its own and matters for judging pick quality by type.
+      // A parlay's own summary row can only carry ONE sport_id, but a mixed-
+      // sport parlay (e.g. 8 MLB legs + 1 NHL leg) genuinely touches more
+      // than one sport -- crediting the whole-combo bet only to whichever
+      // sport the summary row happens to be tagged with left the OTHER
+      // sport(s) showing real "Parlay games" activity next to a contradictory
+      // "0 Total bets," understating how much the capper actually bet in
+      // that sport. Confirmed via a real report: Bullies Picks' June 2
+      // 9-Leg Parlay (8 MLB + 1 NHL) showed "1 parlay game" but "0 Total
+      // bets" under NHL. Fix: credit each parlay as ONE bet to every sport
+      // its own legs (via real parlay_legs links) actually touch, using the
+      // same weight everywhere -- NOT summed extra times into the Overall
+      // total above, which already counts each parlay once regardless of
+      // how many sports its legs span.
+      const legById = {};
+      legs.forEach(l => { legById[l.id] = l; });
+      const parlayTouchedSports = {}; // parlay pick id -> { sportId: sportName }
+      (legLinks || []).forEach(link => {
+        const leg = legById[link.leg_pick_id];
+        if (!leg) return;
+        if (!parlayTouchedSports[link.parlay_pick_id]) parlayTouchedSports[link.parlay_pick_id] = {};
+        parlayTouchedSports[link.parlay_pick_id][leg.sport_id] = leg.sports ? leg.sports.name : 'Unknown';
+      });
+      function parlaysTouchingSport(sportKey) {
+        return parlayBets.filter(p2 => {
+          const touched = parlayTouchedSports[p2.id];
+          // Fall back to the parlay's own tagged sport only when it has no
+          // recorded legs at all (e.g. legs not yet linked/graded).
+          return touched ? Object.prototype.hasOwnProperty.call(touched, sportKey) : p2.sport_id === sportKey;
+        });
+      }
+      const sportNameById = {};
+      [...straightBets, ...legs, ...parlayBets].forEach(p2 => {
+        if (p2.sport_id != null && !sportNameById[p2.sport_id]) sportNameById[p2.sport_id] = p2.sports ? p2.sports.name : 'Unknown';
+      });
       const straightBySport = groupRowsBy(straightBets, p => p.sport_id, p => p.sports ? p.sports.name : 'Unknown');
-      const parlayBySport = groupRowsBy(parlayBets, p => p.sport_id, p => p.sports ? p.sports.name : 'Unknown');
       const legsBySport = groupRowsBy(legs, p => p.sport_id, p => p.sports ? p.sports.name : 'Unknown');
-      const sportKeys = new Set([...Object.keys(straightBySport), ...Object.keys(parlayBySport), ...Object.keys(legsBySport)]);
+      const parlaySportKeys = new Set();
+      parlayBets.forEach(p2 => {
+        const touched = parlayTouchedSports[p2.id];
+        if (touched) Object.keys(touched).forEach(k => parlaySportKeys.add(k));
+        else parlaySportKeys.add(String(p2.sport_id));
+      });
+      const sportKeys = new Set([...Object.keys(straightBySport), ...Object.keys(legsBySport), ...parlaySportKeys]);
       const sportGroupDefs = Array.from(sportKeys).map(key => {
-        const label = (straightBySport[key] || parlayBySport[key] || legsBySport[key]).label;
+        const label = sportNameById[key] || (straightBySport[key] || legsBySport[key] || { label: 'Unknown' }).label;
         const s = tallyRows(straightBySport[key] ? straightBySport[key].rows : []);
-        const p = tallyRows(parlayBySport[key] ? parlayBySport[key].rows : []);
+        const p = tallyRows(parlaysTouchingSport(key));
         const l = tallyRows(legsBySport[key] ? legsBySport[key].rows : []);
         return {
           label, sortKey: s.picks + p.picks,
@@ -7802,6 +7841,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
   ${overallSection}
   ${sportSectionHtml}
+  ${isSingleCapper ? `<div style="font-size:10px;color:#55584d;margin-top:-14px;margin-bottom:20px;">
+    A parlay that mixes sports (e.g. 8 MLB legs + 1 NHL leg) is credited as one "Total bet" / "Parlay bet" to EVERY sport it has a real leg in, so a sport's row is never left showing "0 Total bets" next to real "Parlay games" activity. This means the By Sport totals can add up to more than the Overall total above (each mixed parlay is still only 1 bet there, not double-counted) -- that's expected, not an error.
+  </div>` : ''}
   ${typeSectionHtml}
 </body></html>`);
     win.document.close();
@@ -7819,7 +7861,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     summaryParts.push(from || to ? `${from || 'earliest'} \u2192 ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' \u00b7 ');
 
-    let query = 'picks?select=capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
+    let query = 'picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
     if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
@@ -7830,14 +7872,18 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const picks = await restAllPages(query);
       if (!picks.length) { alert('No picks match these filters.'); return; }
       let legRows = null;
+      let legLinks = null;
       if (capperFilter) {
-        let legQuery = `picks?select=result,sport_id,bet_type_id,sports(name),bet_types(name)&capper_id=eq.${capperFilter}&is_parlay_leg=eq.true`;
+        let legQuery = `picks?select=id,result,sport_id,bet_type_id,sports(name),bet_types(name)&capper_id=eq.${capperFilter}&is_parlay_leg=eq.true`;
         if (sportFilter) legQuery += `&sport_id=eq.${sportFilter}`;
         if (from) legQuery += `&event_date=gte.${from}`;
         if (to) legQuery += `&event_date=lte.${to}`;
         legRows = await restAllPages(legQuery);
+        if (legRows.length) {
+          legLinks = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&leg_pick_id=in.(${legRows.map(l => l.id).join(',')})`);
+        }
       }
-      openCapperAnalysisTab(picks, filterSummary, !!capperFilter, legRows);
+      openCapperAnalysisTab(picks, filterSummary, !!capperFilter, legRows, legLinks);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -7862,7 +7908,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     summaryParts.push(from || to ? `${from || 'earliest'} \u2192 ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' \u00b7 ');
 
-    let query = 'picks?select=capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
+    let query = 'picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
     query += `&capper_id=eq.${capperId}`;
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
@@ -7872,12 +7918,16 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     try {
       const picks = await restAllPages(query);
       if (!picks.length) { alert(`No picks match these filters for ${capperName}.`); return; }
-      let legQuery = `picks?select=result,sport_id,bet_type_id,sports(name),bet_types(name)&capper_id=eq.${capperId}&is_parlay_leg=eq.true`;
+      let legQuery = `picks?select=id,result,sport_id,bet_type_id,sports(name),bet_types(name)&capper_id=eq.${capperId}&is_parlay_leg=eq.true`;
       if (sportFilter) legQuery += `&sport_id=eq.${sportFilter}`;
       if (from) legQuery += `&event_date=gte.${from}`;
       if (to) legQuery += `&event_date=lte.${to}`;
       const legRows = await restAllPages(legQuery);
-      openCapperAnalysisTab(picks, filterSummary, true, legRows);
+      let legLinks = null;
+      if (legRows.length) {
+        legLinks = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&leg_pick_id=in.(${legRows.map(l => l.id).join(',')})`);
+      }
+      openCapperAnalysisTab(picks, filterSummary, true, legRows, legLinks);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -11200,7 +11250,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 178; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 179; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
