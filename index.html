@@ -3209,12 +3209,12 @@
   // currently happening in a given sport just to log one. A 5-day buffer
   // on both ends catches a capper picking a future match a bit before a
   // tournament's technical start, or a date entered slightly off.
-  function populatePickTournamentDropdown() {
+  function populatePickTournamentDropdown(forceValue) {
     const sel = $('pickEventName');
     if (!sel) return;
     const sportId = $('pickSport').value;
     const dateVal = $('pickDate').value;
-    const keep = sel.value;
+    const keep = forceValue !== undefined ? forceValue : sel.value;
 
     let matching = tournaments;
     if (sportId) matching = matching.filter(t => String(t.sport_id) === String(sportId));
@@ -3306,11 +3306,11 @@
   // the currently-selected sport (Strikeouts only makes sense to offer for
   // MLB, Points for basketball, etc.) -- so someone entering an NHL prop
   // isn't scrolling past baseball stats to find Goals.
-  function populatePropStatDropdown() {
+  function populatePropStatDropdown(forceValue) {
     const sel = $('propStat');
     if (!sel) return;
     const sportId = $('pickSport').value;
-    const keep = sel.value;
+    const keep = forceValue !== undefined ? forceValue : sel.value;
 
     let matching = propStats;
     if (sportId) matching = matching.filter(p => String(p.sport_id) === String(sportId));
@@ -3890,7 +3890,7 @@
     $('pickOpeningOdds').value = p.opening_odds ?? '';
     $('pickClosingOdds').value = p.closing_odds ?? '';
     $('pickHomeAway').value = p.home_away || '';
-    populatePickTournamentDropdown();
+    populatePickTournamentDropdown(p.event_name || '');
     $('pickEventName').value = p.event_name || '';
     $('pickTier').value = String(p.pick_tier || 0);
     $('pickNotes').value = p.notes || '';
@@ -3912,7 +3912,15 @@
     // existed. Same pattern already used for the tournament dropdown just
     // above -- populatePickTournamentDropdown() gets an explicit call for
     // the same reason.
-    populatePropStatDropdown();
+    // FIX v178: pass the pick's actual prop_stat explicitly as the value to
+    // preserve, instead of letting the function fall back to the dropdown's
+    // stale/empty current DOM value. The fallback ran before this pick's
+    // value was ever assigned, so a stat not already registered in the
+    // sport-filtered prop_stats list (e.g. "Games" for Tennis, never added
+    // via the quick-add flow) had nothing to "keep," and the subsequent
+    // $('propStat').value assignment below silently no-opped, leaving the
+    // dropdown blank.
+    populatePropStatDropdown(p.prop_stat || '');
     $('propStat').value = p.prop_stat || '';
     $('propTeam').value = p.prop_team || '';
     // Show which parlay (if any) this leg is currently linked to, so
@@ -11192,7 +11200,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 177; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 178; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
