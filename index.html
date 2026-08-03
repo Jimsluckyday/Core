@@ -4555,6 +4555,11 @@
           const bt = leg.bet_types ? leg.bet_types.name : '';
           const lineTxt = leg.line !== null && leg.line !== undefined ? ` (${leg.line > 0 ? '+' : ''}${leg.line})` : '';
           const oddsTxt = leg.opening_odds !== null && leg.opening_odds !== undefined ? ` @ ${leg.opening_odds > 0 ? '+' : ''}${leg.opening_odds}` : '';
+          // A Player Prop's "selection" is just "Over"/"Under" -- the line's
+          // SIGN is what encodes that direction, per this app's own
+          // convention. Without the player/stat shown too, there was no way
+          // to tell what was actually being graded without a full edit.
+          const propBit = (leg.prop_player || leg.prop_stat) ? ` — ${escapeHtml(leg.prop_player || '')} ${escapeHtml(leg.prop_stat || '')}`.trim() : '';
           // Grade right here rather than only in the main Pending Picks list --
           // that's a separate row elsewhere in a long list, easy to lose track
           // of which game belongs to which parlay. This is the visually
@@ -4566,9 +4571,9 @@
                  <button class="mini push" data-leg-grade="${leg.id}" data-result="push">Push</button>
                </span>`
             : stampHtml(leg.result);
-          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}
+          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}
               <button type="button" class="ghost small" data-leg-edit="${leg.id}" style="padding:1px 6px;font-size:10px;margin-left:6px;">Edit</button>
-              <button type="button" class="ghost small" data-leg-delete="${leg.id}" data-leg-summary="${escapeHtml(leg.selection)}${lineTxt}" style="padding:1px 6px;font-size:10px;color:var(--stamp-red);border-color:var(--stamp-red);">Delete</button>
+              <button type="button" class="ghost small" data-leg-delete="${leg.id}" data-leg-summary="${escapeHtml(leg.selection)}${lineTxt}${propBit}" style="padding:1px 6px;font-size:10px;color:var(--stamp-red);border-color:var(--stamp-red);">Delete</button>
             </li>`;
         }).join('') + '</ul>';
       }
@@ -5547,6 +5552,11 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             const bt = leg.bet_types ? leg.bet_types.name : '';
             const lineTxt = (leg.line !== null && leg.line !== undefined) ? ' (' + (leg.line > 0 ? '+' : '') + leg.line + ')' : '';
             const oddsTxt = (leg.opening_odds !== null && leg.opening_odds !== undefined) ? ' @ ' + (leg.opening_odds > 0 ? '+' : '') + leg.opening_odds : '';
+            // A Player Prop's "selection" is just "Over"/"Under" -- the
+            // line's SIGN encodes that direction, per this app's own
+            // convention. Without player/stat shown too, there was no way
+            // to tell what was actually being graded without a full edit.
+            const propBit = (leg.prop_player || leg.prop_stat) ? (' — ' + escLocal(leg.prop_player || '') + ' ' + escLocal(leg.prop_stat || '')).trim() : '';
             const gradeHtml = leg.result === 'pending'
               ? '<span class="grade-btns" style="display:inline-flex;vertical-align:middle;">' +
                   '<button class="mini win" data-leg-grade="' + leg.id + '" data-result="win">Win</button>' +
@@ -5554,9 +5564,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
                   '<button class="mini push" data-leg-grade="' + leg.id + '" data-result="push">Push</button>' +
                 '</span>'
               : '<span class="stamp ' + leg.result + '">' + leg.result + '</span>';
-            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml +
+            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml +
               ' <button type="button" class="mini leg-edit-btn" data-leg-edit="' + leg.id + '" style="padding:1px 6px;">Edit</button>' +
-              ' <button type="button" class="mini leg-delete-btn" data-leg-delete="' + leg.id + '" data-leg-summary="' + escLocal(leg.selection) + lineTxt + '" style="padding:1px 6px;border-color:#8a2f3a;color:#8a2f3a;">Delete</button>' +
+              ' <button type="button" class="mini leg-delete-btn" data-leg-delete="' + leg.id + '" data-leg-summary="' + escLocal(leg.selection) + lineTxt + propBit + '" style="padding:1px 6px;border-color:#8a2f3a;color:#8a2f3a;">Delete</button>' +
               '</li>';
           }).join('') + '</ul>';
         }
@@ -11158,7 +11168,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 175; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 176; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
