@@ -4266,7 +4266,7 @@
     const completeness = $('filterCompleteness').value;
     const tierFilter = $('filterTier').value;
 
-    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&order=event_date.desc,created_at.desc&limit=${limit}`;
+    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc&limit=${limit}`;
     if (status) query += `&result=eq.${status}`;
     if (dateMode === 'today') query += `&event_date=eq.${new Date().toISOString().slice(0, 10)}`;
     if (dateMode === 'exact' && $('filterDateExact').value) query += `&event_date=eq.${$('filterDateExact').value}`;
@@ -4508,6 +4508,12 @@
         legsHtml = '<div style="color:var(--ink-soft);font-style:italic;">No legs linked yet.</div>';
       } else {
         legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,bet_types(name)&id=in.(${legIds.join(',')})`);
+        // Legs are deliberately never their own row anywhere else in the
+        // picks list (see buildPicksFilterQuery) -- the same game appearing
+        // both as its own line AND inside a parlay's legs was exactly the
+        // confusing, error-prone setup this was built to replace, especially
+        // when the same team is called across more than one parlay. This is
+        // now the ONLY place a leg can be viewed, graded, edited, or deleted.
         legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;list-style:none;">' + legs.map(leg => {
           const bt = leg.bet_types ? leg.bet_types.name : '';
           const lineTxt = leg.line !== null && leg.line !== undefined ? ` (${leg.line > 0 ? '+' : ''}${leg.line})` : '';
@@ -4523,7 +4529,10 @@
                  <button class="mini push" data-leg-grade="${leg.id}" data-result="push">Push</button>
                </span>`
             : stampHtml(leg.result);
-          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}</li>`;
+          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}
+              <button type="button" class="ghost small" data-leg-edit="${leg.id}" style="padding:1px 6px;font-size:10px;margin-left:6px;">Edit</button>
+              <button type="button" class="ghost small" data-leg-delete="${leg.id}" data-leg-summary="${escapeHtml(leg.selection)}${lineTxt}" style="padding:1px 6px;font-size:10px;color:var(--stamp-red);border-color:var(--stamp-red);">Delete</button>
+            </li>`;
         }).join('') + '</ul>';
       }
       const row = document.createElement('tr');
@@ -4565,6 +4574,21 @@
             alert('Could not update result: ' + e.message);
             span.querySelectorAll('button').forEach(b => b.disabled = false);
           }
+        });
+      });
+
+      row.querySelectorAll('button[data-leg-edit]').forEach(ebtn => {
+        ebtn.addEventListener('click', () => enterPickEditMode(ebtn.getAttribute('data-leg-edit')));
+      });
+
+      row.querySelectorAll('button[data-leg-delete]').forEach(dbtn => {
+        dbtn.addEventListener('click', () => {
+          const legId = dbtn.getAttribute('data-leg-delete');
+          const summary = dbtn.getAttribute('data-leg-summary');
+          const li = dbtn.closest('li');
+          deletePickWithConfirm(legId, summary, dbtn, async () => {
+            if (li) li.remove();
+          });
         });
       });
     } catch (e) {
@@ -5491,7 +5515,10 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
                   '<button class="mini push" data-leg-grade="' + leg.id + '" data-result="push">Push</button>' +
                 '</span>'
               : '<span class="stamp ' + leg.result + '">' + leg.result + '</span>';
-            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml + '</li>';
+            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml +
+              ' <button type="button" class="mini leg-edit-btn" data-leg-edit="' + leg.id + '" style="padding:1px 6px;">Edit</button>' +
+              ' <button type="button" class="mini leg-delete-btn" data-leg-delete="' + leg.id + '" data-leg-summary="' + escLocal(leg.selection) + lineTxt + '" style="padding:1px 6px;border-color:#8a2f3a;color:#8a2f3a;">Delete</button>' +
+              '</li>';
           }).join('') + '</ul>';
         }
         const tr = document.createElement('tr');
@@ -5533,6 +5560,52 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             } catch (e) {
               alert('Could not update result: ' + e.message);
               span.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
+            }
+          });
+        });
+
+        tr.querySelectorAll('button[data-leg-edit]').forEach(function(ebtn) {
+          ebtn.addEventListener('click', async () => {
+            const op3 = opener();
+            if (!op3 || typeof op3.enterPickEditMode !== 'function') {
+              alert('Could not open the edit form — the main tab may need to be refreshed to a newer version.');
+              return;
+            }
+            const legId = ebtn.getAttribute('data-leg-edit');
+            ebtn.disabled = true;
+            ebtn.textContent = 'Loading...';
+            try {
+              const result = await op3.enterPickEditMode(legId);
+              op3.focus();
+              if (result && result.ok) {
+                alert('Loaded into the edit form on the main Pick Tracker tab: "' + result.selection + '" (' + result.event_date + ').\\n\\nSwitch to that tab to finish editing — some browsers will not let this tab bring it to the front automatically.');
+              } else {
+                alert('Could not load the pick into the edit form: ' + (result && result.error ? result.error : 'unknown error'));
+              }
+            } catch (e) {
+              alert('Could not reach the main tab: ' + e.message);
+            } finally {
+              ebtn.disabled = false;
+              ebtn.textContent = 'Edit';
+            }
+          });
+        });
+
+        tr.querySelectorAll('button[data-leg-delete]').forEach(function(dbtn) {
+          dbtn.addEventListener('click', async () => {
+            const op4 = opener();
+            if (!op4) return;
+            const legId = dbtn.getAttribute('data-leg-delete');
+            const summary = dbtn.getAttribute('data-leg-summary');
+            if (!confirm('Delete this pick permanently?\\n\\n' + summary + '\\n\\nThis cannot be undone.')) return;
+            dbtn.disabled = true;
+            try {
+              await op4.rest('picks?id=eq.' + legId, { method: 'DELETE' });
+              const li = dbtn.closest('li');
+              if (li) li.remove();
+            } catch (e) {
+              alert('Could not delete: ' + e.message);
+              dbtn.disabled = false;
             }
           });
         });
@@ -10875,7 +10948,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 170; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 171; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
