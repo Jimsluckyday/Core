@@ -989,7 +989,7 @@
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Breaks down every graded pick by tier — count, win-loss-push, and win % for Tier 0 (base picks) through Tier 4 (a capper's highest-confidence pick, however they brand it — Whale of the Day, Lock of the Week, VIP pick, etc.). Also breaks it down per capper, since cappers use different tiers differently, and one capper's Tier 4 may perform very differently than another's.
+          Breaks down every graded pick by tier — count, win-loss-push, and win % for Tier -1 (explicitly below base, e.g. a lotto pick) through Tier 4 (a capper's highest-confidence pick, however they brand it — Whale of the Day, Lock of the Week, VIP pick, etc.). Select "All cappers" to break it down per capper instead, since cappers use different tiers differently and one capper's Tier 4 may perform very differently than another's. The Straight/Parlay column shows how many of that tier's picks were standalone bets vs. whole parlays (a parlay's tier comes from what the capper called the whole combo, not guessed from its legs) — a second table below shows how the individual games inside those parlays did, since every leg shares its parlay's own tier.
         </div>
         <div id="potdPerfWrap"></div>
       </div>
@@ -3517,24 +3517,39 @@
   // again later, from a completely separate save action -- the CSV
   // pipeline's parlay_id never needed this since a whole image uploads in
   // one atomic run, but Add Pick entries don't have that guarantee.
-  async function linkLegToParlay(capperId, eventDate, sportId, parlayNumber, legId) {
+  // legTier is OPTIONAL and only ever pushes a genuinely NEW leg's tier to
+  // match its parlay -- never the other way, and never touching a leg that
+  // already exists under a DIFFERENT parlay (a leg shared across parlays
+  // keeps its own already-reconciled tier; see the tierConflict warning in
+  // savePick() for that specific, more delicate case). Confirmed directly
+  // by the owner: the parlay's own tier is the real signal -- if he calls a
+  // Tier 3 parlay, every leg in it falls under that same confidence
+  // umbrella, it's never independently "Tier 0" just because nobody typed
+  // a number on that specific leg.
+  async function linkLegToParlay(capperId, eventDate, sportId, parlayNumber, legId, legTier) {
     const parlayBetType = findByNameCI(betTypes, 'Parlay');
     if (!parlayBetType) throw new Error('No "Parlay" bet type is registered -- add it in Setup first.');
 
-    let summaryId;
+    let summaryId, parlayTier, tierReconciled = false;
     const existingSummary = await rest(
-      `picks?select=id&capper_id=eq.${capperId}&event_date=eq.${eventDate}` +
+      `picks?select=id,pick_tier&capper_id=eq.${capperId}&event_date=eq.${eventDate}` +
       `&parlay_local_number=eq.${parlayNumber}&bet_type_id=eq.${parlayBetType.id}`
     );
     if (existingSummary.length) {
       summaryId = existingSummary[0].id;
+      parlayTier = Number(existingSummary[0].pick_tier) || 0;
+      if (legTier !== undefined && legTier !== null && Number(legTier) !== parlayTier) {
+        await rest(`picks?id=eq.${legId}`, { method: 'PATCH', body: JSON.stringify({ pick_tier: parlayTier }) });
+        tierReconciled = true;
+      }
     } else {
+      parlayTier = (legTier !== undefined && legTier !== null) ? Number(legTier) : 0;
       const inserted = await rest('picks', {
         method: 'POST', headers: { Prefer: 'return=representation' },
         body: JSON.stringify([{
           capper_id: capperId, sport_id: sportId || null, bet_type_id: parlayBetType.id,
           selection: '1-Leg Parlay', event_date: eventDate, is_parlay_leg: false,
-          parlay_local_number: parlayNumber, pick_tier: 0, result: 'pending', is_published: false
+          parlay_local_number: parlayNumber, pick_tier: parlayTier, result: 'pending', is_published: false
         }])
       });
       summaryId = inserted[0].id;
@@ -3554,7 +3569,7 @@
     }
 
     await refreshParlaySummary(summaryId);
-    return summaryId;
+    return { summaryId, parlayTier, tierReconciled };
   }
 
   async function savePick() {
@@ -3628,8 +3643,11 @@
         await rest(`picks?id=eq.${editingId}`, { method: 'PATCH', body: JSON.stringify(payload) });
         let msg = 'Pick updated.';
         if (parlayNumberVal) {
-          await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, editingId);
+          const linkResult = await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, editingId, payload.pick_tier);
           msg += ` Linked to Parlay ${parlayNumberVal}.`;
+          if (linkResult.tierReconciled) {
+            msg += ` Tier automatically set to Tier ${linkResult.parlayTier} to match this parlay's existing tag -- every leg in a parlay shares the same confidence tier.`;
+          }
         }
         showMsg($('pickMsg'), msg, 'ok');
         exitPickEditMode();
@@ -3662,7 +3680,14 @@
           legId = inserted[0].id;
           msg = `Pick saved and linked to Parlay ${parlayNumberVal}.`;
         }
-        await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, legId);
+        // Only a genuinely NEW leg's tier gets reconciled to match its
+        // parlay -- a leg shared with an existing, different parlay keeps
+        // whatever tier it already has (the tierConflict warning above is
+        // what surfaces that case instead, deliberately not auto-changed).
+        const linkResult = await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, legId, existingLeg ? undefined : payload.pick_tier);
+        if (linkResult.tierReconciled) {
+          msg += ` Tier automatically set to Tier ${linkResult.parlayTier} to match this parlay's existing tag -- every leg in a parlay shares the same confidence tier.`;
+        }
         showMsg($('pickMsg'), msg, 'ok');
         // Deliberately NOT resetting capper/sport/pick_type/date, so entering
         // a dozen picks from the same capper for the same slate is fast.
@@ -6821,18 +6846,19 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     $('togglePotdPerfBtn').textContent = showing ? 'Show performance' : 'Hide performance';
   });
 
-  function potdWlpRow(label, wins, losses, pushes) {
-    const total = wins + losses + pushes;
-    const winPct = (wins + losses) > 0 ? Math.round((1000 * wins) / (wins + losses)) / 10 : null;
-    return `<tr><td>${label}</td><td>${total}</td><td>${wins}</td><td>${losses}</td><td>${pushes}</td><td><strong>${winPct !== null ? winPct + '%' : '—'}</strong></td></tr>`;
-  }
-
   function potdStats(arr) {
     return {
       wins: arr.filter(p => p.result === 'win').length,
       losses: arr.filter(p => p.result === 'loss').length,
       pushes: arr.filter(p => p.result === 'push').length
     };
+  }
+
+  function potdTierRow(label, wins, losses, pushes, straightParlayText) {
+    const total = wins + losses + pushes;
+    const winPct = (wins + losses) > 0 ? Math.round((1000 * wins) / (wins + losses)) / 10 : null;
+    const spCell = straightParlayText !== undefined ? `<td>${straightParlayText}</td>` : '';
+    return `<tr><td>${label}</td><td>${total}</td>${spCell}<td>${wins}</td><td>${losses}</td><td>${pushes}</td><td><strong>${winPct !== null ? winPct + '%' : '—'}</strong></td></tr>`;
   }
 
   async function runPotdPerf() {
@@ -6844,64 +6870,75 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
 
     try {
-      let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name)&result=in.(win,loss,push)';
+      let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
       if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
       if (from) baseQuery += `&event_date=gte.${from}`;
       if (to) baseQuery += `&event_date=lte.${to}`;
       const picks = await restAllPages(baseQuery + '&is_parlay_leg=eq.false');
-      // Legs never show up mixed into the standalone numbers above (that
-      // would double-count the same real game alongside its parlay), but
-      // they're fetched separately so a capper's tier tags on his parlay
-      // legs are still visible somewhere -- otherwise a capper who tags a
-      // parlay leg Tier 3 would look like he's never called a Tier 3 pick
-      // at all, even though the tier data genuinely exists and already
+      // Legs never show up mixed into the standalone/parlay numbers above
+      // (that would double-count the same real game alongside its own
+      // parlay), but they're fetched separately so a capper's tier tags on
+      // his parlay legs are still visible somewhere -- otherwise a capper
+      // who tags a parlay Tier 3 would look like he's never called a Tier 3
+      // pick at all, even though the tier data genuinely exists and already
       // feeds Publish Ranking's scoring.
       const legPicks = await restAllPages(baseQuery + '&is_parlay_leg=eq.true');
-      renderPotdPerf(picks, legPicks);
+      renderPotdPerf(picks, legPicks, !capperFilter);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
     }
   }
 
-  function potdTierBreakdownHtml(picks, tiers, tierLabel, title, filterNote) {
-    const overallRows = tiers.map(t => {
-      const arr = picks.filter(p => (Number(p.pick_tier) || 0) === t);
-      if (!arr.length) return '';
-      const s = potdStats(arr);
-      return potdWlpRow(tierLabel(t), s.wins, s.losses, s.pushes);
-    }).join('');
+  // One flat table, tiers as rows in the natural order (-1 to 4), only
+  // showing tiers that actually have picks -- not a separate "all cappers
+  // combined" table plus a second, mostly-redundant "by capper" table.
+  // groupByCapper only kicks in for the "All cappers" filter (tier meaning
+  // is capper-specific, so blending everyone together isn't that useful);
+  // with one specific capper selected there's nothing to group.
+  function potdTierTableHtml(picks, tiers, tierLabel, title, filterNote, opts) {
+    const groupByCapper = !!(opts && opts.groupByCapper);
+    const showStraightParlay = !!(opts && opts.showStraightParlay);
 
-    const byCapper = {};
-    picks.forEach(p => {
-      const name = p.cappers ? p.cappers.name : '—';
-      if (!byCapper[name]) byCapper[name] = tiers.reduce((acc, t) => { acc[t] = []; return acc; }, {});
-      byCapper[name][Number(p.pick_tier) || 0].push(p);
-    });
-    const capperRows = Object.entries(byCapper)
-      .filter(([, byTier]) => tiers.some(t => t !== 0 && byTier[t].length))
-      .map(([name, byTier]) => tiers.map(t => {
-        const arr = byTier[t];
+    function rowsFor(rows, prefix) {
+      return tiers.map(t => {
+        const arr = rows.filter(p => (Number(p.pick_tier) || 0) === t);
         if (!arr.length) return '';
         const s = potdStats(arr);
-        return potdWlpRow(`${escapeHtml(name)} — ${tierLabel(t)}`, s.wins, s.losses, s.pushes);
-      }).join('')).join('');
+        let spText;
+        if (showStraightParlay) {
+          const straightCount = arr.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay')).length;
+          spText = `${straightCount}/${arr.length - straightCount}`;
+        }
+        return potdTierRow(prefix ? `${escapeHtml(prefix)} — ${tierLabel(t)}` : tierLabel(t), s.wins, s.losses, s.pushes, spText);
+      }).join('');
+    }
 
+    let bodyHtml;
+    if (groupByCapper) {
+      const byCapper = {};
+      picks.forEach(p => {
+        const name = p.cappers ? p.cappers.name : '—';
+        if (!byCapper[name]) byCapper[name] = [];
+        byCapper[name].push(p);
+      });
+      bodyHtml = Object.entries(byCapper).map(([name, rows]) => rowsFor(rows, name)).join('');
+    } else {
+      bodyHtml = rowsFor(picks, null);
+    }
+
+    const spHead = showStraightParlay ? '<th>Straight/Parlay</th>' : '';
+    const colspan = showStraightParlay ? 7 : 6;
     return `
-      <p class="stub-title" style="margin-bottom:8px;">${title} (all cappers combined)</p>
-      <table class="picks-table" style="margin-bottom:10px;">
-        <thead><tr><th></th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th></tr></thead>
-        <tbody>${overallRows}</tbody>
+      <p class="stub-title" style="margin-bottom:8px;">${title}</p>
+      <table class="picks-table" style="margin-bottom:8px;">
+        <thead><tr><th></th><th>Picks</th>${spHead}<th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th></tr></thead>
+        <tbody>${bodyHtml || `<tr><td colspan="${colspan}">No picks match these filters.</td></tr>`}</tbody>
       </table>
-      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:8px;">${filterNote}</div>
-      <p class="stub-title" style="margin-bottom:8px;">${title} — by capper (only cappers using a tier other than 0)</p>
-      <table class="picks-table" style="margin-bottom:20px;">
-        <thead><tr><th></th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th></tr></thead>
-        <tbody>${capperRows || '<tr><td colspan="6">No picks outside Tier 0.</td></tr>'}</tbody>
-      </table>`;
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:20px;">${filterNote}</div>`;
   }
 
-  function renderPotdPerf(picks, legPicks) {
+  function renderPotdPerf(picks, legPicks, groupByCapper) {
     const wrap = $('potdPerfWrap');
     if (!picks.length && !legPicks.length) {
       wrap.innerHTML = '<div class="empty-state">No graded picks match these filters.</div>';
@@ -6911,17 +6948,17 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const tiers = [-1, 0, 1, 2, 3, 4];
     const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
 
-    const straightSection = picks.length
-      ? potdTierBreakdownHtml(picks, tiers, tierLabel, 'By tier',
-          'Standalone picks only -- a parlay leg\'s tier tag is never mixed in here, since that would double-count the same real game alongside its own parlay. See the separate table below for those.')
-      : '<div class="empty-state" style="margin-bottom:20px;">No standalone picks match these filters.</div>';
+    const mainSection = potdTierTableHtml(picks, tiers, tierLabel, 'By tier',
+      'Straight bets and parlays (counted as one unit each) together -- the Straight/Parlay column shows how many of that tier\'s picks were which. A parlay\'s own tier comes from what the capper called the WHOLE combo, not guessed from its legs -- every leg in a parlay shares that same tier by default. See the table below for how the individual legs did.',
+      { groupByCapper, showStraightParlay: true });
 
     const legSection = legPicks.length
-      ? potdTierBreakdownHtml(legPicks, tiers, tierLabel, 'By tier — parlay legs (individual games inside a parlay)',
-          'Each row here is a game a capper only offered as part of a parlay, never called standalone -- his tier tag on it is real (Publish Ranking already counts it, at a reduced weight), it just lives on a different kind of pick than the table above.')
+      ? potdTierTableHtml(legPicks, tiers, tierLabel, 'By tier — parlay legs (individual games inside a parlay)',
+          'Every leg shares its parlay\'s own tier, so this isn\'t a separate confidence signal from the table above -- it\'s about volume: how many games he\'s packaging at each level. Useful for noticing when something\'s unusual for him, like a much bigger parlay than normal at his top tier.',
+          { groupByCapper, showStraightParlay: false })
       : '';
 
-    wrap.innerHTML = straightSection + legSection;
+    wrap.innerHTML = mainSection + legSection;
   }
 
   $('runPotdPerfBtn').addEventListener('click', runPotdPerf);
@@ -10765,8 +10802,16 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
               legId = inserted[0].id;
               importedCount++;
             }
-            for (const m of v.parlayMemberships) {
-              await linkLegToParlay(v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id, m.number, legId);
+            // Only reconcile tier on the FIRST parlay this (genuinely new)
+            // leg links to in this pass -- if it also belongs to a second
+            // parlay number in the same paste, that parlay's own tier isn't
+            // silently overwritten by this leg's tier a second time (same
+            // "don't auto-resolve a shared-leg conflict" principle as
+            // Add Pick's tierConflict warning).
+            for (let mi = 0; mi < v.parlayMemberships.length; mi++) {
+              const m = v.parlayMemberships[mi];
+              const legTier = (!existingLeg && mi === 0) ? v.resolved.pick_tier : undefined;
+              await linkLegToParlay(v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id, m.number, legId, legTier);
             }
           }
 
@@ -10980,7 +11025,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 172; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 173; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
