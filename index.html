@@ -9542,27 +9542,33 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   function renderPublishRank(scored, pastDueScored) {
     const wrap = $('publishRankWrap');
 
+    // Straight/Parlay filter applies here too -- without it, a parlay
+    // candidate in the past-due section would be just as buried as one in
+    // the main list, defeating the point of the filter.
+    function pickTypeMatches(s, pickTypeFilter) {
+      if (pickTypeFilter === 'straight') return !s.isParlayCandidate;
+      if (pickTypeFilter === 'parlay') return !!s.isParlayCandidate;
+      return true;
+    }
+
     function pastDueSectionHtml() {
       if (!pastDueScored || !pastDueScored.length) return '';
-      const cardsHtml = pastDueScored.map((s, i) => cardHtml(s, i + 1)).join('');
       return `
         <div style="margin-top:24px;padding-top:16px;border-top:1.5px dashed var(--field);">
           <p class="stub-title" style="margin-bottom:8px;">Event date has passed (${pastDueScored.length})</p>
           <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
             These picks are still pending (not yet graded), and their event date has already come and gone -- they're grouped separately so they don't get an actively-recalculating score mixed in with picks still to come, but each one below still has a real, one-time score computed exactly like any other pick, and can be published normally. That's deliberate: during testing/backfill (working through historical data before there's a live audience, or tuning the scoring formula against known outcomes), publishing these is completely normal. For live, day-to-day operation once real customers are watching, the usual approach is to grade these first via Grade Results, then publish through the normal record instead.
           </div>
-          <div id="pastDueCardsWrap">${cardsHtml}</div>
+          <div id="pastDueCardsWrap"></div>
         </div>`;
     }
 
-    function wirePastDueSection() {
-      wireCardActions(pastDueScored);
-    }
-
-    if (!scored.length) {
-      wrap.innerHTML = '<div class="empty-state">No pending picks match these filters.</div>' + pastDueSectionHtml();
-      wirePastDueSection();
-      return;
+    function renderPastDueCards(pickTypeFilter) {
+      if (!pastDueScored || !pastDueScored.length) return;
+      const filtered = pastDueScored.filter(s => pickTypeMatches(s, pickTypeFilter));
+      const cardsHtml = filtered.map(s => cardHtml(s, pastDueScored.indexOf(s) + 1)).join('');
+      $('pastDueCardsWrap').innerHTML = cardsHtml || '<div class="empty-state">Nothing matches that filter.</div>';
+      wireCardActions(filtered);
     }
 
     function cardHtml(s, rank) {
@@ -9655,7 +9661,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     function applyFilterAndRender() {
       const term = ($('prSearchBox').value || '').toLowerCase().trim();
       const publishedOnly = $('prPublishedOnlyCb').checked;
+      const pickTypeFilter = $('prPickTypeFilter').value; // '' = both, 'straight', 'parlay'
       const filtered = scored.filter(s => {
+        if (!pickTypeMatches(s, pickTypeFilter)) return false;
         if (publishedOnly && !s.pick.is_published) return false;
         if (!term) return true;
         const capperName = (s.pick.cappers ? s.pick.cappers.name : '').toLowerCase();
@@ -9667,8 +9675,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // the filtered view -- so "#1" still means "#1 overall," even when
       // searching narrows what's on screen.
       const cardsHtml = filtered.map(s => cardHtml(s, scored.indexOf(s) + 1)).join('');
-      $('prCardsWrap').innerHTML = cardsHtml || '<div class="empty-state">Nothing matches that search.</div>';
+      $('prCardsWrap').innerHTML = cardsHtml || '<div class="empty-state">No pending picks match these filters.</div>';
       wireCardActions(filtered);
+      renderPastDueCards(pickTypeFilter);
     }
 
     wrap.innerHTML = `
@@ -9680,19 +9689,30 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           <label>Search (capper, selection, or player)</label>
           <input type="text" id="prSearchBox" placeholder="e.g. Castle, A11 Bets, Panathinaikos..." />
         </div>
+        <div class="field">
+          <label>Pick type</label>
+          <select id="prPickTypeFilter">
+            <option value="">Straight + Parlays</option>
+            <option value="straight">Straight only</option>
+            <option value="parlay">Parlays only</option>
+          </select>
+        </div>
         <div style="align-self:flex-end;">
           <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:normal;">
             <input type="checkbox" id="prPublishedOnlyCb" /> Show published only
           </label>
         </div>
       </div>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+        <strong>Pick type</strong> is a quick way to check parlays without them getting buried in a long ranked list -- switch to "Parlays only" (with "Include parlays as candidates" checked above) for a fast look at whether one stands out today, even if it wouldn't crack a Top 10 sorted by everything blended together.
+      </div>
       <div id="prCardsWrap"></div>
       ${pastDueSectionHtml()}`;
 
     $('prSearchBox').addEventListener('input', applyFilterAndRender);
     $('prPublishedOnlyCb').addEventListener('change', applyFilterAndRender);
+    $('prPickTypeFilter').addEventListener('change', applyFilterAndRender);
     applyFilterAndRender();
-    wirePastDueSection();
 
     function renderActionCell(pickId, isPublished) {
       return isPublished
@@ -11138,7 +11158,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 174; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 175; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
