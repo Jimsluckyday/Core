@@ -3686,11 +3686,25 @@
           legId = inserted[0].id;
           msg = `Pick saved and linked to Parlay ${parlayNumberVal}.`;
         }
-        // Only a genuinely NEW leg's tier gets reconciled to match its
-        // parlay -- a leg shared with an existing, different parlay keeps
-        // whatever tier it already has (the tierConflict warning above is
-        // what surfaces that case instead, deliberately not auto-changed).
-        const linkResult = await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, legId, existingLeg ? undefined : payload.pick_tier);
+        // A dedup-matched EXISTING leg only needs its typed tier withheld
+        // if it's ALREADY linked to some other, differently-tiered parlay --
+        // that's the genuine ambiguity the tierConflict warning above
+        // exists for. An existing-but-orphaned leg (matched by natural key,
+        // but never actually linked to any parlay yet -- e.g. older
+        // standalone/backtested data being folded into a parlay for the
+        // first time) has no established tier to protect, so the tier just
+        // typed applies normally, same as any brand-new leg. CONFIRMED from
+        // a real failure: a leg that pre-existed from unrelated historical
+        // data silently defaulted its brand-new parlay to Tier 0, discarding
+        // the Tier -1 actually selected on the form, purely because the
+        // row happened to already exist -- not because it was genuinely
+        // shared with anything.
+        let legTierArg = payload.pick_tier;
+        if (existingLeg) {
+          const existingLinks = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${legId}`);
+          if (existingLinks.length) legTierArg = undefined;
+        }
+        const linkResult = await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, legId, legTierArg);
         if (linkResult.tierReconciled) {
           msg += ` Tier automatically set to Tier ${linkResult.parlayTier} to match this parlay's existing tag -- every leg in a parlay shares the same confidence tier.`;
         }
@@ -10945,15 +10959,25 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
               legId = inserted[0].id;
               importedCount++;
             }
-            // Only reconcile tier on the FIRST parlay this (genuinely new)
-            // leg links to in this pass -- if it also belongs to a second
-            // parlay number in the same paste, that parlay's own tier isn't
-            // silently overwritten by this leg's tier a second time (same
-            // "don't auto-resolve a shared-leg conflict" principle as
-            // Add Pick's tierConflict warning).
+            // A dedup-matched EXISTING leg only needs its typed tier
+            // withheld if it's ALREADY linked to some other parlay -- an
+            // existing-but-orphaned leg (matched by natural key, but never
+            // actually linked to any parlay before) has no established tier
+            // to protect, same reasoning as Add Pick's equivalent fix.
+            let existingLinksCount = 0;
+            if (existingLeg) {
+              const existingLinks = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${legId}`);
+              existingLinksCount = existingLinks.length;
+            }
+            // Only reconcile tier on the FIRST parlay this leg links to in
+            // THIS pass -- if it also belongs to a second parlay number in
+            // the same paste, that parlay's own tier isn't silently
+            // overwritten by this leg's tier a second time (same "don't
+            // auto-resolve a shared-leg conflict" principle as Add Pick's
+            // tierConflict warning).
             for (let mi = 0; mi < v.parlayMemberships.length; mi++) {
               const m = v.parlayMemberships[mi];
-              const legTier = (!existingLeg && mi === 0) ? v.resolved.pick_tier : undefined;
+              const legTier = (existingLinksCount === 0 && mi === 0) ? v.resolved.pick_tier : undefined;
               await linkLegToParlay(v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id, m.number, legId, legTier);
             }
           }
@@ -11168,7 +11192,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 176; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 177; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
