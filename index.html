@@ -656,7 +656,8 @@
         <div class="field">
           <label>Pick tier</label>
           <select id="pickTier">
-            <option value="0">Tier 0 — base pick (default)</option>
+            <option value="-1">Tier -1 — explicitly below base (lotto pick, half unit, smaller than his normal size)</option>
+            <option value="0" selected>Tier 0 — base pick (default)</option>
             <option value="1">Tier 1</option>
             <option value="2">Tier 2</option>
             <option value="3">Tier 3</option>
@@ -763,6 +764,7 @@
           <label>Tier</label>
           <select id="filterTier">
             <option value="">All tiers</option>
+            <option value="-1">Tier -1 only (below base)</option>
             <option value="0">Tier 0 (base) only</option>
             <option value="1+">Any special tier (1-4)</option>
             <option value="1">Tier 1 only</option>
@@ -1235,6 +1237,10 @@
         <p class="stub-title" style="margin-bottom:8px;">Pick tier bonuses (nominal/maximum points, Tier 0 is always 0)</p>
         <div class="row">
           <div class="field">
+            <label>Tier -1 bonus (below base)</label>
+            <input id="fsTierMinus1Bonus" type="number" step="1" />
+          </div>
+          <div class="field">
             <label>Tier 1 bonus</label>
             <input id="fsTier1Bonus" type="number" step="1" />
           </div>
@@ -1252,7 +1258,7 @@
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:14px;">
-          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier above 0, since one tier being worth it doesn't mean they all are.
+          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. <strong>Tier -1</strong> is for a pick the capper explicitly signaled as below his normal base confidence (a lotto pick, an explicitly smaller unit size than usual) -- same scaling logic, just typically expected to be a negative number once backtesting shows the pattern is real, since it's meant to actively hurt a score, not just withhold a bonus. Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier away from 0, since one tier being worth adjusting doesn't mean they all are.
         </div>
         <button id="saveFormulaSettingsBtn" class="btn-danger">Save Formula Changes</button>
         <button class="ghost" id="resetFormulaSettingsBtn">Reset to Defaults</button>
@@ -4612,6 +4618,7 @@
       if (p.event_name) detail += ` <span style="color:var(--ink-soft);font-style:italic;">— ${escapeHtml(p.event_name)}</span>`;
       if (p.line_flagged_for_review) detail += ` <span style="color:var(--stamp-amber);" title="${escapeHtml(p.line_flag_note || 'Flagged for a later look -- not blocking, grading proceeds normally against the entered line.')}">&#9873; line flagged</span>`;
       if (p.pick_tier > 0) detail += ` <span style="color:var(--stamp-amber);font-weight:bold;">&#11088; Tier ${p.pick_tier}</span>`;
+      else if (p.pick_tier < 0) detail += ` <span style="color:var(--stamp-red);font-weight:bold;">&#9660; Tier ${p.pick_tier}</span>`;
       if (!p.is_published) detail += ' <span style="color:var(--stamp-amber);">· draft</span>';
       // Collapsed by default -- clicking fetches and inserts this parlay's
       // linked legs as a sub-row right underneath, so the summary view
@@ -4888,6 +4895,7 @@
       if (p.line !== null && p.line !== undefined) pickText += isProp ? ` (${p.line})` : ` (${p.line > 0 ? '+' : ''}${p.line})`;
       if (p.event_name) pickText += ` — ${escapeHtml(p.event_name)}`;
       if (p.pick_tier > 0) pickText += ` &#11088;T${p.pick_tier}`;
+      else if (p.pick_tier < 0) pickText += ` &#9660;T${p.pick_tier}`;
       if (betTypeName.toLowerCase() === 'parlay') {
         pickText += ` <button type="button" class="mini parlay-legs-toggle" data-parlay-id="${p.id}" style="padding:1px 6px;font-size:10px;">&#9662; legs</button>`;
       }
@@ -6836,58 +6844,42 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
 
     try {
-      let query = 'picks?select=capper_id,pick_tier,result,cappers(name)&is_parlay_leg=eq.false&result=in.(win,loss,push)';
-      if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
-      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
-      if (from) query += `&event_date=gte.${from}`;
-      if (to) query += `&event_date=lte.${to}`;
-      const picks = await restAllPages(query);
-      renderPotdPerf(picks);
+      let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name)&result=in.(win,loss,push)';
+      if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
+      if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
+      if (from) baseQuery += `&event_date=gte.${from}`;
+      if (to) baseQuery += `&event_date=lte.${to}`;
+      const picks = await restAllPages(baseQuery + '&is_parlay_leg=eq.false');
+      // Legs never show up mixed into the standalone numbers above (that
+      // would double-count the same real game alongside its parlay), but
+      // they're fetched separately so a capper's tier tags on his parlay
+      // legs are still visible somewhere -- otherwise a capper who tags a
+      // parlay leg Tier 3 would look like he's never called a Tier 3 pick
+      // at all, even though the tier data genuinely exists and already
+      // feeds Publish Ranking's scoring.
+      const legPicks = await restAllPages(baseQuery + '&is_parlay_leg=eq.true');
+      renderPotdPerf(picks, legPicks);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
     }
   }
 
-  function renderPotdPerf(picks) {
-    const wrap = $('potdPerfWrap');
-    if (!picks.length) {
-      wrap.innerHTML = '<div class="empty-state">No graded picks match these filters.</div>';
-      return;
-    }
-
-    const tiers = [0, 1, 2, 3, 4];
-    const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : `Tier ${t}`;
+  function potdTierBreakdownHtml(picks, tiers, tierLabel, title, filterNote) {
     const overallRows = tiers.map(t => {
-      const arr = picks.filter(p => (p.pick_tier || 0) === t);
+      const arr = picks.filter(p => (Number(p.pick_tier) || 0) === t);
       if (!arr.length) return '';
       const s = potdStats(arr);
       return potdWlpRow(tierLabel(t), s.wins, s.losses, s.pushes);
     }).join('');
 
-    const hasSpecialTiers = picks.some(p => (p.pick_tier || 0) > 0);
-    if (!hasSpecialTiers) {
-      wrap.innerHTML = `
-        <p class="stub-title" style="margin-bottom:8px;">By tier</p>
-        <table class="picks-table" style="margin-bottom:20px;">
-          <thead><tr><th></th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th></tr></thead>
-          <tbody>${overallRows}</tbody>
-        </table>
-        <div class="empty-state">No picks above Tier 0 in this range yet -- mark some in the pick entry form to start building tier data here.</div>`;
-      return;
-    }
-
-    // Per-capper breakdown -- only cappers who have at least one pick above
-    // Tier 0, showing each of THEIR tiers side by side (not compared
-    // against other cappers).
     const byCapper = {};
     picks.forEach(p => {
       const name = p.cappers ? p.cappers.name : '—';
       if (!byCapper[name]) byCapper[name] = tiers.reduce((acc, t) => { acc[t] = []; return acc; }, {});
-      byCapper[name][p.pick_tier || 0].push(p);
+      byCapper[name][Number(p.pick_tier) || 0].push(p);
     });
-
     const capperRows = Object.entries(byCapper)
-      .filter(([, byTier]) => tiers.some(t => t > 0 && byTier[t].length))
+      .filter(([, byTier]) => tiers.some(t => t !== 0 && byTier[t].length))
       .map(([name, byTier]) => tiers.map(t => {
         const arr = byTier[t];
         if (!arr.length) return '';
@@ -6895,17 +6887,41 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         return potdWlpRow(`${escapeHtml(name)} — ${tierLabel(t)}`, s.wins, s.losses, s.pushes);
       }).join('')).join('');
 
-    wrap.innerHTML = `
-      <p class="stub-title" style="margin-bottom:8px;">By tier (all cappers combined)</p>
-      <table class="picks-table" style="margin-bottom:20px;">
+    return `
+      <p class="stub-title" style="margin-bottom:8px;">${title} (all cappers combined)</p>
+      <table class="picks-table" style="margin-bottom:10px;">
         <thead><tr><th></th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th></tr></thead>
         <tbody>${overallRows}</tbody>
       </table>
-      <p class="stub-title" style="margin-bottom:8px;">By capper (only cappers using a tier above 0)</p>
-      <table class="picks-table">
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:8px;">${filterNote}</div>
+      <p class="stub-title" style="margin-bottom:8px;">${title} — by capper (only cappers using a tier other than 0)</p>
+      <table class="picks-table" style="margin-bottom:20px;">
         <thead><tr><th></th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th></tr></thead>
-        <tbody>${capperRows}</tbody>
+        <tbody>${capperRows || '<tr><td colspan="6">No picks outside Tier 0.</td></tr>'}</tbody>
       </table>`;
+  }
+
+  function renderPotdPerf(picks, legPicks) {
+    const wrap = $('potdPerfWrap');
+    if (!picks.length && !legPicks.length) {
+      wrap.innerHTML = '<div class="empty-state">No graded picks match these filters.</div>';
+      return;
+    }
+
+    const tiers = [-1, 0, 1, 2, 3, 4];
+    const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
+
+    const straightSection = picks.length
+      ? potdTierBreakdownHtml(picks, tiers, tierLabel, 'By tier',
+          'Standalone picks only -- a parlay leg\'s tier tag is never mixed in here, since that would double-count the same real game alongside its own parlay. See the separate table below for those.')
+      : '<div class="empty-state" style="margin-bottom:20px;">No standalone picks match these filters.</div>';
+
+    const legSection = legPicks.length
+      ? potdTierBreakdownHtml(legPicks, tiers, tierLabel, 'By tier — parlay legs (individual games inside a parlay)',
+          'Each row here is a game a capper only offered as part of a parlay, never called standalone -- his tier tag on it is real (Publish Ranking already counts it, at a reduced weight), it just lives on a different kind of pick than the table above.')
+      : '';
+
+    wrap.innerHTML = straightSection + legSection;
   }
 
   $('runPotdPerfBtn').addEventListener('click', runPotdPerf);
@@ -9064,7 +9080,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   let scoringConfig = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
-    tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
     parlayLegWeight: 0.5
   };
 
@@ -9083,6 +9099,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           streakCapGames: Number(r.streak_cap_games),
           confluenceCapCappers: Number(r.confluence_cap_cappers),
           hotPickStreakThreshold: Number(r.hot_pick_streak_threshold),
+          tierMinus1BonusPoints: num(r.tier_minus1_bonus_points),
           tier1BonusPoints: num(r.tier1_bonus_points),
           tier2BonusPoints: num(r.tier2_bonus_points),
           tier3BonusPoints: num(r.tier3_bonus_points),
@@ -9155,6 +9172,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   function tierBonusPoints(tier, tierAdjWinPct) {
     const nominal = (() => {
       switch (Number(tier) || 0) {
+        case -1: return scoringConfig.tierMinus1BonusPoints;
         case 1: return scoringConfig.tier1BonusPoints;
         case 2: return scoringConfig.tier2BonusPoints;
         case 3: return scoringConfig.tier3BonusPoints;
@@ -9163,7 +9181,16 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       }
     })();
     if (!nominal) return 0;
-    return nominal * tierAdjWinPct;
+    // A positive nominal (reward, tiers 1-4) scales UP with how well this
+    // capper's stated confidence at this tier is actually borne out --
+    // full reward only when his own win rate here backs up the claim. A
+    // negative nominal (penalty, Tier -1) is the mirror image: the penalty
+    // should scale up as his LOSS rate at this tier confirms his own
+    // lowered-confidence signal, and soften if he's surprisingly good
+    // despite calling it a lotto/reduced pick -- so it uses his loss rate
+    // (1 - tierAdjWinPct), not his win rate directly.
+    const trust = nominal > 0 ? tierAdjWinPct : (1 - tierAdjWinPct);
+    return nominal * trust;
   }
 
   function scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct) {
@@ -9249,7 +9276,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         else if (p.result === 'loss') byCapperSportBetType[sbtKey].losses += w;
 
         const tier = Number(p.pick_tier) || 0;
-        if (tier > 0) {
+        if (tier !== 0) {
           const tKey = `${p.capper_id}::${tier}`;
           if (!byCapperTier[tKey]) byCapperTier[tKey] = { wins: 0, losses: 0 };
           if (p.result === 'win') byCapperTier[tKey].wins += w;
@@ -9428,11 +9455,13 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             </div>`).join('')}
         </div>` : '';
 
-      const tierBadge = p.pick_tier > 0 ? `<span style="color:var(--stamp-amber);font-weight:bold;">&#11088; Tier ${p.pick_tier}</span> ` : '';
-      const tierStatBox = p.pick_tier > 0 ? `
+      const tierColor = p.pick_tier < 0 ? 'var(--stamp-red)' : 'var(--stamp-amber)';
+      const tierIcon = p.pick_tier < 0 ? '&#9660;' : '&#11088;';
+      const tierBadge = p.pick_tier !== 0 ? `<span style="color:${tierColor};font-weight:bold;">${tierIcon} Tier ${p.pick_tier}</span> ` : '';
+      const tierStatBox = p.pick_tier !== 0 ? `
           <div class="pr-stat">
             <div class="pr-stat-label">Tier</div>
-            <div class="pr-stat-value" style="color:var(--stamp-amber);">Tier ${p.pick_tier} <span style="font-weight:normal;color:var(--ink-soft);">(${s.tierRecord}, ${s.tierAdjWinPctPct}% adj)</span></div>
+            <div class="pr-stat-value" style="color:${tierColor};">Tier ${p.pick_tier} <span style="font-weight:normal;color:var(--ink-soft);">(${s.tierRecord}, ${s.tierAdjWinPctPct}% adj)</span></div>
             <div class="pr-stat-sub">his own record specifically at this tier -- scales the nominal bonus</div>
             <div class="pr-stat-pts">${s.score.tierPts >= 0 ? '+' : ''}${s.score.tierPts}pt</div>
           </div>` : '';
@@ -9653,7 +9682,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
         <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
         <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
-        <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${p.pick_tier > 0 ? ' &#11088;T' + p.pick_tier : ''}</td>
+        <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${p.pick_tier > 0 ? ' &#11088;T' + p.pick_tier : (p.pick_tier < 0 ? ' &#9660;T' + p.pick_tier : '')}</td>
         <td>${oddsText}</td>
         <td>${resultBadge}${p.published_was_hot ? ' &#128293;' : ''}</td>
         <td>${p.published_score ?? '—'}</td>
@@ -9904,7 +9933,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           wins: sbt.wins + (p.result === 'win' ? w : 0),
           losses: sbt.losses + (p.result === 'loss' ? w : 0)
         };
-        if (tier > 0) {
+        if (tier !== 0) {
           tierByCapper[`${cap}::${tier}`] = {
             wins: t.wins + (p.result === 'win' ? w : 0),
             losses: t.losses + (p.result === 'loss' ? w : 0)
@@ -10014,9 +10043,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const winPct = (wins + losses) > 0 ? Math.round((1000 * wins) / (wins + losses)) / 10 : null;
       return { wins, losses, pushes, total: arr.length, winPct };
     }
-    const tierLabelsBt = { 0: 'Tier 0 (base picks)', 1: 'Tier 1', 2: 'Tier 2', 3: 'Tier 3', 4: 'Tier 4 (highest)' };
-    const hasAnyTiered = entries.some(e => e.tier > 0);
-    const tierRowsBt = [0, 1, 2, 3, 4].map(t => {
+    const tierLabelsBt = { '-1': 'Tier -1 (below base)', 0: 'Tier 0 (base picks)', 1: 'Tier 1', 2: 'Tier 2', 3: 'Tier 3', 4: 'Tier 4 (highest)' };
+    const hasAnyTiered = entries.some(e => e.tier !== 0);
+    const tierRowsBt = [-1, 0, 1, 2, 3, 4].map(t => {
       const arr = entries.filter(e => e.tier === t);
       if (!arr.length) return '';
       const s = simpleWinPct(arr);
@@ -10029,10 +10058,10 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         <tbody>${tierRowsBt}</tbody>
       </table>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:18px;">
-        If a tier's win % is meaningfully and consistently above Tier 0 across enough picks to trust it (not just a handful), that supports giving that specific tier real weight in Formula Settings. If a tier is close to or below Tier 0's rate, a bonus for it isn't justified yet, regardless of how confident it feels anecdotally -- and there's no reason every tier needs the same bonus, or any bonus at all.
+        If Tier 1-4's win % is meaningfully and consistently above Tier 0 across enough picks to trust it (not just a handful), that supports giving that specific tier real weight in Formula Settings. Tier -1 is the opposite check -- it should be meaningfully BELOW Tier 0 to justify a real (negative) bonus there. If a tier is close to Tier 0's rate in whichever direction it's supposed to differ, a bonus for it isn't justified yet, regardless of how confident it feels anecdotally -- and there's no reason every tier needs a bonus at all. This only covers standalone picks, same as everywhere else in Backtest -- parlay legs aren't included here.
       </div>` : `
       <p class="stub-title" style="margin-bottom:8px;">Win % by tier</p>
-      <div class="empty-state" style="margin-bottom:18px;">No picks above Tier 0 in this date range yet -- mark some in the pick entry form to start building data here.</div>`;
+      <div class="empty-state" style="margin-bottom:18px;">No picks outside Tier 0 in this date range yet -- mark some in the pick entry form to start building data here.</div>`;
 
     wrap.innerHTML = `
       <div style="font-size:11px;color:var(--ink-soft);margin-bottom:14px;">
@@ -10060,7 +10089,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   const FORMULA_DEFAULTS = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
-    tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
     parlayLegWeight: 0.5
   };
 
@@ -10073,6 +10102,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     $('fsStreakCap').value = cfg.streakCapGames;
     $('fsConfluenceCap').value = cfg.confluenceCapCappers;
     $('fsHotThreshold').value = cfg.hotPickStreakThreshold;
+    $('fsTierMinus1Bonus').value = cfg.tierMinus1BonusPoints;
     $('fsTier1Bonus').value = cfg.tier1BonusPoints;
     $('fsTier2Bonus').value = cfg.tier2BonusPoints;
     $('fsTier3Bonus').value = cfg.tier3BonusPoints;
@@ -10118,6 +10148,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       streakCapGames: Number($('fsStreakCap').value),
       confluenceCapCappers: Number($('fsConfluenceCap').value),
       hotPickStreakThreshold: Number($('fsHotThreshold').value),
+      tierMinus1BonusPoints: Number($('fsTierMinus1Bonus').value),
       tier1BonusPoints: Number($('fsTier1Bonus').value),
       tier2BonusPoints: Number($('fsTier2Bonus').value),
       tier3BonusPoints: Number($('fsTier3Bonus').value),
@@ -10153,6 +10184,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           streak_cap_games: newCfg.streakCapGames,
           confluence_cap_cappers: newCfg.confluenceCapCappers,
           hot_pick_streak_threshold: newCfg.hotPickStreakThreshold,
+          tier_minus1_bonus_points: newCfg.tierMinus1BonusPoints,
           tier1_bonus_points: newCfg.tier1BonusPoints,
           tier2_bonus_points: newCfg.tier2BonusPoints,
           tier3_bonus_points: newCfg.tier3BonusPoints,
@@ -10948,7 +10980,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 171; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 172; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
