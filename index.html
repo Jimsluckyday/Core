@@ -3382,6 +3382,13 @@
 
     $('propRow').style.display = usesProp ? 'flex' : 'none';
     $('lineField').style.display = usesLine ? 'block' : 'none';
+    // Hiding the field alone left its stale value sitting in the DOM --
+    // savePick() reads $('pickLine').value regardless of visibility, so
+    // switching a pick from e.g. Spread (+7) to Moneyline (no line) still
+    // saved line=7 on a bet type that should never have one. Confirmed
+    // against a real pick: Your Daily Capper's Toronto Blue Jays Moneyline
+    // pick saved with a leftover +7 this way.
+    if (!usesLine) $('pickLine').value = '';
     $('homeAwayField').style.display = usesProp ? 'none' : 'block';
     if (usesProp) $('pickHomeAway').value = '';
 
@@ -3402,10 +3409,18 @@
   }
   $('pickType').addEventListener('change', updatePickTypeFields);
   $('pickSport').addEventListener('change', updateSelectionDatalist);
-  $('pickSport').addEventListener('change', populatePickTournamentDropdown);
-  $('pickSport').addEventListener('change', populatePropStatDropdown);
+  // Wrapped in arrow functions (not passed directly) -- both functions now
+  // take an optional forceValue param (added in v178, for enterPickEditMode's
+  // explicit calls). Passed directly to addEventListener, the browser's own
+  // native Event object becomes that first argument on every real sport/date
+  // change, and since a real Event is never undefined, it gets treated as
+  // the value to "keep" and written straight into the dropdown -- confirmed
+  // as a real, live bug: several picks' event_name ended up saved as the
+  // literal string "[object Event]" in Supabase because of exactly this.
+  $('pickSport').addEventListener('change', () => populatePickTournamentDropdown());
+  $('pickSport').addEventListener('change', () => populatePropStatDropdown());
   $('pickSport').addEventListener('change', updatePickTimezoneReminder);
-  $('pickDate').addEventListener('change', populatePickTournamentDropdown);
+  $('pickDate').addEventListener('change', () => populatePickTournamentDropdown());
 
   // KBO games happen in Korea (roughly 13-14 hours ahead of US Eastern),
   // and plenty of tennis is played in Europe/Australia/Asia -- a pick
@@ -4677,7 +4692,6 @@
       if (p.line_flagged_for_review) detail += ` <span style="color:var(--stamp-amber);" title="${escapeHtml(p.line_flag_note || 'Flagged for a later look -- not blocking, grading proceeds normally against the entered line.')}">&#9873; line flagged</span>`;
       if (p.pick_tier > 0) detail += ` <span style="color:var(--stamp-amber);font-weight:bold;">&#11088; Tier ${p.pick_tier}</span>`;
       else if (p.pick_tier < 0) detail += ` <span style="color:var(--stamp-red);font-weight:bold;">&#9660; Tier ${p.pick_tier}</span>`;
-      if (!p.is_published) detail += ' <span style="color:var(--stamp-amber);">· draft</span>';
       // Collapsed by default -- clicking fetches and inserts this parlay's
       // linked legs as a sub-row right underneath, so the summary view
       // stays uncluttered but the detail is one click away.
@@ -11250,7 +11264,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 179; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 180; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
