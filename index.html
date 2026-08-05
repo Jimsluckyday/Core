@@ -1589,7 +1589,7 @@
       </p>
       <div id="flaggedLinesPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          These are picks where research noticed a line that looked like a possible transcription error, not just normal line movement (which is expected and never flagged). Grading already happened normally against the originally entered line regardless -- this list is purely for an optional later look, on your own time, to confirm it really was what the capper sent. Clearing a flag doesn't change anything about the pick itself.
+          Two different, unrelated things share this list, each with its own badge below. <strong>Line flags</strong> are picks where research noticed a line that looked like a possible transcription error, not just normal line movement (which is expected and never flagged) -- grading already happened normally against the originally entered line regardless. <strong>Tier review flags</strong> are NOT an error of any kind -- they mark a brand-new capper's first pick, or an existing capper's first-ever use of a unit size/label, so you can confirm the estimated tier is right (the pick still uploaded and graded normally either way). Neither type blocks anything -- this is purely an optional later look, on your own time. Clearing a flag doesn't change anything else about the pick.
         </div>
         <button id="findFlaggedLinesBtn">Find flagged picks</button>
         <div id="flaggedLinesWrap" style="margin-top:12px;"></div>
@@ -8518,7 +8518,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const wrap = $('flaggedLinesWrap');
     wrap.innerHTML = '<div class="empty-state">Loading flagged picks...</div>';
     try {
-      const picks = await restAllPages('picks?select=id,event_date,selection,line,result,line_flag_note,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&line_flagged_for_review=eq.true&order=event_date.desc');
+      const picks = await restAllPages('picks?select=id,event_date,selection,line,result,line_flag_note,tier_needs_review,tier_review_note,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&or=(line_flagged_for_review.eq.true,tier_needs_review.eq.true)&order=event_date.desc');
       renderFlaggedLines(picks);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
@@ -8531,7 +8531,18 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       wrap.innerHTML = '<div class="empty-state">Nothing currently flagged.</div>';
       return;
     }
-    const rows = picks.map(p => `
+    // A pick can carry either flag, or both -- shown as separate badges so
+    // it's clear at a glance which kind of review this is, since a tier
+    // review is a question to confirm, not an error like a line flag.
+    const rows = picks.map(p => {
+      const badges = [];
+      if (p.line_flag_note) {
+        badges.push(`<div><span style="color:var(--stamp-amber);font-weight:bold;">&#9873; Line</span> ${escapeHtml(p.line_flag_note)}</div>`);
+      }
+      if (p.tier_needs_review) {
+        badges.push(`<div><span style="color:var(--accent);font-weight:bold;">&#127882; Tier review</span> ${escapeHtml(p.tier_review_note || '')}</div>`);
+      }
+      return `
       <tr>
         <td>${p.event_date}</td>
         <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
@@ -8539,9 +8550,10 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
         <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
         <td>${p.result}</td>
-        <td>${escapeHtml(p.line_flag_note || '')}</td>
+        <td style="font-size:11px;">${badges.join('')}</td>
         <td><button type="button" class="ghost small clear-flag-btn" data-id="${p.id}">Clear flag</button></td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
     wrap.innerHTML = `
       <div style="font-size:12px;margin-bottom:10px;"><strong>${picks.length}</strong> pick${picks.length === 1 ? '' : 's'} currently flagged.</div>
       <table class="picks-table">
@@ -8552,7 +8564,10 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try {
-          await rest(`picks?id=eq.${btn.getAttribute('data-id')}`, { method: 'PATCH', body: JSON.stringify({ line_flagged_for_review: false }) });
+          await rest(`picks?id=eq.${btn.getAttribute('data-id')}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ line_flagged_for_review: false, tier_needs_review: false })
+          });
           btn.closest('tr').remove();
         } catch (e) {
           alert('Could not clear: ' + e.message);
@@ -11264,7 +11279,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 180; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 181; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
