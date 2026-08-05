@@ -9871,7 +9871,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // would never publish a leg by itself (it was never his standalone
       // call), so legs never become their own scored/publishable candidate.
       const includeParlaysAsCandidates = !!($('prIncludeParlays') && $('prIncludeParlays').checked);
-      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
+      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
       if (sportFilter) pendingQuery += `&sport_id=eq.${sportFilter}`;
       if (from) pendingQuery += `&event_date=gte.${from}`;
       if (to) pendingQuery += `&event_date=lte.${to}`;
@@ -10044,6 +10044,40 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         };
       });
 
+      // Head-to-head conflict detection -- CONFIRMED as a real scoring gap
+      // by the project owner: two opposing picks for the SAME real game can
+      // each score well independently (a hot-streak capper on the Yankees
+      // ML and a different hot-streak capper on the Blue Jays ML when
+      // they're playing each other; or a crowd of average cappers piling
+      // onto one side while the single best capper calls the other side)
+      // since nothing today checks whether a high-scoring pick is directly
+      // contradicted by another high-scoring pick. rundown_event_id (set by
+      // schedule sync) is the real, specific game a pick was matched to --
+      // two picks sharing it with DIFFERENT selections are unambiguously
+      // opposing sides of the same game, not just a matching-logic guess.
+      // Scoped to straight picks only, same bet type only (Moneyline vs
+      // Moneyline, Over vs Under) per the project owner's own call -- this
+      // is Stage 1, surfacing the conflict for a human decision, not yet
+      // adjusting the score itself; that's a deliberate follow-on once
+      // there's real data on how these actually resolve.
+      const conflictGroups = {};
+      scoredStraight.forEach(e => {
+        const eventId = e.pick.rundown_event_id;
+        if (!eventId) return; // not schedule-synced yet -- nothing to safely compare against
+        const key = `${eventId}::${e.pick.bet_type_id}`;
+        if (!conflictGroups[key]) conflictGroups[key] = [];
+        conflictGroups[key].push(e);
+      });
+      Object.values(conflictGroups).forEach(group => {
+        const distinctSelections = new Set(group.map(e => e.pick.selection));
+        if (distinctSelections.size < 2) return; // same side, multiple cappers -- that's confluence, not conflict
+        group.forEach(e => {
+          e.conflicts = group
+            .filter(o => o.pick.selection !== e.pick.selection)
+            .map(o => ({ capperName: o.pick.cappers ? o.pick.cappers.name : '—', selection: o.pick.selection, score: o.score.total }));
+        });
+      });
+
       const allScored = scoredStraight.concat(scoredParlays);
 
       // Split AFTER scoring, purely for display grouping -- both groups
@@ -10127,6 +10161,25 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const streakColor = s.streak.type === 'win' ? '#2d6a4f' : (s.streak.type === 'loss' ? '#8a2f3a' : 'var(--ink-soft)');
       const betTypeName = p.bet_types ? p.bet_types.name : 'this bet type';
 
+      // Head-to-head conflict -- a DIFFERENT candidate pick landed the
+      // opposite side of this exact same real game (same rundown_event_id,
+      // same bet type, different selection). Shown ABOVE confluence and in
+      // red, deliberately louder than agreement -- this is the case worth
+      // stopping and looking at before publishing either side, not a
+      // background data point.
+      let conflictHtml = '';
+      if (s.conflicts && s.conflicts.length) {
+        conflictHtml = `
+        <div class="pr-confluence" style="border-color:var(--stamp-red);background:rgba(138,47,58,0.06);">
+          <div class="pr-confluence-header" style="color:var(--stamp-red);">&#9888; Head-to-head conflict — ${s.conflicts.length} other pending pick${s.conflicts.length === 1 ? '' : 's'} took the opposite side of this exact game</div>
+          ${s.conflicts.map(c => `
+            <div class="pr-agreeing-row">
+              <span class="pr-agreeing-name">${escapeHtml(c.capperName)} — ${escapeHtml(c.selection)}</span>
+              <span>Their score: <strong>${c.score}</strong> (this pick: <strong>${s.score.total}</strong>)</span>
+            </div>`).join('')}
+        </div>`;
+      }
+
       // A parlay candidate's confluence is the AVERAGE of each of its own
       // legs' confluence -- how much outside agreement exists on each team
       // in the combo -- not a match on its own meaningless "N-Leg Parlay"
@@ -10205,11 +10258,13 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           </div>
           ${tierStatBox}
         </div>
+        ${conflictHtml}
         ${confluenceHtml}
       </div>`;
     }
 
     const publishedCount = scored.filter(s => s.pick.is_published).length;
+    const conflictCount = scored.filter(s => s.conflicts && s.conflicts.length).length;
 
     function applyFilterAndRender() {
       const term = ($('prSearchBox').value || '').toLowerCase().trim();
@@ -10235,7 +10290,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
     wrap.innerHTML = `
       <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">
-        ${scored.length} pending pick${scored.length === 1 ? '' : 's'} scored, sorted highest to lowest. <strong>${publishedCount}</strong> currently published from this list.
+        ${scored.length} pending pick${scored.length === 1 ? '' : 's'} scored, sorted highest to lowest. <strong>${publishedCount}</strong> currently published from this list.${conflictCount ? ` <strong style="color:var(--stamp-red);">&#9888; ${conflictCount} pick${conflictCount === 1 ? '' : 's'} in a head-to-head conflict</strong> — see the red warning on each affected card below.` : ''}
       </div>
       <div class="row" style="margin-bottom:10px;">
         <div class="field" style="flex:1;">
@@ -11731,7 +11786,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 189; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 190; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
