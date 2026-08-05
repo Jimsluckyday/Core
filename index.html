@@ -547,6 +547,13 @@
           <label>Date of event</label>
           <input id="pickDate" type="date" />
         </div>
+        <div class="field">
+          <label>Date entered <span style="font-weight:normal;color:var(--ink-soft);">(when this came from the capper)</span></label>
+          <input id="pickDateEntered" type="date" />
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--ink-soft);margin:-10px 0 12px;">
+        These are almost always the same day and "Date entered" will follow "Date of event" automatically -- change it by hand only when they genuinely differ, e.g. a KBO/tennis/golf/soccer pick posted one day for an event that plays out on another. Keeping both means you can always pull "everything the group posted on the 1st" separately from "everything that actually happens on the 1st," instead of losing one once the other gets corrected.
       </div>
 
       <div id="pickTimezoneReminder" style="display:none;font-size:11px;font-weight:bold;color:var(--stamp-amber);margin:-6px 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
@@ -735,7 +742,7 @@
           </select>
         </div>
         <div class="field">
-          <label>Date</label>
+          <label>Date of event</label>
           <select id="filterDateMode">
             <option value="all">All dates</option>
             <option value="today">Today only</option>
@@ -745,6 +752,18 @@
         <div class="field" id="filterDateExactField" style="display:none;">
           <label>&nbsp;</label>
           <input id="filterDateExact" type="date" />
+        </div>
+        <div class="field">
+          <label>Date entered <span style="font-weight:normal;color:var(--ink-soft);">(when posted)</span></label>
+          <select id="filterDateEnteredMode">
+            <option value="all">All dates</option>
+            <option value="today">Today only</option>
+            <option value="exact">Specific date...</option>
+          </select>
+        </div>
+        <div class="field" id="filterDateEnteredExactField" style="display:none;">
+          <label>&nbsp;</label>
+          <input id="filterDateEnteredExact" type="date" />
         </div>
         <div class="field">
           <label>Capper</label>
@@ -3525,6 +3544,23 @@
   $('pickDate').addEventListener('change', () => checkExistingParlayPreview());
   $('pickParlayNumber').addEventListener('change', () => checkExistingParlayPreview());
 
+  // "Date entered" (when the capper actually posted this) auto-follows
+  // "Date of event" until someone types into it directly -- the two are
+  // the same day for the vast majority of picks, so this stays invisible
+  // most of the time, but stops following the moment it's needed (a
+  // KBO/tennis/golf/soccer pick posted one day for an event on another),
+  // so a real divergence is never silently overwritten by a later date-of-
+  // event change. CONFIRMED as a real, recurring need (not an edge case) --
+  // per the project owner, KBO/tennis/golf/soccer picks routinely won't
+  // resolve the same day they're posted, and losing "what came in on day
+  // X" once event_date gets corrected made retroactive validation
+  // impossible to do with confidence.
+  let dateEnteredManuallySet = false;
+  $('pickDate').addEventListener('change', () => {
+    if (!dateEnteredManuallySet) $('pickDateEntered').value = $('pickDate').value;
+  });
+  $('pickDateEntered').addEventListener('input', () => { dateEnteredManuallySet = true; });
+
   // KBO games happen in Korea (roughly 13-14 hours ahead of US Eastern),
   // and plenty of tennis is played in Europe/Australia/Asia -- a pick
   // that comes in late evening US time for "tonight's game" is very
@@ -3703,6 +3739,7 @@
     const bt = currentBetType();
     const isProp = bt ? bt.uses_prop_fields : false;
     const event_date = $('pickDate').value;
+    const dateEnteredVal = $('pickDateEntered').value || event_date;
     const lineVal = $('pickLine').value;
     const oddsVal = $('pickOpeningOdds').value;
     const closingOddsVal = $('pickClosingOdds').value;
@@ -3740,6 +3777,7 @@
       bet_type_id,
       selection,
       event_date,
+      date_entered: dateEnteredVal,
       line,
       opening_odds: oddsVal ? Number(oddsVal) : null,
       closing_odds: closingOddsVal ? Number(closingOddsVal) : null,
@@ -3848,6 +3886,12 @@
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
         $('pickParlayExistingPreview').style.display = 'none';
+        // Date of event is deliberately KEPT (see above), so Date entered
+        // resumes following it fresh for the next pick in this batch --
+        // exactly the common case of entering several picks from the same
+        // day's group post in a row.
+        dateEnteredManuallySet = false;
+        $('pickDateEntered').value = $('pickDate').value;
         $('pickSelection').focus();
       } else {
         // New picks always start unpublished -- publishing only ever
@@ -3876,6 +3920,12 @@
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
         $('pickParlayExistingPreview').style.display = 'none';
+        // Date of event is deliberately KEPT (see above), so Date entered
+        // resumes following it fresh for the next pick in this batch --
+        // exactly the common case of entering several picks from the same
+        // day's group post in a row.
+        dateEnteredManuallySet = false;
+        $('pickDateEntered').value = $('pickDate').value;
         $('pickSelection').focus();
       }
       await refreshPicksList();
@@ -3955,6 +4005,8 @@
     $('pickScheduleSyncNote').textContent = '';
     $('pickParlayNumber').value = '';
     $('pickParlayExistingPreview').style.display = 'none';
+    dateEnteredManuallySet = false;
+    $('pickDateEntered').value = $('pickDate').value;
   }
   $('cancelPickEditBtn').addEventListener('click', exitPickEditMode);
 
@@ -4000,6 +4052,12 @@
     updatePickTypeFields();
     updatePickTimezoneReminder();
     $('pickDate').value = p.event_date;
+    // Load the pick's own real date_entered rather than letting the
+    // auto-follow-Date-of-event listener silently overwrite a genuine
+    // divergence (a KBO/tennis/golf/soccer pick posted one day for an
+    // event on another) the moment this form's other fields get populated.
+    $('pickDateEntered').value = p.date_entered || p.event_date;
+    dateEnteredManuallySet = true;
     $('pickSelection').value = p.selection || '';
     const editBt = betTypes.find(b => String(b.id) === String(p.bet_type_id));
     const editIsProp = editBt ? editBt.uses_prop_fields : false;
@@ -4443,11 +4501,12 @@
   function buildPicksFilterQuery(limit) {
     const status = $('filterStatus').value;
     const dateMode = $('filterDateMode').value;
+    const dateEnteredMode = $('filterDateEnteredMode').value;
     const capperFilter = $('filterCapper').value;
     const completeness = $('filterCompleteness').value;
     const tierFilter = $('filterTier').value;
 
-    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
+    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
     // Supabase silently caps any single response at its own server-side max
     // (confirmed: 1000 rows, regardless of what limit= asks for) -- a limit
     // here only makes sense for a single, non-paginated rest() call safely
@@ -4464,6 +4523,8 @@
     if (status) query += `&result=eq.${status}`;
     if (dateMode === 'today') query += `&event_date=eq.${new Date().toISOString().slice(0, 10)}`;
     if (dateMode === 'exact' && $('filterDateExact').value) query += `&event_date=eq.${$('filterDateExact').value}`;
+    if (dateEnteredMode === 'today') query += `&date_entered=eq.${new Date().toISOString().slice(0, 10)}`;
+    if (dateEnteredMode === 'exact' && $('filterDateEnteredExact').value) query += `&date_entered=eq.${$('filterDateEnteredExact').value}`;
     if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
     if (completeness === 'missing_odds') query += `&or=(opening_odds.is.null,closing_odds.is.null)`;
     else if (completeness === 'missing_home_away') query += `&home_away=is.null`;
@@ -4874,7 +4935,7 @@
         data-cascade-line="${p.line ?? ''}"
         data-cascade-prop-player="${escapeHtml(p.prop_player || '')}"
         data-cascade-prop-stat="${escapeHtml(p.prop_stat || '')}">
-        <td>${p.event_date}</td>
+        <td>${p.event_date}${(p.date_entered && p.date_entered !== p.event_date) ? ` <span style="color:var(--ink-soft);font-style:italic;font-size:10px;" title="Posted by the capper on ${p.date_entered}">(posted ${p.date_entered})</span>` : ''}</td>
         <td>${startTimeCell}</td>
         <td>${capperCellHtml(p)}</td>
         <td>${escapeHtml(sportName)}</td>
@@ -4906,7 +4967,7 @@
     wrap.innerHTML = `
       ${batchSaveBar}
       <table class="picks-table">
-        <thead><tr><th>Date</th><th>Start Time</th><th>Capper</th><th>Sport</th><th>Type</th><th>Player</th><th>Stat</th><th>Pick</th><th>Odds</th><th>Result</th><th>Source</th><th></th></tr></thead>
+        <thead><tr><th>Event date</th><th>Start Time</th><th>Capper</th><th>Sport</th><th>Type</th><th>Player</th><th>Stat</th><th>Pick</th><th>Odds</th><th>Result</th><th>Source</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
 
@@ -5112,8 +5173,16 @@
         oddsStatus = 'complete'; oddsText = oddsParts;
       }
       const statusText = p.is_published ? 'Published' : 'Draft';
+      // Only shown when it genuinely differs from the event date -- the
+      // vast majority of picks are posted the same day they're played, so
+      // surfacing this on every single row would just be noise. When a
+      // KBO/tennis/golf/soccer pick was posted on a different day than it
+      // plays, that's exactly the case worth a quick visual flag here.
+      const dateCell = (p.date_entered && p.date_entered !== p.event_date)
+        ? `${p.event_date} <span style="color:var(--ink-soft);font-style:italic;" title="Posted by the capper on ${p.date_entered}">(posted ${p.date_entered})</span>`
+        : p.event_date;
       const cells = [
-        p.event_date,
+        dateCell,
         capperCellHtml(p),
         sportName,
         betTypeName,
@@ -5159,7 +5228,7 @@
       </tr>`;
     }).join('');
 
-    const cols = ['Date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source'];
+    const cols = ['Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source'];
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -5961,7 +6030,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   const exportBtn = document.getElementById('exportCsvBtn');
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
-      const cols = ['Date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source Image'];
+      const cols = ['Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6017,9 +6086,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       picks = applyMsfFilters(picks);
       const status = $('filterStatus').value;
       const dateMode = $('filterDateMode').value;
+      const dateEnteredMode = $('filterDateEnteredMode').value;
       const summaryParts = [];
       summaryParts.push(status ? `Status: ${status}` : 'All statuses');
-      summaryParts.push(dateMode === 'today' ? 'Today only' : (dateMode === 'exact' && $('filterDateExact').value ? `Date: ${$('filterDateExact').value}` : 'All dates'));
+      summaryParts.push(dateMode === 'today' ? 'Event date: today' : (dateMode === 'exact' && $('filterDateExact').value ? `Event date: ${$('filterDateExact').value}` : 'All event dates'));
+      if (dateEnteredMode === 'today') summaryParts.push('Date entered: today');
+      else if (dateEnteredMode === 'exact' && $('filterDateEnteredExact').value) summaryParts.push(`Date entered: ${$('filterDateEnteredExact').value}`);
       if ($('filterCapper').value) summaryParts.push($('filterCapper').selectedOptions[0]?.textContent || '');
       if (msfState.sport) summaryParts.push(`Sport: ${sports.filter(s => msfState.sport.has(String(s.id))).map(s => s.name).join(', ')}`);
       if (msfState.betType) summaryParts.push(`Bet type: ${betTypes.filter(b => msfState.betType.has(String(b.id))).map(b => b.name).join(', ')}`);
@@ -6039,7 +6111,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
   // ---------- CSV export (main Pending Picks list) ----------
   function picksToCsvRows(picks) {
-    const cols = ['Date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source Image'];
+    const cols = ['Event Date', 'Date Entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source Image'];
     const rows = picks.map(p => {
       const capperName = p.cappers ? p.cappers.name : '—';
       const sportName = p.sports ? p.sports.name : '—';
@@ -6053,7 +6125,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         p.closing_odds !== null && p.closing_odds !== undefined ? `Close ${p.closing_odds > 0 ? '+' : ''}${p.closing_odds}` : null
       ].filter(Boolean).join(' / ') || '—';
       const statusText = p.is_published ? 'Published' : 'Draft';
-      return [p.event_date, capperName, sportName, betTypeName, isProp ? (p.prop_player || '—') : '—', isProp ? (p.prop_stat || '—') : '—', pickText, oddsText, p.result, statusText, p.source_image || '—'];
+      return [p.event_date, p.date_entered || p.event_date, capperName, sportName, betTypeName, isProp ? (p.prop_player || '—') : '—', isProp ? (p.prop_stat || '—') : '—', pickText, oddsText, p.result, statusText, p.source_image || '—'];
     });
     return { cols, rows };
   }
@@ -6254,6 +6326,11 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   $('filterTier').addEventListener('change', refreshPicksList);
   $('filterDateMode').addEventListener('change', () => {
     $('filterDateExactField').style.display = $('filterDateMode').value === 'exact' ? 'block' : 'none';
+    refreshPicksList();
+  });
+  $('filterDateEnteredExact').addEventListener('change', refreshPicksList);
+  $('filterDateEnteredMode').addEventListener('change', () => {
+    $('filterDateEnteredExactField').style.display = $('filterDateEnteredMode').value === 'exact' ? 'block' : 'none';
     refreshPicksList();
   });
 
@@ -11048,6 +11125,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     // database went completely unflagged as duplicates because of this).
     const normalizedDate = normalizeDateStr(date);
 
+    // Optional -- when the capper posted this on a different day than the
+    // event itself plays (KBO/tennis/golf/soccer, most commonly). Defaults
+    // to the event date itself when not provided, which is correct for the
+    // overwhelming majority of picks where the two are the same day.
+    const dateEnteredRaw = (row.date_entered || row.entered_date || row.posted_date || '').trim();
+    const normalizedDateEntered = dateEnteredRaw && !isNaN(Date.parse(dateEnteredRaw))
+      ? normalizeDateStr(dateEnteredRaw)
+      : normalizedDate;
+
     const capper = findByNameCI(cappers, row.capper);
     if (!capper) errors.push(`capper "${row.capper || ''}" not found`);
 
@@ -11134,6 +11220,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       parlayNumber, // working field only -- never sent to the DB directly, see processParlayGroups()
       resolved: errors.length === 0 ? {
         event_date: normalizedDate,
+        date_entered: normalizedDateEntered,
         capper_id: capper.id,
         sport_id: sport.id,
         bet_type_id: betType.id,
@@ -11645,7 +11732,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 186; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 187; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
