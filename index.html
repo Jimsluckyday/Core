@@ -5173,16 +5173,15 @@
         oddsStatus = 'complete'; oddsText = oddsParts;
       }
       const statusText = p.is_published ? 'Published' : 'Draft';
-      // Only shown when it genuinely differs from the event date -- the
-      // vast majority of picks are posted the same day they're played, so
-      // surfacing this on every single row would just be noise. When a
-      // KBO/tennis/golf/soccer pick was posted on a different day than it
-      // plays, that's exactly the case worth a quick visual flag here.
-      const dateCell = (p.date_entered && p.date_entered !== p.event_date)
-        ? `${p.event_date} <span style="color:var(--ink-soft);font-style:italic;" title="Posted by the capper on ${p.date_entered}">(posted ${p.date_entered})</span>`
-        : p.event_date;
+      // A real, always-visible column -- CONFIRMED directly by the project
+      // owner: an inline "(posted X)" note shown only when it differs from
+      // the event date effectively made it invisible for the overwhelming
+      // majority of rows, which read as "there's no column for this at
+      // all." A little more clutter here is an explicit, accepted tradeoff.
+      const dateEnteredCell = p.date_entered || p.event_date;
       const cells = [
-        dateCell,
+        p.event_date,
+        dateEnteredCell,
         capperCellHtml(p),
         sportName,
         betTypeName,
@@ -5199,8 +5198,8 @@
         // HTML with the source_image reference now shown in this column) --
         // same reasoning as odds/result below, which also separate what's
         // sorted/filtered from what's displayed.
-        const sortVal = i === 8 ? p.result : (i === 7 ? oddsStatus : (i === 1 ? capperName : String(c)));
-        const extraAttr = i === 8 ? ` data-result-cell="${p.id}"` : '';
+        const sortVal = i === 9 ? p.result : (i === 8 ? oddsStatus : (i === 2 ? capperName : String(c)));
+        const extraAttr = i === 9 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
       const gradeBtns = p.result === 'pending'
@@ -5228,7 +5227,7 @@
       </tr>`;
     }).join('');
 
-    const cols = ['Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source'];
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source'];
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -5306,10 +5305,10 @@
   <h1>All Picks <button id="refreshTabBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;cursor:pointer;vertical-align:middle;">&#8635; Refresh</button> <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)} · ${picks.length} picks</div>
   <div style="margin-bottom:12px;">
-    <button type="button" class="quick-filter-btn" data-quick-col="2">Filter by Sport &#9662;</button>
-    <button type="button" class="quick-filter-btn" data-quick-col="3">Filter by Bet type &#9662;</button>
-    <button type="button" class="quick-filter-btn" data-quick-col="6">Filter by Selection &#9662;</button>
-    <button type="button" class="quick-filter-btn" data-quick-col="7">Filter by Odds Status &#9662;</button>
+    <button type="button" class="quick-filter-btn" data-quick-col="3">Filter by Sport &#9662;</button>
+    <button type="button" class="quick-filter-btn" data-quick-col="4">Filter by Bet type &#9662;</button>
+    <button type="button" class="quick-filter-btn" data-quick-col="7">Filter by Selection &#9662;</button>
+    <button type="button" class="quick-filter-btn" data-quick-col="8">Filter by Odds Status &#9662;</button>
   </div>
   <div style="margin-bottom:14px;padding:10px;border:1px dashed #22281f;border-radius:3px;">
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#234d35;font-weight:bold;margin-bottom:8px;">Automation tools — sync schedule/odds &amp; grade results without SQL</div>
@@ -5707,8 +5706,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           method: 'PATCH',
           body: JSON.stringify({ result: result, graded_at: new Date().toISOString() })
         });
-        // Update this row in place: Result column is the 9th cell (index 8)
-        const resultCell = row.children[8];
+        // Update this row in place: Result column is the 10th cell (index 9)
+        // -- shifted by the new Date Entered column inserted at index 1.
+        const resultCell = row.children[9];
         if (resultCell) { resultCell.innerHTML = stampHtml(result); resultCell.setAttribute('data-value', result); }
         btn.closest('.grade-btns').remove();
 
@@ -5945,7 +5945,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           const oddsParts = [];
           if (oo !== '') oddsParts.push('Open ' + (Number(oo) > 0 ? '+' : '') + oo);
           if (co !== '') oddsParts.push('Close ' + (Number(co) > 0 ? '+' : '') + co);
-          const oddsCell = row.children[7];
+          const oddsCell = row.children[8]; // shifted by the new Date Entered column at index 1
           if (oddsCell) {
             oddsCell.textContent = oddsParts.join(' / ') || '—';
             oddsCell.setAttribute('data-value', (oddsParts.join(' / ') || '—').toLowerCase());
@@ -5992,7 +5992,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       if (!op) return;
       const id = btn.getAttribute('data-id');
       const row = btn.closest('tr');
-      const summary = row ? (row.children[6] ? row.children[6].textContent.trim() : '') : '';
+      const summary = row ? (row.children[7] ? row.children[7].textContent.trim() : '') : ''; // Pick column, shifted by the new Date Entered column at index 1
       if (!confirm('Delete this pick permanently?\\n\\n' + summary + '\\n\\nThis cannot be undone.')) return;
       btn.disabled = true;
       try {
@@ -6040,12 +6040,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const visibleRows = Array.from(table.tBodies[0].querySelectorAll('tr')).filter(row => row.style.display !== 'none');
       if (!visibleRows.length) { alert('No rows to export -- check your current filters.'); return; }
       const dataRows = visibleRows.map(row => {
-        // First 10 columns come from the visible cells (capper cell's
-        // textContent will include the source_image note text merged in --
-        // that's fine, it's still readable). The 11th column (Source Image)
-        // reads the clean data attribute directly instead, so there's also
-        // one unambiguous column with just the filename, not merged text.
-        const cellValues = cols.slice(0, 10).map((_, i) => csvField((row.children[i] || {}).textContent || '').trim());
+        // All columns EXCEPT the last (Source Image) come from the visible
+        // cells (capper cell's textContent will include the source_image
+        // note text merged in -- that's fine, it's still readable). Source
+        // Image reads the clean data attribute directly instead, so there's
+        // also one unambiguous column with just the filename, not merged
+        // text. Derived from cols.length (not a hardcoded count) so adding
+        // or removing a column here never silently drops/duplicates one.
+        const cellValues = cols.slice(0, -1).map((_, i) => csvField((row.children[i] || {}).textContent || '').trim());
         const sourceImage = csvField(row.dataset.sourceImage || '');
         return [...cellValues, sourceImage];
       });
@@ -11732,7 +11734,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 187; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 188; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
