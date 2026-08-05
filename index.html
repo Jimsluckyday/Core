@@ -8166,7 +8166,18 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   // five different cappers agreeing on a game is normal, but the SAME capper
   // showing up twice for the identical bet almost always means a re-import
   // or two people entering the same file.
-  function dupKey(p) {
+  //
+  // A Parlay summary row's OWN "selection" is a generic placeholder like
+  // "2-Leg Parlay" -- identical across every 2-leg parlay a capper ever
+  // calls, whatever teams are actually in it. Using it directly here would
+  // group entirely different parlays together as "duplicates" just because
+  // they're both 2 legs. CONFIRMED as a real bug: six different 2-leg
+  // parlays with completely different teams/results were all lumped into
+  // one group. legSig, when provided, is a sorted signature built from the
+  // parlay's ACTUAL linked legs instead, so two parlays only match when
+  // they genuinely contain the same games.
+  function dupKey(p, legSig) {
+    if (legSig !== undefined) return [p.capper_id, p.event_date, 'PARLAY_LEGS', legSig].join('|');
     return [p.capper_id, p.event_date, p.sport_id, p.bet_type_id, p.selection, p.line, p.prop_player, p.prop_stat].join('|');
   }
 
@@ -8187,35 +8198,74 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
     try {
       const picks = await restAllPages(query);
+
+      // Build a real legs-based signature for every parlay summary row found,
+      // so the grouping below can tell two different parlays apart instead
+      // of matching on the generic "N-Leg Parlay" text they all share.
+      const parlayRows = picks.filter(p => p.bet_types && p.bet_types.name === 'Parlay');
+      const legSigByParlayId = {};
+      const legsByParlayId = {};
+      if (parlayRows.length) {
+        const links = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&parlay_pick_id=in.(${parlayRows.map(p => p.id).join(',')})`);
+        const legIds = links.map(l => l.leg_pick_id);
+        const legPicks = legIds.length
+          ? await restAllPages(`picks?select=id,sport_id,bet_type_id,selection,line,prop_player,prop_stat&id=in.(${legIds.join(',')})`)
+          : [];
+        const legById = {};
+        legPicks.forEach(l => { legById[l.id] = l; });
+        links.forEach(l => {
+          const leg = legById[l.leg_pick_id];
+          if (!leg) return;
+          if (!legsByParlayId[l.parlay_pick_id]) legsByParlayId[l.parlay_pick_id] = [];
+          legsByParlayId[l.parlay_pick_id].push(leg);
+        });
+        parlayRows.forEach(p => {
+          const legs = legsByParlayId[p.id];
+          if (!legs || !legs.length) return; // no legs linked yet -- fall back to the old generic key
+          legSigByParlayId[p.id] = legs
+            .map(l => [l.sport_id, l.bet_type_id, l.selection, l.line, l.prop_player, l.prop_stat].join('~'))
+            .sort()
+            .join('||');
+        });
+      }
+
       const groups = {};
       picks.forEach(p => {
-        const key = dupKey(p);
+        const key = dupKey(p, legSigByParlayId[p.id]);
         if (!groups[key]) groups[key] = [];
         groups[key].push(p);
       });
       const dupGroups = Object.values(groups).filter(g => g.length > 1);
-      renderDupGroups(dupGroups);
+      renderDupGroups(dupGroups, legsByParlayId);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
     }
   }
 
-  function renderDupGroups(dupGroups) {
+  function renderDupGroups(dupGroups, legsByParlayId) {
     const wrap = $('dupWrap');
     if (!dupGroups.length) {
       wrap.innerHTML = '<div class="empty-state">No exact duplicates found for these filters.</div>';
       return;
     }
+    legsByParlayId = legsByParlayId || {};
     const totalRows = dupGroups.reduce((sum, g) => sum + g.length, 0);
     const groupsHtml = dupGroups.map((group, gi) => {
       const rowsHtml = group.map(p => {
         const propBit = (p.prop_player || p.prop_stat) ? ` — ${escapeHtml(p.prop_player || '')} ${escapeHtml(p.prop_stat || '')}`.trim() : '';
+        const legs = legsByParlayId[p.id];
+        // Show the parlay's ACTUAL legs, not just its generic "2-Leg Parlay"
+        // label -- that label alone is exactly what made unrelated parlays
+        // look identical in this list before.
+        const selectionBit = legs && legs.length
+          ? `${escapeHtml(p.selection)} — ${legs.map(l => escapeHtml(l.selection) + (l.line !== null && l.line !== undefined ? ` (${l.line})` : '')).join(', ')}`
+          : `${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${propBit}`;
         return `<tr data-pick-id="${p.id}">
           <td>${p.event_date}</td>
           <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
           <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
           <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
-          <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${propBit}</td>
+          <td>${selectionBit}</td>
           <td>${p.result}</td>
           <td>${p.created_at ? new Date(p.created_at).toLocaleString() : '—'}</td>
           <td><button type="button" class="ghost small dup-delete-btn" data-id="${p.id}" style="border-color:#8a2f3a;color:#8a2f3a;">Delete this one</button></td>
@@ -8223,7 +8273,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       }).join('');
       return `
         <div style="margin-bottom:16px;border:1px solid var(--field);border-radius:2px;padding:10px;">
-          <div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">Group ${gi + 1} — ${group.length} identical entries (same capper, date, sport, bet type, selection${group[0].line !== null ? '/line' : ''})</div>
+          <div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">Group ${gi + 1} — ${group.length} identical entries (${legsByParlayId[group[0].id] ? 'same capper, date, and parlay legs' : 'same capper, date, sport, bet type, selection' + (group[0].line !== null ? '/line' : '')})</div>
           <table class="picks-table">
             <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Result</th><th>Entered</th><th></th></tr></thead>
             <tbody>${rowsHtml}</tbody>
@@ -11520,7 +11570,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 184; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 185; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
