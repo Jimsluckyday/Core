@@ -4372,7 +4372,20 @@
     const completeness = $('filterCompleteness').value;
     const tierFilter = $('filterTier').value;
 
-    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc&limit=${limit}`;
+    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
+    // Supabase silently caps any single response at its own server-side max
+    // (confirmed: 1000 rows, regardless of what limit= asks for) -- a limit
+    // here only makes sense for a single, non-paginated rest() call safely
+    // under that cap (the live on-screen list). Callers that need EVERY
+    // matching row (open-in-new-tab, CSV export) must page through with
+    // restAllPages() instead and pass limit=null here, or a broad "all
+    // dates" filter silently returns only its newest ~1000 rows -- which,
+    // sorted newest-first, are disproportionately still-pending picks,
+    // making it look like completed picks vanished when "all dates" is
+    // selected. CONFIRMED from a real report: picking a specific past date
+    // correctly showed completed picks (a small enough result to never hit
+    // the cap), while "all dates" showed only pending.
+    if (limit) query += `&limit=${limit}`;
     if (status) query += `&result=eq.${status}`;
     if (dateMode === 'today') query += `&event_date=eq.${new Date().toISOString().slice(0, 10)}`;
     if (dateMode === 'exact' && $('filterDateExact').value) query += `&event_date=eq.${$('filterDateExact').value}`;
@@ -5919,8 +5932,13 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      const query = buildPicksFilterQuery(20000);
-      let picks = await rest(query);
+      // limit=null + restAllPages() -- a single rest() call here would
+      // silently truncate to Supabase's own ~1000-row server cap on a broad
+      // filter (e.g. "all dates"), which skews toward whatever sorts first
+      // (newest event_date, i.e. mostly still-pending picks) and made
+      // completed picks look like they'd vanished. See buildPicksFilterQuery.
+      const query = buildPicksFilterQuery(null);
+      let picks = await restAllPages(query);
       picks = applyMsfFilters(picks);
       const status = $('filterStatus').value;
       const dateMode = $('filterDateMode').value;
@@ -6022,9 +6040,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     btn.textContent = 'Exporting...';
     try {
       // Same filters currently applied to the on-screen list -- exports
-      // exactly what's shown, not everything in the database.
-      const query = buildPicksFilterQuery(20000);
-      let picks = await rest(query);
+      // exactly what's shown, not everything in the database. limit=null +
+      // restAllPages() for the same reason as the All Picks tab -- a single
+      // rest() call silently truncates to Supabase's ~1000-row server cap
+      // on a broad filter, which would silently under-export.
+      const query = buildPicksFilterQuery(null);
+      let picks = await restAllPages(query);
       picks = applyMsfFilters(picks);
       if (!picks.length) { alert('No picks match the current filters.'); return; }
       const { cols, rows } = picksToCsvRows(picks);
@@ -11499,7 +11520,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 183; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 184; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
