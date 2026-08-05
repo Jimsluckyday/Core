@@ -1311,6 +1311,38 @@
       </div>
     </div>
 
+    <!-- NOTABLE STATISTICS -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Notable statistics <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public yet</span>
+        <button class="ghost small" id="toggleNotableStatsBtn">Show tool</button>
+      </p>
+      <div id="notableStatsPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Min. sample = this % of the average capper's total volume</label>
+            <input id="notableStatsMinPct" type="number" min="0.1" step="0.1" value="5" />
+          </div>
+          <div class="field">
+            <label>Absolute floor (never below this many picks)</label>
+            <input id="notableStatsAbsMin" type="number" min="1" value="5" />
+          </div>
+          <div class="field">
+            <label>Confidence bar (Wilson lower/upper bound %)</label>
+            <input id="notableStatsBar" type="number" min="50" max="99" value="65" />
+          </div>
+        </div>
+        <div class="row">
+          <div style="align-self:flex-end;">
+            <button id="runNotableStatsBtn">Run (new tab)</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Scans every capper × tier, capper × bet type, and capper × sport/bet-type combo for a record notable enough to act on -- either promote (Travy going 10-0 on parlays) or watch closely (a real cold streak in one specific slice, not just an overall bad day). Ranked by a Wilson confidence bound, not raw win %, so a 2-0 record can never outrank a real 10-0 one -- it asks "how good is this, even in the worst plausible case given how few picks I've seen," which naturally demands more proof from a smaller sample. The minimum sample size is deliberately NOT a fixed number -- it's a percentage of the average capper's total graded volume, recomputed live every time this runs, so the bar rises on its own as your overall data grows instead of staying stuck at whatever felt right on day one (the absolute floor just prevents it from allowing something silly while the average itself is still tiny). This is a snapshot for you to look at and act on by hand -- nothing here feeds the scoring formula yet.
+        </div>
+      </div>
+    </div>
+
     <!-- CAPPER STREAKS -->
     <div class="stub" data-tab="reports">
       <p class="stub-title">
@@ -7433,6 +7465,157 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     runTopBottom();
   });
 
+  // ---------- Notable Statistics ----------
+  $('toggleNotableStatsBtn').addEventListener('click', () => {
+    const panel = $('notableStatsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleNotableStatsBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+  });
+
+  // Wilson score interval -- asks "how good is this win rate, even in the
+  // worst plausible case given how few picks I've seen," rather than just
+  // trusting the raw percentage. A 2-0 record has a wide interval (its lower
+  // bound is low, so it can't outrank a real 10-0 record), while a 10-0
+  // record's lower bound is genuinely high -- the sample size is baked
+  // directly into the bound instead of needing a separate arbitrary cutoff.
+  function wilsonBounds(wins, losses) {
+    const n = wins + losses;
+    if (n === 0) return { lower: 0, upper: 1 };
+    const z = 1.96; // 95% confidence
+    const phat = wins / n;
+    const denom = 1 + (z * z) / n;
+    const center = phat + (z * z) / (2 * n);
+    const margin = z * Math.sqrt((phat * (1 - phat) + (z * z) / (4 * n)) / n);
+    return { lower: (center - margin) / denom, upper: (center + margin) / denom };
+  }
+
+  const TIER_LABELS_NOTABLE = { '-1': 'Tier -1', '0': 'Tier 0', '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '4': 'Tier 4' };
+
+  async function computeNotableStats(minPct, absMin, barPct) {
+    const picks = await restAllPages(
+      'picks?select=capper_id,sport_id,bet_type_id,pick_tier,result,cappers(name),sports(name),bet_types(name)' +
+      '&is_parlay_leg=eq.false&result=in.(win,loss)'
+    );
+
+    // System-wide average graded volume per capper -- this is what makes the
+    // minimum sample size grow WITH the data instead of staying fixed. As the
+    // average capper calls more picks over time, the bar for "notable" rises
+    // right along with it, rather than a fixed number that was reasonable on
+    // day one and trivially easy to hit a year later.
+    const cappersSeen = new Set(picks.map(p => p.capper_id));
+    const avgVolume = cappersSeen.size ? picks.length / cappersSeen.size : 0;
+    const minSample = Math.max(absMin, Math.round(avgVolume * (minPct / 100)));
+
+    // Three independent slice types per capper -- tier, bet type (this is
+    // exactly what catches "Travy is 10-0 on Parlays," since Parlay is just
+    // another bet_type here), and sport+bet-type together (catches "Algo
+    // Picks is 18-0 on MLB Moneylines" -- a combo neither of the other two
+    // slice types would isolate on its own).
+    const slices = {}; // sliceKey -> { capperName, label, wins, losses }
+    function bump(key, capperName, label, isWin) {
+      if (!slices[key]) slices[key] = { capperName, label, wins: 0, losses: 0 };
+      if (isWin) slices[key].wins++; else slices[key].losses++;
+    }
+    for (const p of picks) {
+      const capperName = p.cappers ? p.cappers.name : '—';
+      const sportName = p.sports ? p.sports.name : '—';
+      const betName = p.bet_types ? p.bet_types.name : '—';
+      const isWin = p.result === 'win';
+      const tierLabel = TIER_LABELS_NOTABLE[String(p.pick_tier)] || `Tier ${p.pick_tier}`;
+
+      bump(`${p.capper_id}::tier::${p.pick_tier}`, capperName, tierLabel, isWin);
+      bump(`${p.capper_id}::bt::${p.bet_type_id}`, capperName, betName, isWin);
+      bump(`${p.capper_id}::sbt::${p.sport_id}::${p.bet_type_id}`, capperName, `${sportName} ${betName}`, isWin);
+    }
+
+    const barLower = barPct / 100;
+    const barUpper = 1 - barLower;
+    const hot = [], cold = [];
+    Object.values(slices).forEach(s => {
+      const n = s.wins + s.losses;
+      if (n < minSample) return;
+      const { lower, upper } = wilsonBounds(s.wins, s.losses);
+      const entry = { ...s, n, winPct: Math.round((1000 * s.wins) / n) / 10, lower, upper };
+      if (lower >= barLower) hot.push(entry);
+      else if (upper <= barUpper) cold.push(entry);
+    });
+    hot.sort((a, b) => b.lower - a.lower);
+    cold.sort((a, b) => a.upper - b.upper);
+
+    return { hot, cold, minSample, avgVolume, totalPicks: picks.length, totalCappers: cappersSeen.size };
+  }
+
+  function notableStatsRowHtml(e) {
+    return `<tr>
+      <td>${escapeHtml(e.capperName)}</td>
+      <td>${escapeHtml(e.label)}</td>
+      <td>${e.wins}-${e.losses}</td>
+      <td>${e.winPct}%</td>
+      <td>${Math.round(e.lower * 1000) / 10}% – ${Math.round(e.upper * 1000) / 10}%</td>
+    </tr>`;
+  }
+
+  function openNotableStatsTab(result, minPct, absMin, barPct) {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    const hotHtml = result.hot.length
+      ? result.hot.map(notableStatsRowHtml).join('')
+      : `<tr><td colspan="5">Nothing clears the bar yet.</td></tr>`;
+    const coldHtml = result.cold.length
+      ? result.cold.map(notableStatsRowHtml).join('')
+      : `<tr><td colspan="5">Nothing clears the bar yet.</td></tr>`;
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Notable Statistics</title>
+<style>
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
+  .stub-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: #234d35; font-weight: bold; }
+  .picks-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; margin-bottom: 24px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; }
+  .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
+</style>
+</head><body>
+  <h1>Notable Statistics</h1>
+  <div style="font-size:11px;color:#55584d;margin-bottom:14px;">
+    ${result.totalCappers} cappers · ${result.totalPicks} graded picks · average ${Math.round(result.avgVolume * 10) / 10} picks/capper · minimum sample to qualify: ${result.minSample} (${minPct}% of average, floor ${absMin}) · confidence bar: ${barPct}%
+  </div>
+  <p class="stub-title" style="margin-bottom:8px;">&#128293; Notable positive -- worth promoting</p>
+  <table class="picks-table">
+    <thead><tr><th>Capper</th><th>Slice</th><th>Record</th><th>Win %</th><th>Wilson range</th></tr></thead>
+    <tbody>${hotHtml}</tbody>
+  </table>
+  <p class="stub-title" style="margin-bottom:8px;">&#10052;&#65039; Notable negative -- worth watching</p>
+  <table class="picks-table">
+    <thead><tr><th>Capper</th><th>Slice</th><th>Record</th><th>Win %</th><th>Wilson range</th></tr></thead>
+    <tbody>${coldHtml}</tbody>
+  </table>
+  <div style="font-size:10px;color:#55584d;margin-top:8px;">
+    "Wilson range" is the 95% confidence interval on that slice's true win rate given its sample size -- a positive entry's LOWER bound already clears the bar (so it's a real signal, not lucky small-sample noise); a negative entry's UPPER bound already sits below the mirrored bar (so it's a real cold pattern, not an unlucky blip). This is a snapshot for you to act on by hand -- nothing here feeds the scoring formula yet.
+  </div>
+</body></html>`);
+    win.document.close();
+  }
+
+  $('runNotableStatsBtn').addEventListener('click', async () => {
+    const minPct = Number($('notableStatsMinPct').value) || 5;
+    const absMin = Math.max(1, Number($('notableStatsAbsMin').value) || 5);
+    const barPct = Math.min(99, Math.max(50, Number($('notableStatsBar').value) || 65));
+    const btn = $('runNotableStatsBtn');
+    btn.disabled = true;
+    try {
+      const result = await computeNotableStats(minPct, absMin, barPct);
+      openNotableStatsTab(result, minPct, absMin, barPct);
+    } catch (e) {
+      alert('Could not calculate notable statistics: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // ---------- Capper streaks (standalone — no need to open Leaderboard/Top-Bottom/Consensus) ----------
   $('toggleStreaksBtn').addEventListener('click', () => {
     const panel = $('streaksPanel');
@@ -11279,7 +11462,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 181; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 182; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
