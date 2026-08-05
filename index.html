@@ -9649,7 +9649,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // would never publish a leg by itself (it was never his standalone
       // call), so legs never become their own scored/publishable candidate.
       const includeParlaysAsCandidates = !!($('prIncludeParlays') && $('prIncludeParlays').checked);
-      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
+      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
       if (sportFilter) pendingQuery += `&sport_id=eq.${sportFilter}`;
       if (from) pendingQuery += `&event_date=gte.${from}`;
       if (to) pendingQuery += `&event_date=lte.${to}`;
@@ -9744,7 +9744,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             overallAdjPct: o.overallAdjPct,
             betTypeRecord: o.betTypeRecord, // this same sport+bet-type combo, for their capper
             betTypeAdjPct: o.betTypeAdjPct,
-            isLeg: o.isLeg
+            isLeg: o.isLeg,
+            tier: o.pick.pick_tier, // THIS agreeing capper's own confidence on THIS pick -- an
+            rawSignal: o.pick.raw_confidence_signal // agreement called at his own Tier 4 means far more than one at Tier 0
           }))
         };
       }
@@ -9865,6 +9867,37 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       wireCardActions(filtered);
     }
 
+    // An agreeing capper's OWN confidence on this exact pick matters just as
+    // much as the fact that he agrees at all -- a capper who independently
+    // called this his own Tier 4 "Whale Play" is a far stronger signal than
+    // one who called it at his base Tier 0, even though both count as one
+    // agreeing capper today. raw_confidence_signal (added alongside the
+    // per-capper relative tier engine) carries that capper's own branding
+    // for the signal when it's a label, e.g. "label:Whale" -- shown here so
+    // "Tier 4" reads as "Tier 4 (Whale)" instead of a bare number.
+    function describeTierSignal(tier, rawSignal) {
+      if (!tier) return null;
+      let label = null;
+      if (rawSignal && rawSignal.startsWith('label:')) label = rawSignal.slice(6).split('@')[0];
+      else if (rawSignal && rawSignal.startsWith('lotto:')) label = rawSignal.slice(6);
+      return { tier, label };
+    }
+
+    function agreeingTierBadgeHtml(tier, rawSignal) {
+      const sig = describeTierSignal(tier, rawSignal);
+      if (!sig) return '';
+      const labelText = sig.label ? ` (${escapeHtml(sig.label)})` : '';
+      if (sig.tier >= 3) {
+        // High-confidence agreement -- deliberately the loudest thing in
+        // the row, since this is the exact case worth stopping to notice.
+        return ` <span style="background:var(--stamp-amber);color:#22281f;font-weight:bold;padding:1px 7px;border-radius:3px;">&#11088; his Tier ${sig.tier}${labelText}</span>`;
+      }
+      if (sig.tier > 0) {
+        return ` <span style="color:var(--stamp-amber);font-weight:bold;">&#11088; his Tier ${sig.tier}${labelText}</span>`;
+      }
+      return ` <span style="color:var(--stamp-red);font-weight:bold;">&#9660; his Tier ${sig.tier}${labelText}</span>`;
+    }
+
     function cardHtml(s, rank) {
       const p = s.pick;
       const propBit = (p.prop_player || p.prop_stat) ? ` — ${escapeHtml(p.prop_player || '')} ${escapeHtml(p.prop_stat || '')}`.trim() : '';
@@ -9888,17 +9921,21 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
               ${legsWithAgreement.map(l => `
                 <div class="pr-agreeing-row" style="border-bottom:1px dashed var(--field);padding-bottom:6px;margin-bottom:6px;">
                   <span class="pr-agreeing-name">${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''} — ${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)</span>
-                  ${l.agreeingCappers.map(c => `<div style="padding-left:14px;">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);">(parlay leg — half weight)</span>' : ''} — Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</div>`).join('')}
+                  ${l.agreeingCappers.map(c => `<div style="padding-left:14px;">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)} — Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</div>`).join('')}
                 </div>`).join('')}
             </div>`;
         }
       } else if (s.agreeingCappers.length) {
+        const highTierAgreeing = s.agreeingCappers.filter(c => c.tier >= 3).length;
+        const highTierNote = highTierAgreeing
+          ? ` — <span style="color:var(--stamp-amber);font-weight:bold;">${highTierAgreeing} of them at Tier 3+</span>`
+          : '';
         confluenceHtml = `
         <div class="pr-confluence">
-          <div class="pr-confluence-header">Confluence — ${s.agreeingCappers.length} other capper${s.agreeingCappers.length === 1 ? '' : 's'} independently picked this same game (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
+          <div class="pr-confluence-header">Confluence — ${s.agreeingCappers.length} other capper${s.agreeingCappers.length === 1 ? '' : 's'} independently picked this same game (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)${highTierNote}</div>
           ${s.agreeingCappers.map(c => `
             <div class="pr-agreeing-row">
-              <span class="pr-agreeing-name">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);font-weight:normal;">(parlay leg — half weight)</span>' : ''}</span>
+              <span class="pr-agreeing-name">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);font-weight:normal;">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)}</span>
               <span>Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</span>
               <span>${escapeHtml(betTypeName)} in ${escapeHtml(p.sports ? p.sports.name : 'this sport')}: ${c.betTypeRecord} (${c.betTypeAdjPct}% blended)</span>
             </div>`).join('')}
@@ -11462,7 +11499,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 182; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 183; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
