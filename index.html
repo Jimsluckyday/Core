@@ -576,6 +576,7 @@
           <div id="pickParlayHint" style="font-size:10px;color:var(--ink-soft);margin-top:4px;">
             If this same selection is ALSO their own standalone bet (not just a parlay leg), save it twice — once with this left blank, once with the parlay number set. Numbers are just YOUR local labels for today's parlays from this capper, e.g. "their first parlay" — reused automatically if you pick the same number again for another leg today.
           </div>
+          <div id="pickParlayExistingPreview" style="display:none;font-size:11px;margin-top:6px;padding:7px 10px;border-radius:2px;"></div>
         </div>
       </div>
 
@@ -3454,6 +3455,76 @@
   $('pickSport').addEventListener('change', updatePickTimezoneReminder);
   $('pickDate').addEventListener('change', () => populatePickTournamentDropdown());
 
+  // Live "does this parlay number already exist" preview -- CONFIRMED as a
+  // real, recurring mistake: parlay numbers are just local labels reused
+  // across SEPARATE save sessions for the same capper/date (by design, per
+  // the hint above), which means picking "Parlay 1" again days later
+  // silently merges into whatever Parlay 1 already has, with zero
+  // indication beforehand. Real case: Seeking Returns already had a
+  // 2-leg Parlay 1 on 6/1 from an earlier session; picking Parlay 1 again
+  // for two unrelated legs merged them into the same parlay instead of
+  // creating a new one, and there was no way to have known that in advance.
+  // This doesn't change the merge behavior itself (still correct/intended
+  // when it's genuinely the same parlay) -- it just makes it visible before
+  // saving, not after.
+  async function checkExistingParlayPreview() {
+    const box = $('pickParlayExistingPreview');
+    const capperId = $('pickCapper').value;
+    const eventDate = $('pickDate').value;
+    const parlayNumber = $('pickParlayNumber').value;
+    if (!capperId || !eventDate || !parlayNumber) {
+      box.style.display = 'none';
+      return;
+    }
+    const parlayBetType = findByNameCI(betTypes, 'Parlay');
+    if (!parlayBetType) { box.style.display = 'none'; return; }
+
+    box.style.display = 'block';
+    box.style.background = 'transparent';
+    box.style.border = '1px dashed var(--line)';
+    box.style.color = 'var(--ink-soft)';
+    box.textContent = `Checking whether Parlay ${parlayNumber} already exists for this capper/date...`;
+
+    try {
+      const existing = await rest(
+        `picks?select=id,event_date&capper_id=eq.${capperId}&event_date=eq.${eventDate}` +
+        `&parlay_local_number=eq.${parlayNumber}&bet_type_id=eq.${parlayBetType.id}`
+      );
+      // Stale response guard -- if the capper/date/number changed again
+      // while this request was in flight, don't render an answer to a
+      // question that's no longer being asked.
+      if (capperId !== $('pickCapper').value || eventDate !== $('pickDate').value || parlayNumber !== $('pickParlayNumber').value) return;
+
+      if (!existing.length) {
+        box.style.border = '1px dashed var(--line)';
+        box.style.color = 'var(--ink-soft)';
+        box.innerHTML = `No existing Parlay ${escapeHtml(parlayNumber)} for this capper on this date yet — saving will create a new one.`;
+        return;
+      }
+
+      const summaryId = existing[0].id;
+      const links = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${summaryId}`);
+      const legIds = links.map(l => l.leg_pick_id);
+      const legs = legIds.length
+        ? await rest(`picks?select=id,selection,line,result&id=in.(${legIds.join(',')})`)
+        : [];
+
+      box.style.border = '1.5px solid var(--stamp-amber)';
+      box.style.color = 'var(--ink)';
+      const legsText = legs.length
+        ? legs.map(l => `${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''} — ${l.result}`).join('; ')
+        : '(no legs linked yet)';
+      box.innerHTML = `&#9888; Parlay ${escapeHtml(parlayNumber)} already exists for this capper on ${escapeHtml(eventDate)}: <strong>${legsText}</strong> — this pick will be added to THAT parlay, not create a new one. Pick a different number above if that's not what you meant.`;
+    } catch (e) {
+      box.style.border = '1px dashed var(--line)';
+      box.style.color = 'var(--ink-soft)';
+      box.textContent = `Could not check for an existing parlay: ${e.message}`;
+    }
+  }
+  $('pickCapper').addEventListener('change', () => checkExistingParlayPreview());
+  $('pickDate').addEventListener('change', () => checkExistingParlayPreview());
+  $('pickParlayNumber').addEventListener('change', () => checkExistingParlayPreview());
+
   // KBO games happen in Korea (roughly 13-14 hours ahead of US Eastern),
   // and plenty of tennis is played in Europe/Australia/Asia -- a pick
   // that comes in late evening US time for "tonight's game" is very
@@ -3776,6 +3847,7 @@
         $('pickGameStartTime').value = '';
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
+        $('pickParlayExistingPreview').style.display = 'none';
         $('pickSelection').focus();
       } else {
         // New picks always start unpublished -- publishing only ever
@@ -3803,6 +3875,7 @@
         $('pickGameStartTime').value = '';
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
+        $('pickParlayExistingPreview').style.display = 'none';
         $('pickSelection').focus();
       }
       await refreshPicksList();
@@ -3881,6 +3954,7 @@
     $('pickGameStartTime').value = '';
     $('pickScheduleSyncNote').textContent = '';
     $('pickParlayNumber').value = '';
+    $('pickParlayExistingPreview').style.display = 'none';
   }
   $('cancelPickEditBtn').addEventListener('click', exitPickEditMode);
 
@@ -3973,6 +4047,7 @@
     // Show which parlay (if any) this leg is currently linked to, so
     // editing doesn't silently lose or misrepresent that link.
     $('pickParlayNumber').value = '';
+    $('pickParlayExistingPreview').style.display = 'none';
     if (p.is_parlay_leg) {
       try {
         const links = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${p.id}`);
@@ -11570,7 +11645,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 185; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 186; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
