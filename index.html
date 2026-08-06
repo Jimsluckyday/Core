@@ -3600,8 +3600,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const html = tierKeys.map(t => {
         const group = byTier[t];
         const label = t === NO_TIER ? 'No tier assigned' : `Tier ${t}`;
-        const unitSizes = [...new Set(group.map(r => (r.raw_unit_size || '').trim()).filter(Boolean))];
-        const unitSizesText = unitSizes.length ? escapeHtml(unitSizes.join(', ')) : 'none recorded';
+        // Counted per distinct value, not just deduped -- a tier with 0.5U
+        // shown twice and 0.3U shown once needs to read as "0.5 (2), 0.3
+        // (1)", not one flat "0.5, 0.3" that hides how lopsided it actually
+        // is toward one value.
+        const unitSizeCounts = new Map();
+        group.forEach(r => {
+          const v = (r.raw_unit_size || '').trim();
+          if (!v) return;
+          unitSizeCounts.set(v, (unitSizeCounts.get(v) || 0) + 1);
+        });
+        const unitSizesText = unitSizeCounts.size
+          ? [...unitSizeCounts.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([v, count]) => `${escapeHtml(v)} (${count})`)
+              .join(', ')
+          : 'none recorded';
         const reviewNotes = [...new Set(group.map(r => (r.tier_review_note || '').trim()).filter(Boolean))];
         const images = [...new Set(group.map(r => r.source_image).filter(Boolean))];
         return `<div style="margin-bottom:10px;">
@@ -11883,7 +11897,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 196; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 197; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
