@@ -5417,15 +5417,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   function sortByColumn(colIndex, type, dir) {
-    // An expanded parlay-legs detail row is a single wide <td colspan> with
-    // no data-value attribute at all -- sorting used to crash the moment
-    // one was open (`.getAttribute` on a missing cell), which looked like
-    // "sort does nothing" since the thrown error aborted the whole
-    // rows.sort() silently while every other filter control kept working.
-    // Collapsing them first sidesteps the crash and is also the only
-    // sensible behavior anyway, since a detail row has no column values of
-    // its own to sort by and would otherwise end up detached from its
-    // parent pick once the real rows reorder around it.
+    // An expanded parlay-legs detail row is a single wide td colspan cell
+    // with no data-value attribute at all -- sorting used to crash the
+    // moment one was open (calling getAttribute on a missing cell), which
+    // looked like "sort does nothing" since the thrown error aborted the
+    // whole rows.sort() silently while every other filter control kept
+    // working. Collapsing them first sidesteps the crash and is also the
+    // only sensible behavior anyway, since a detail row has no column
+    // values of its own to sort by and would otherwise end up detached
+    // from its parent pick once the real rows reorder around it.
     document.querySelectorAll('tr[data-parlay-legs-for]').forEach(r => r.remove());
     document.querySelectorAll('button.parlay-legs-toggle').forEach(b => { b.innerHTML = '&#9662; legs'; });
     const rows = allRows();
@@ -11856,7 +11856,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 192; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 193; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
