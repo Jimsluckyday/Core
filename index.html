@@ -1690,10 +1690,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div class="checkbox-row"><input type="checkbox" id="rqCheckClosing" checked /><label for="rqCheckClosing">Closing odds</label></div>
             <div class="checkbox-row"><input type="checkbox" id="rqCheckOpening" /><label for="rqCheckOpening">Opening odds</label></div>
             <div class="checkbox-row"><input type="checkbox" id="rqCheckHomeAway" checked /><label for="rqCheckHomeAway">Home / Away</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckUnitSize" /><label for="rqCheckUnitSize">No unit size recorded</label></div>
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Once started, each pick is shown one at a time with just the missing pieces to fill in — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left.
+          Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Once started, each pick is shown one at a time — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left. Tier and Unit size are always editable on every card regardless of which boxes are checked above, since there's no reason to make a separate trip back here just to fix the tier while a pick is already open for something else.
         </div>
         <button id="startReviewQueueBtn">Start review</button>
         <div id="reviewQueueWrap" style="margin-top:14px;"></div>
@@ -9115,6 +9116,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const checkClosing = $('rqCheckClosing').checked;
     const checkOpening = $('rqCheckOpening').checked;
     const checkHomeAway = $('rqCheckHomeAway').checked;
+    const checkUnitSize = $('rqCheckUnitSize').checked;
 
     // Only the CHECKED data types count toward "incomplete" -- unchecking
     // one (e.g. opening odds during testing) means a pick missing only
@@ -9123,6 +9125,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     if (checkClosing) conditions.push('closing_odds.is.null');
     if (checkOpening) conditions.push('opening_odds.is.null');
     if (checkHomeAway) conditions.push('home_away.is.null');
+    if (checkUnitSize) conditions.push('raw_unit_size.is.null');
 
     const wrap = $('reviewQueueWrap');
     if (!conditions.length) {
@@ -9132,7 +9135,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
     wrap.innerHTML = '<div class="empty-state">Loading incomplete picks...</div>';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,result,pick_tier,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,result,pick_tier,raw_unit_size,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -9164,7 +9167,17 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     if (p.opening_odds === null || p.opening_odds === undefined) missingParts.push('opening odds');
     if (p.closing_odds === null || p.closing_odds === undefined) missingParts.push('closing odds');
     if (!p.home_away && !isProp) missingParts.push('home/away');
+    if (!p.raw_unit_size) missingParts.push('unit size');
 
+    // Tier and unit size are always editable here, not just when they're
+    // the reason a pick showed up in the queue -- once a card is already up
+    // for some other missing piece, there's no reason to make someone dig
+    // back into a whole separate screen just to also fix the tier while
+    // they're looking right at it. Same reasoning behind adding this here
+    // instead of into Bulk-fill standard odds: that tool applies ONE value
+    // to everything at once (a sensible default like -110), but a tier or
+    // unit size is a real fact specific to this one pick -- there's no
+    // universal default to blanket-apply the way there is for odds.
     wrap.innerHTML = `
       <div style="font-size:12px;margin-bottom:10px;">
         Reviewing <strong>${reviewIndex + 1}</strong> of <strong>${reviewQueue.length}</strong> · ${reviewSkippedCount} skipped so far
@@ -9190,6 +9203,21 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             <label>Closing odds</label>
             <input id="rqClosingOdds" type="number" step="1" value="${p.closing_odds ?? ''}" />
           </div>
+          <div class="field">
+            <label>Tier</label>
+            <select id="rqTier">
+              <option value="-1" ${Number(p.pick_tier) === -1 ? 'selected' : ''}>Tier -1</option>
+              <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>Tier 0</option>
+              <option value="1" ${Number(p.pick_tier) === 1 ? 'selected' : ''}>Tier 1</option>
+              <option value="2" ${Number(p.pick_tier) === 2 ? 'selected' : ''}>Tier 2</option>
+              <option value="3" ${Number(p.pick_tier) === 3 ? 'selected' : ''}>Tier 3</option>
+              <option value="4" ${Number(p.pick_tier) === 4 ? 'selected' : ''}>Tier 4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Unit size</label>
+            <input id="rqUnitSize" type="text" placeholder="e.g. 2U, 1.5U, Whale" value="${escapeHtml(p.raw_unit_size || '')}" />
+          </div>
         </div>
       </div>
       <button id="rqSaveNextBtn">Save &amp; Next</button>
@@ -9209,6 +9237,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const closingVal = $('rqClosingOdds').value;
         payload.opening_odds = openingVal ? Number(openingVal) : null;
         payload.closing_odds = closingVal ? Number(closingVal) : null;
+        payload.pick_tier = Number($('rqTier').value);
+        payload.raw_unit_size = $('rqUnitSize').value.trim() || null;
         await rest(`picks?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
         reviewIndex++;
         renderReviewCard();
@@ -11897,7 +11927,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 197; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 198; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
