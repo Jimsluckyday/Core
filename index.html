@@ -671,6 +671,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="3">Tier 3</option>
             <option value="4">Tier 4 — highest confidence (Whale/Lock/VIP, etc.)</option>
           </select>
+          <input id="pickRawUnitSize" type="text" placeholder="Unit size as shown (optional), e.g. 2U, 1.5U, Whale" style="margin-top:6px;" />
+          <div style="font-size:10px;color:var(--ink-soft);margin-top:2px;">Exactly as the capper wrote it -- this is what "Unit sizes seen" below pulls from. Leave blank if none was shown.</div>
           <button type="button" class="ghost small" id="showTierHistoryBtn" style="margin-top:4px;">Show this capper's tier history</button>
           <div id="tierHistoryPanel" style="display:none;font-size:11px;margin-top:6px;padding:8px 10px;border:1px dashed var(--line);border-radius:2px;max-height:240px;overflow-y:auto;"></div>
         </div>
@@ -3858,6 +3860,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       home_away: homeAway || null,
       event_name: $('pickEventName').value.trim() || null,
       pick_tier: Number(pickTierVal),
+      raw_unit_size: $('pickRawUnitSize').value.trim() || null,
       notes: $('pickNotes').value.trim() || null,
       prop_player: isProp ? ($('propPlayer').value.trim() || null) : null,
       prop_stat: isProp ? ($('propStat').value.trim() || null) : null,
@@ -3956,6 +3959,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('propStat').value = '';
         $('propTeam').value = '';
         $('pickTier').value = '0';
+        $('pickRawUnitSize').value = '';
         $('pickGameStartTime').value = '';
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
@@ -3990,6 +3994,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('propStat').value = '';
         $('propTeam').value = '';
         $('pickTier').value = '0';
+        $('pickRawUnitSize').value = '';
         $('pickGameStartTime').value = '';
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
@@ -4073,6 +4078,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('propStat').value = '';
     $('propTeam').value = '';
     $('pickTier').value = '0';
+    $('pickRawUnitSize').value = '';
     $('pickPublishedStatus').textContent = 'Not published.';
     $('unpublishFromEditBtn').style.display = 'none';
     $('pickGameStartTime').value = '';
@@ -4144,6 +4150,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     populatePickTournamentDropdown(p.event_name || '');
     $('pickEventName').value = p.event_name || '';
     $('pickTier').value = String(p.pick_tier || 0);
+    $('pickRawUnitSize').value = p.raw_unit_size || '';
     $('pickNotes').value = p.notes || '';
     if (p.is_published) {
       $('pickPublishedStatus').textContent = 'Currently published.';
@@ -11876,7 +11883,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 195; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 196; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
