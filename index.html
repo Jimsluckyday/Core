@@ -3571,28 +3571,45 @@ These are almost always the same day, so "Date entered" only fills in a starting
     panel.innerHTML = 'Loading...';
     try {
       const rows = await restAllPages(
-        `picks?select=event_date,pick_tier,selection,notes&capper_id=eq.${capperId}&is_parlay_leg=eq.false&order=event_date.desc`
+        `picks?select=pick_tier,raw_unit_size,tier_review_note,source_image&capper_id=eq.${capperId}&is_parlay_leg=eq.false&order=event_date.desc`
       );
       if (!rows.length) {
         panel.innerHTML = `No history yet for ${escapeHtml(capperName)} -- nothing to compare against, this would be their first recorded pick.`;
         return;
       }
+      // "No tier" (pick_tier never set -- older manually-entered picks from
+      // before the tier system existed) is kept separate from a real Tier 0
+      // (the relative-tier engine's own determination that no unit size was
+      // shown) -- these mean different things when confirming a capper's
+      // scale, so collapsing them together would hide exactly the gap this
+      // tool exists to find.
+      const NO_TIER = '__no_tier__';
       const byTier = {};
       rows.forEach(r => {
-        const t = r.pick_tier ?? 0;
+        const t = (r.pick_tier === null || r.pick_tier === undefined) ? NO_TIER : r.pick_tier;
         if (!byTier[t]) byTier[t] = [];
         byTier[t].push(r);
       });
-      const tiers = Object.keys(byTier).map(Number).sort((a, b) => b - a);
-      const html = tiers.map(t => {
+      const tierKeys = Object.keys(byTier).sort((a, b) => {
+        if (a === NO_TIER) return 1;
+        if (b === NO_TIER) return -1;
+        return Number(b) - Number(a);
+      });
+      const html = tierKeys.map(t => {
         const group = byTier[t];
-        const examples = group.slice(0, 4).map(r => {
-          const noteBit = r.notes ? escapeHtml(r.notes.slice(0, 90)) + (r.notes.length > 90 ? '…' : '') : '';
-          return `<div style="padding:3px 0 3px 10px;border-left:2px solid var(--line);margin-bottom:3px;">${r.event_date} — ${escapeHtml(r.selection)}${noteBit ? `<div style="color:var(--ink-soft);font-style:italic;">${noteBit}</div>` : ''}</div>`;
-        }).join('');
-        return `<div style="margin-bottom:8px;"><strong>Tier ${t}</strong> — ${group.length} pick${group.length === 1 ? '' : 's'} on file${group.length > 4 ? ', 4 most recent shown' : ''}:${examples}</div>`;
+        const label = t === NO_TIER ? 'No tier assigned' : `Tier ${t}`;
+        const unitSizes = [...new Set(group.map(r => (r.raw_unit_size || '').trim()).filter(Boolean))];
+        const unitSizesText = unitSizes.length ? escapeHtml(unitSizes.join(', ')) : 'none recorded';
+        const reviewNotes = [...new Set(group.map(r => (r.tier_review_note || '').trim()).filter(Boolean))];
+        const images = [...new Set(group.map(r => r.source_image).filter(Boolean))];
+        return `<div style="margin-bottom:10px;">
+          <strong>${label}</strong> — ${group.length} pick${group.length === 1 ? '' : 's'}<br>
+          <span style="color:var(--ink-soft);">Unit sizes seen:</span> ${unitSizesText}
+          ${reviewNotes.length ? `<div style="color:var(--stamp-amber);">${reviewNotes.map(n => escapeHtml(n)).join('<br>')}</div>` : ''}
+          ${images.length ? `<div style="color:var(--ink-soft);font-size:10px;word-break:break-all;">Images: ${images.map(img => escapeHtml(img)).join(', ')}</div>` : ''}
+        </div>`;
       }).join('');
-      panel.innerHTML = `<div style="margin-bottom:6px;color:var(--ink-soft);">${rows.length} total picks on file for ${escapeHtml(capperName)}. Notes are whatever the original entry recorded -- not every pick will mention a unit size.</div>${html}`;
+      panel.innerHTML = `<div style="margin-bottom:6px;color:var(--ink-soft);">${rows.length} total picks on file for ${escapeHtml(capperName)}.</div>${html}`;
     } catch (e) {
       panel.innerHTML = `Could not load history: ${e.message}`;
     }
@@ -11859,7 +11876,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 194; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 195; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
