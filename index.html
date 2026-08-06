@@ -8993,7 +8993,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const wrap = $('flaggedLinesWrap');
     wrap.innerHTML = '<div class="empty-state">Loading flagged picks...</div>';
     try {
-      const picks = await restAllPages('picks?select=id,event_date,selection,line,result,line_flag_note,tier_needs_review,tier_review_note,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&or=(line_flagged_for_review.eq.true,tier_needs_review.eq.true)&order=event_date.desc');
+      const picks = await restAllPages('picks?select=id,event_date,selection,line,result,line_flag_note,tier_needs_review,tier_review_note,result_marker_flag,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&or=(line_flagged_for_review.eq.true,tier_needs_review.eq.true,result_marker_flag.eq.true)&order=event_date.desc');
       renderFlaggedLines(picks);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
@@ -9016,6 +9016,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       }
       if (p.tier_needs_review) {
         badges.push(`<div><span style="color:var(--accent);font-weight:bold;">&#127882; Tier review</span> ${escapeHtml(p.tier_review_note || '')}</div>`);
+      }
+      if (p.result_marker_flag) {
+        badges.push(`<div><span style="color:var(--stamp-red);font-weight:bold;">&#9989; Check mark/X visible</span> please confirm</div>`);
       }
       return `
       <tr>
@@ -9041,7 +9044,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         try {
           await rest(`picks?id=eq.${btn.getAttribute('data-id')}`, {
             method: 'PATCH',
-            body: JSON.stringify({ line_flagged_for_review: false, tier_needs_review: false })
+            body: JSON.stringify({ line_flagged_for_review: false, tier_needs_review: false, result_marker_flag: false })
           });
           btn.closest('tr').remove();
         } catch (e) {
@@ -11856,7 +11859,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 193; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 194; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
