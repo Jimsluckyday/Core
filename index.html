@@ -671,6 +671,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="3">Tier 3</option>
             <option value="4">Tier 4 — highest confidence (Whale/Lock/VIP, etc.)</option>
           </select>
+          <button type="button" class="ghost small" id="showTierHistoryBtn" style="margin-top:4px;">Show this capper's tier history</button>
+          <div id="tierHistoryPanel" style="display:none;font-size:11px;margin-top:6px;padding:8px 10px;border:1px dashed var(--line);border-radius:2px;max-height:240px;overflow-y:auto;"></div>
         </div>
         <div class="field">
           <label>Game start time (optional)</label>
@@ -3544,6 +3546,59 @@ These are almost always the same day, so "Date entered" only fills in a starting
   $('pickDate').addEventListener('change', () => checkExistingParlayPreview());
   $('pickParlayNumber').addEventListener('change', () => checkExistingParlayPreview());
 
+  // Quick per-capper tier reference -- CONFIRMED as a real, recurring need:
+  // manually re-entering old picks that predate the tier system means
+  // there's no live way to tell what unit size a capper like Nicky Cashin
+  // or Locks By Tommy has actually used before, now that tiers are ranked
+  // relative to each capper's OWN history rather than a shared number line.
+  // raw_unit_size/raw_confidence_signal are essentially never populated on
+  // older picks, but the free-text `notes` field very often IS -- the
+  // pipeline's own transcription notes frequently spell out the real
+  // signal ("1.5 unit play", "Marked as WHALE PLAY") even when the
+  // dedicated fields were never filled in. This surfaces that existing
+  // text directly, grouped by the tier it was actually given, rather than
+  // trying to re-extract or re-normalize anything new.
+  async function showTierHistory() {
+    const capperId = $('pickCapper').value;
+    const capperName = $('pickCapperSearch').value.trim() || 'this capper';
+    const panel = $('tierHistoryPanel');
+    if (!capperId) {
+      panel.style.display = 'block';
+      panel.innerHTML = 'Pick a capper above first.';
+      return;
+    }
+    panel.style.display = 'block';
+    panel.innerHTML = 'Loading...';
+    try {
+      const rows = await restAllPages(
+        `picks?select=event_date,pick_tier,selection,notes&capper_id=eq.${capperId}&is_parlay_leg=eq.false&order=event_date.desc`
+      );
+      if (!rows.length) {
+        panel.innerHTML = `No history yet for ${escapeHtml(capperName)} -- nothing to compare against, this would be their first recorded pick.`;
+        return;
+      }
+      const byTier = {};
+      rows.forEach(r => {
+        const t = r.pick_tier ?? 0;
+        if (!byTier[t]) byTier[t] = [];
+        byTier[t].push(r);
+      });
+      const tiers = Object.keys(byTier).map(Number).sort((a, b) => b - a);
+      const html = tiers.map(t => {
+        const group = byTier[t];
+        const examples = group.slice(0, 4).map(r => {
+          const noteBit = r.notes ? escapeHtml(r.notes.slice(0, 90)) + (r.notes.length > 90 ? '…' : '') : '';
+          return `<div style="padding:3px 0 3px 10px;border-left:2px solid var(--line);margin-bottom:3px;">${r.event_date} — ${escapeHtml(r.selection)}${noteBit ? `<div style="color:var(--ink-soft);font-style:italic;">${noteBit}</div>` : ''}</div>`;
+        }).join('');
+        return `<div style="margin-bottom:8px;"><strong>Tier ${t}</strong> — ${group.length} pick${group.length === 1 ? '' : 's'} on file${group.length > 4 ? ', 4 most recent shown' : ''}:${examples}</div>`;
+      }).join('');
+      panel.innerHTML = `<div style="margin-bottom:6px;color:var(--ink-soft);">${rows.length} total picks on file for ${escapeHtml(capperName)}. Notes are whatever the original entry recorded -- not every pick will mention a unit size.</div>${html}`;
+    } catch (e) {
+      panel.innerHTML = `Could not load history: ${e.message}`;
+    }
+  }
+  $('showTierHistoryBtn').addEventListener('click', showTierHistory);
+
   // "Date entered" (when the capper actually posted this) is a KEPT field,
   // same as Capper/Sport/Date of event already are -- it only auto-fills
   // when currently BLANK, and is never overwritten by a later Date-of-event
@@ -3888,6 +3943,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
         $('pickParlayExistingPreview').style.display = 'none';
+        $('tierHistoryPanel').style.display = 'none';
         // Date entered is deliberately KEPT too, same as Capper/Sport/Date
         // of event above -- entering a whole multi-pick image only requires
         // setting it once, and it must NOT reset here or the very bug this
@@ -3921,6 +3977,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickScheduleSyncNote').textContent = '';
         $('pickParlayNumber').value = '';
         $('pickParlayExistingPreview').style.display = 'none';
+        $('tierHistoryPanel').style.display = 'none';
         // Date entered is deliberately KEPT too, same as Capper/Sport/Date
         // of event above -- entering a whole multi-pick image only requires
         // setting it once, and it must NOT reset here or the very bug this
@@ -4005,6 +4062,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickScheduleSyncNote').textContent = '';
     $('pickParlayNumber').value = '';
     $('pickParlayExistingPreview').style.display = 'none';
+    $('tierHistoryPanel').style.display = 'none';
   }
   $('cancelPickEditBtn').addEventListener('click', exitPickEditMode);
 
@@ -4103,6 +4161,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // editing doesn't silently lose or misrepresent that link.
     $('pickParlayNumber').value = '';
     $('pickParlayExistingPreview').style.display = 'none';
+    $('tierHistoryPanel').style.display = 'none';
     if (p.is_parlay_leg) {
       try {
         const links = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${p.id}`);
@@ -11786,7 +11845,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 190; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 191; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
