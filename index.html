@@ -5479,8 +5479,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
      time, and squeezing all of them into one fixed width made everything
      -- including the filter dropdowns -- cramped and hard to use,
      especially on a phone. Scrolls sideways instead of shrinking columns
-     indefinitely; each column keeps a readable minimum width. */
-  .picks-table-scroll { overflow-x: auto; margin-top: 10px; }
+     indefinitely; each column keeps a readable minimum width.
+     CONFIRMED, second round of feedback: a scrollbar on a nested div sits
+     right at the bottom of THAT div's own content -- with many rows, that
+     could be scrolled far below the visible screen, or simply not render
+     as an obvious control at all. Scrolling the whole PAGE horizontally
+     instead puts the browser's own scrollbar at the bottom of the
+     viewport, where it's always visible and reachable regardless of how
+     many rows are in the table or how far down the page you've scrolled. */
+  .picks-table-scroll { margin-top: 10px; }
   .picks-table { width: 100%; min-width: 1500px; border-collapse: collapse; font-size: 12px; }
   .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; position: relative; user-select: none; white-space: nowrap; }
   .picks-table td { padding: 7px 6px; border-bottom: 1px dashed #b9b09a; }
@@ -12198,7 +12205,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 204; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 205; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
