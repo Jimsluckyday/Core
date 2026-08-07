@@ -4601,7 +4601,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const completeness = $('filterCompleteness').value;
     const tierFilter = $('filterTier').value;
 
-    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
+    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
     // Supabase silently caps any single response at its own server-side max
     // (confirmed: 1000 rows, regardless of what limit= asks for) -- a limit
     // here only makes sense for a single, non-paginated rest() call safely
@@ -9447,7 +9447,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     wrap.innerHTML = '<div class="empty-state">Looking up picks missing odds...</div>';
 
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,result,is_published,pick_tier,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)`;
       if (missing === 'closing_any') query += `&closing_odds=is.null`;
       else if (missing === 'opening_any') query += `&opening_odds=is.null`;
       else if (missing === 'opening') query += `&opening_odds=is.null&closing_odds=not.is.null`;
@@ -12095,7 +12095,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 200; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 201; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
