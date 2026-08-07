@@ -5231,7 +5231,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('togglePicksBtn').textContent = showing ? 'Show picks' : 'Hide picks';
   });
 
-  function allPicksRowsToHtml(picks) {
+  function allPicksRowsToHtml(picks, capperUsualMap) {
+    capperUsualMap = capperUsualMap || {};
     if (!picks.length) return `<div class="empty-state">No picks match these filters.</div>`;
     const rows = picks.map(p => {
       const capperName = p.cappers ? p.cappers.name : '—';
@@ -5293,6 +5294,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <option value="4" ${Number(p.pick_tier) === 4 ? 'selected' : ''}>Tier 4</option>
       </select>`;
       const unitSizeCell = `<input type="text" class="inline-unitsize-input" data-id="${p.id}" value="${escapeHtml(p.raw_unit_size || '')}" placeholder="e.g. 2U" style="width:80px;font-family:inherit;font-size:11px;padding:3px 4px;" />`;
+      // Read-only reference, not another input -- CONFIRMED as the actual
+      // need once Tier/Unit size became directly editable: without
+      // something to jog memory right there, editing a capper whose
+      // history you don't remember means stopping to go dig it up
+      // elsewhere, which defeats the point of editing inline at all.
+      const capperUsualCell = escapeHtml(capperUsualMap[p.capper_id] || 'no history yet');
       const cells = [
         p.event_date,
         dateEnteredCell,
@@ -5302,6 +5309,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         isProp ? (p.prop_player || '—') : '—',
         isProp ? (p.prop_stat || '—') : '—',
         pickText,
+        capperUsualCell,
         tierCell,
         unitSizeCell,
         oddsText,
@@ -5313,11 +5321,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // Sort/filter value must stay the PLAIN capper name (not the richer
         // HTML with the source_image reference now shown in this column) --
         // same reasoning as odds/result below, which also separate what's
-        // sorted/filtered from what's displayed. Tier/Unit size (8, 9) have
-        // no filter dropdown at all (see the header below), so their value
-        // here is only ever used as a plain display fallback, never read.
-        const sortVal = i === 11 ? p.result : (i === 10 ? oddsStatus : (i === 2 ? capperName : (i === 8 ? String(p.pick_tier ?? 0) : (i === 9 ? (p.raw_unit_size || '') : String(c)))));
-        const extraAttr = i === 11 ? ` data-result-cell="${p.id}"` : '';
+        // sorted/filtered from what's displayed. Capper's usual/Tier/Unit
+        // size (8, 9, 10) have no filter dropdown at all (see the header
+        // below), so their value here is only ever a plain display
+        // fallback, never read.
+        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : String(c)))));
+        const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
       const gradeBtns = p.result === 'pending'
@@ -5350,9 +5359,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // apparatus below (no filter-btn) -- that machinery reads a cell's own
     // textContent for its filter-panel value list, which would return every
     // <option>'s text concatenated together for a <select>, not just the
-    // one currently chosen.
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source'];
-    const noFilterCols = new Set(['Tier', 'Unit size']);
+    // one currently chosen. "Capper's usual" is plain text and COULD be
+    // filtered/sorted the normal way, but a derived reference summary isn't
+    // a meaningful thing to sort by, so it's left out for the same reason.
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source'];
+    const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -5368,13 +5379,49 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </table>`;
   }
 
-  function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin) {
+  async function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin) {
     const win = existingWin || window.open('', '_blank');
     if (!win) {
       alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
       return;
     }
-    const tableHtml = allPicksRowsToHtml(picks);
+    // A quick, always-visible reference for what this capper has actually
+    // used before -- CONFIRMED as the real need once Tier/Unit size became
+    // directly editable in this table (v199): editing many different
+    // cappers' rows in a row is only fast if there's nothing to go look up
+    // elsewhere first. One batched query covers every capper currently in
+    // view, rather than one lookup per row.
+    const distinctCapperIds = [...new Set(picks.map(p => p.capper_id).filter(Boolean))];
+    const capperUsualMap = {};
+    if (distinctCapperIds.length) {
+      try {
+        const historyRows = await restAllPages(
+          `picks?select=capper_id,pick_tier,raw_unit_size&capper_id=in.(${distinctCapperIds.join(',')})&is_parlay_leg=eq.false`
+        );
+        const byCapperCombo = {};
+        historyRows.forEach(r => {
+          if (!byCapperCombo[r.capper_id]) byCapperCombo[r.capper_id] = new Map();
+          const tier = (r.pick_tier === null || r.pick_tier === undefined) ? '—' : r.pick_tier;
+          const unit = (r.raw_unit_size || '').trim() || '—';
+          const key = `${tier}|${unit}`;
+          const m = byCapperCombo[r.capper_id];
+          m.set(key, (m.get(key) || 0) + 1);
+        });
+        Object.keys(byCapperCombo).forEach(capperId => {
+          const combos = [...byCapperCombo[capperId].entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([key, count]) => {
+              const [tier, unit] = key.split('|');
+              return `T${tier}${unit !== '—' ? '/' + unit : ''} (${count})`;
+            });
+          capperUsualMap[capperId] = combos.join(', ');
+        });
+      } catch (e) {
+        console.warn('Could not load capper tier/unit-size history for the reference column:', e.message);
+      }
+    }
+    const tableHtml = allPicksRowsToHtml(picks, capperUsualMap);
     win.document.open();
     win.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>All Picks</title>
@@ -5433,7 +5480,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <button type="button" class="quick-filter-btn" data-quick-col="3">Filter by Sport &#9662;</button>
     <button type="button" class="quick-filter-btn" data-quick-col="4">Filter by Bet type &#9662;</button>
     <button type="button" class="quick-filter-btn" data-quick-col="7">Filter by Selection &#9662;</button>
-    <button type="button" class="quick-filter-btn" data-quick-col="10">Filter by Odds Status &#9662;</button>
+    <button type="button" class="quick-filter-btn" data-quick-col="11">Filter by Odds Status &#9662;</button>
   </div>
   <div style="margin-bottom:14px;padding:10px;border:1px dashed #22281f;border-radius:3px;">
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#234d35;font-weight:bold;margin-bottom:8px;">Automation tools — sync schedule/odds &amp; grade results without SQL</div>
@@ -5446,7 +5493,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
   </div>
   ${tableHtml}
-  <div style="font-size:10px;color:#55584d;margin-top:8px;">Click the arrow on any column (or the quick-filter buttons above) to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the query. Tier and Unit size are directly editable in this table -- change the dropdown or type into the box and it saves immediately, no separate Save step. Use Refresh above after making changes elsewhere to bring this view up to date.</div>
+  <div style="font-size:10px;color:#55584d;margin-top:8px;">Click the arrow on any column (or the quick-filter buttons above) to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the query. Tier and Unit size are directly editable in this table -- change the dropdown or type into the box and it saves immediately, no separate Save step. "Capper's usual" is a read-only reference showing that capper's most common Tier/Unit size combos on file, so there's no need to go look it up elsewhere before editing. Use Refresh above after making changes elsewhere to bring this view up to date.</div>
 <script>
 var __sourceQuery = ${JSON.stringify(sourceQuery)};
 var __filterSummary = ${JSON.stringify(filterSummary)};
@@ -5842,10 +5889,10 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           method: 'PATCH',
           body: JSON.stringify({ result: result, graded_at: new Date().toISOString() })
         });
-        // Update this row in place: Result column is now index 11 -- shifted
-        // by the Date Entered column (index 1) and the Tier/Unit size
-        // columns (indices 8-9) inserted after Pick.
-        const resultCell = row.children[11];
+        // Update this row in place: Result column is now index 12 -- shifted
+        // by the Date Entered column (index 1) and the Capper's usual/Tier/
+        // Unit size columns (indices 8-10) inserted after Pick.
+        const resultCell = row.children[12];
         if (resultCell) { resultCell.innerHTML = stampHtml(result); resultCell.setAttribute('data-value', result); }
         btn.closest('.grade-btns').remove();
 
@@ -6082,7 +6129,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           const oddsParts = [];
           if (oo !== '') oddsParts.push('Open ' + (Number(oo) > 0 ? '+' : '') + oo);
           if (co !== '') oddsParts.push('Close ' + (Number(co) > 0 ? '+' : '') + co);
-          const oddsCell = row.children[10]; // shifted by Date Entered (index 1) and the new Tier/Unit size columns (8-9)
+          const oddsCell = row.children[11]; // shifted by Date Entered (index 1) and Capper's usual/Tier/Unit size (8-10)
           if (oddsCell) {
             oddsCell.textContent = oddsParts.join(' / ') || '—';
             oddsCell.setAttribute('data-value', (oddsParts.join(' / ') || '—').toLowerCase());
@@ -6239,7 +6286,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // real table -- e.g. the "Capper" header sat over Date Entered's
       // actual values. Must be kept in exact sync with the real column
       // order built in allPicksRowsToHtml above.
-      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source Image'];
+      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6256,19 +6303,20 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // also one unambiguous column with just the filename, not merged
         // text. Derived from cols.length (not a hardcoded count) so adding
         // or removing a column here never silently drops/duplicates one.
-        // Tier (8) and Unit size (9) hold a live <select>/<input> instead
+        // Tier (9) and Unit size (10) hold a live <select>/<input> instead
         // of plain text -- textContent would return every option's text
         // concatenated for the select, and nothing at all for the input
         // (a form control's typed value is never reflected as textContent),
         // so both need to read the control's actual .value instead.
+        // Capper's usual (8) is plain read-only text, no special handling.
         const cellValues = cols.slice(0, -1).map((_, i) => {
           const cell = row.children[i];
           if (!cell) return csvField('');
-          if (i === 8) {
+          if (i === 9) {
             const sel = cell.querySelector('select');
             return csvField(sel ? sel.value : '');
           }
-          if (i === 9) {
+          if (i === 10) {
             const inp = cell.querySelector('input');
             return csvField(inp ? inp.value.trim() : '');
           }
@@ -12047,7 +12095,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 199; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 200; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
