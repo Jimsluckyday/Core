@@ -5287,7 +5287,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
       } else {
         oddsStatus = 'complete'; oddsText = oddsParts;
       }
-      const statusText = p.is_published ? 'Published' : 'Draft';
       // A real, always-visible column -- CONFIRMED directly by the project
       // owner: an inline "(posted X)" note shown only when it differs from
       // the event date effectively made it invisible for the overwhelming
@@ -5335,7 +5334,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
         unitSizeCell,
         oddsText,
         `<span class="stamp ${p.result}">${p.result}</span>`,
-        statusText,
         escapeHtml(p.source_image || '—')
       ];
       const cellsHtml = cells.map((c, i) => {
@@ -5383,7 +5381,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // one currently chosen. "Capper's usual" is plain text and COULD be
     // filtered/sorted the normal way, but a derived reference summary isn't
     // a meaningful thing to sort by, so it's left out for the same reason.
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source'];
+    // "Status" (Published/Draft) removed -- direct feedback that it wasn't
+    // needed here and was just taking up space as more columns got added
+    // over time, on a table that's read on mobile as often as desktop.
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source'];
     const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
@@ -5472,10 +5473,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
     win.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>All Picks</title>
 <style>
-  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 1000px; margin: 0 auto; }
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 1400px; margin: 0 auto; }
   h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
-  .picks-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; position: relative; user-select: none; }
+  /* CONFIRMED, direct feedback: this table keeps gaining columns over
+     time, and squeezing all of them into one fixed width made everything
+     -- including the filter dropdowns -- cramped and hard to use,
+     especially on a phone. Scrolls sideways instead of shrinking columns
+     indefinitely; each column keeps a readable minimum width. */
+  .picks-table-scroll { overflow-x: auto; margin-top: 10px; }
+  .picks-table { width: 100%; min-width: 1500px; border-collapse: collapse; font-size: 12px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; position: relative; user-select: none; white-space: nowrap; }
   .picks-table td { padding: 7px 6px; border-bottom: 1px dashed #b9b09a; }
   .empty-state { font-style: italic; color: #55584d; }
   .filter-btn { border: none; background: transparent; cursor: pointer; font-size: 10px; color: #55584d; padding: 2px 4px; margin-left: 4px; border-radius: 2px; }
@@ -5538,8 +5545,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Backfill Older Date</button>
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
   </div>
-  ${tableHtml}
-  <div style="font-size:10px;color:#55584d;margin-top:8px;">Click the arrow on any column (or the quick-filter buttons above) to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the query. Tier and Unit size are directly editable in this table -- change the dropdown or type into the box and it saves immediately, no separate Save step. "Capper's usual" is a read-only reference showing that capper's most common Tier/Unit size combos on file, so there's no need to go look it up elsewhere before editing. Use Refresh above after making changes elsewhere to bring this view up to date.</div>
+  <div class="picks-table-scroll">${tableHtml}</div>
+  <div style="font-size:10px;color:#55584d;margin-top:8px;">Click the arrow on any column (or the quick-filter buttons above) to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the query. Tier and Unit size are directly editable in this table -- change the dropdown or type into the box and it saves immediately, no separate Save step. "Capper's usual" is a read-only reference showing that capper's most common Tier/Unit size combos on file, so there's no need to go look it up elsewhere before editing. This table scrolls sideways rather than shrinking columns as more fields get added -- swipe or scroll right to see everything. Use Refresh above after making changes elsewhere to bring this view up to date.</div>
 <script>
 var __sourceQuery = ${JSON.stringify(sourceQuery)};
 var __filterSummary = ${JSON.stringify(filterSummary)};
@@ -6280,10 +6287,19 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   // changes: strips ONLY a literal U directly after a number ("1U" -> "1",
   // "5U Whale" -> "5 Whale"), leaving star-ratings and text-only labels like
   // "POD" or "2 stars" completely untouched since they aren't unit counts.
+  // CRITICAL, CONFIRMED REAL BUG: this regex needs DOUBLE backslashes here
+  // (\\d, \\., \\b), not single -- this whole block is text inside the
+  // outer template literal that builds this pop-out, and that literal's
+  // own string-escape processing silently consumes one backslash from any
+  // \X it doesn't recognize as a real escape. A single \d/\./\b here would
+  // survive as plain d/./b in the actual popup script -- no error, no
+  // warning, just a regex that quietly stops matching real unit sizes at
+  // all. Doubling here is what makes a single, correct \d/\./\b actually
+  // reach the popup's own runtime code.
   function normalizeUnitSizeLocal(raw) {
     const trimmed = (raw || '').trim();
     if (!trimmed) return trimmed;
-    return trimmed.replace(/^(-?\d+(?:\.\d+)?)u\b/i, '$1');
+    return trimmed.replace(/^(-?\\d+(?:\\.\\d+)?)u\\b/i, '$1');
   }
 
   document.querySelectorAll('input.inline-unitsize-input').forEach(inp => {
@@ -6347,7 +6363,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // real table -- e.g. the "Capper" header sat over Date Entered's
       // actual values. Must be kept in exact sync with the real column
       // order built in allPicksRowsToHtml above.
-      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source Image'];
+      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6373,11 +6389,26 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // (one per tier) -- plain .textContent would run them all together
         // with no separator at all ("T1 (9): 2 x5T0 (35)..."), so this
         // reads each <br>-separated line and joins them with "; " instead.
+        // CRITICAL, CONFIRMED REAL REGRESSION: a backslash-escaped regex
+        // here (originally /<br\s*\/?>/i) silently breaks, because this
+        // whole block is itself text inside the outer template literal
+        // that builds this entire pop-out -- when THAT literal gets
+        // evaluated, its own string-escape processing strips any backslash
+        // before a character it doesn't recognize as a real escape (\s,
+        // \/), turning the regex into invalid garbage. The resulting
+        // SyntaxError broke the ENTIRE pop-out script, not just this one
+        // line -- every filter, sort, and inline edit on the page stopped
+        // working the moment this shipped, since one bad token anywhere in
+        // this script aborts the whole thing. Avoiding backslashes
+        // entirely here (a plain [^>]* character class needs none) is the
+        // safe pattern going forward for anything written inside this
+        // specific template -- same lesson as the backtick and dollar-brace
+        // rule documented on escapeHtml above, just for backslash escapes.
         const cellValues = cols.slice(0, -1).map((_, i) => {
           const cell = row.children[i];
           if (!cell) return csvField('');
           if (i === 8) {
-            const lines = cell.innerHTML.split(/<br\s*\/?>/i).map(h => {
+            const lines = cell.innerHTML.split(/<br[^>]*>/i).map(h => {
               const tmp = document.createElement('div');
               tmp.innerHTML = h;
               return tmp.textContent.trim();
@@ -12167,7 +12198,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 203; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 204; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
