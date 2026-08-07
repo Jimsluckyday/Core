@@ -3607,7 +3607,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // is toward one value.
         const unitSizeCounts = new Map();
         group.forEach(r => {
-          const v = (r.raw_unit_size || '').trim();
+          const v = normalizeUnitSize(r.raw_unit_size);
           if (!v) return;
           unitSizeCounts.set(v, (unitSizeCounts.get(v) || 0) + 1);
         });
@@ -3875,7 +3875,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       home_away: homeAway || null,
       event_name: $('pickEventName').value.trim() || null,
       pick_tier: Number(pickTierVal),
-      raw_unit_size: $('pickRawUnitSize').value.trim() || null,
+      raw_unit_size: normalizeUnitSize($('pickRawUnitSize').value) || null,
       notes: $('pickNotes').value.trim() || null,
       prop_player: isProp ? ($('propPlayer').value.trim() || null) : null,
       prop_stat: isProp ? ($('propStat').value.trim() || null) : null,
@@ -4572,6 +4572,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return String(str).replace(/[&<>"'`]/g, (c) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
     }[c])).replace(/\$\{/g, '&#36;{');
+  }
+
+  // CONFIRMED 2026-08-06: historical unit sizes were entered inconsistently
+  // -- "1U" and "1" side by side for the same thing -- because "U" is
+  // implied and the project owner has settled on numbers-only going
+  // forward. This strips ONLY a literal U/u directly after a numeric
+  // prefix, and ONLY that letter -- "5U Whale" becomes "5 Whale" (not
+  // "5Whale" or "5 U Whale"), and anything that doesn't have a number
+  // immediately followed by U is left completely alone. That last part
+  // matters: a star-rating like "2 stars" or "5 Star" is a DIFFERENT
+  // confidence scale, not a unit count, and must never be touched by this
+  // -- the space between the digit and "star(s)" means the regex below
+  // never matches it in the first place.
+  function normalizeUnitSize(raw) {
+    const trimmed = (raw || '').trim();
+    if (!trimmed) return trimmed;
+    return trimmed.replace(/^(-?\d+(?:\.\d+)?)u\b/i, '$1');
   }
 
   // Opens a full HTML document in a new tab as a real page load (via a
@@ -5402,7 +5419,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         historyRows.forEach(r => {
           if (!byCapperCombo[r.capper_id]) byCapperCombo[r.capper_id] = new Map();
           const tier = (r.pick_tier === null || r.pick_tier === undefined) ? '—' : r.pick_tier;
-          const unit = (r.raw_unit_size || '').trim() || '—';
+          const unit = normalizeUnitSize(r.raw_unit_size) || '—';
           const key = `${tier}|${unit}`;
           const m = byCapperCombo[r.capper_id];
           m.set(key, (m.get(key) || 0) + 1);
@@ -6226,11 +6243,25 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     });
   });
 
+  // This popup can't call the main tab's normalizeUnitSize by name (it's a
+  // fully separate window, only window.opener.rest and similar exposed
+  // functions are reachable) -- small enough to duplicate locally rather
+  // than round-trip through opener() for something this trivial. Must stay
+  // in sync with normalizeUnitSize in the main script if that rule ever
+  // changes: strips ONLY a literal U directly after a number ("1U" -> "1",
+  // "5U Whale" -> "5 Whale"), leaving star-ratings and text-only labels like
+  // "POD" or "2 stars" completely untouched since they aren't unit counts.
+  function normalizeUnitSizeLocal(raw) {
+    const trimmed = (raw || '').trim();
+    if (!trimmed) return trimmed;
+    return trimmed.replace(/^(-?\d+(?:\.\d+)?)u\b/i, '$1');
+  }
+
   document.querySelectorAll('input.inline-unitsize-input').forEach(inp => {
     let lastSaved = inp.value;
     inp.addEventListener('blur', async () => {
-      const value = inp.value.trim();
-      if (value === lastSaved) return; // nothing actually changed -- skip the round trip
+      const value = normalizeUnitSizeLocal(inp.value);
+      if (value === lastSaved) { inp.value = value; return; } // nothing actually changed -- skip the round trip
       const op = opener();
       if (!op) return;
       const id = inp.getAttribute('data-id');
@@ -6240,6 +6271,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           method: 'PATCH',
           body: JSON.stringify({ raw_unit_size: value || null })
         });
+        inp.value = value; // reflect the normalized form back so "1U" visibly becomes "1"
         lastSaved = value;
         flashSaveStatus(inp, true);
       } catch (e) {
@@ -9406,7 +9438,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         payload.opening_odds = openingVal ? Number(openingVal) : null;
         payload.closing_odds = closingVal ? Number(closingVal) : null;
         payload.pick_tier = Number($('rqTier').value);
-        payload.raw_unit_size = $('rqUnitSize').value.trim() || null;
+        payload.raw_unit_size = normalizeUnitSize($('rqUnitSize').value) || null;
         await rest(`picks?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
         reviewIndex++;
         renderReviewCard();
@@ -12095,7 +12127,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 201; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 202; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
