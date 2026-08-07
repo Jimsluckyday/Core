@@ -5242,8 +5242,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (p.home_away) pickText += ` (${p.home_away})`;
       if (p.line !== null && p.line !== undefined) pickText += isProp ? ` (${p.line})` : ` (${p.line > 0 ? '+' : ''}${p.line})`;
       if (p.event_name) pickText += ` — ${escapeHtml(p.event_name)}`;
-      if (p.pick_tier > 0) pickText += ` &#11088;T${p.pick_tier}`;
-      else if (p.pick_tier < 0) pickText += ` &#9660;T${p.pick_tier}`;
+      // Tier now has its own editable column (below) instead of being
+      // baked into this text -- the inline star/arrow badge would just be a
+      // second, stale-looking copy of the same number the moment someone
+      // edits it in the new dropdown.
       if (betTypeName.toLowerCase() === 'parlay') {
         pickText += ` <button type="button" class="mini parlay-legs-toggle" data-parlay-id="${p.id}" style="padding:1px 6px;font-size:10px;">&#9662; legs</button>`;
       }
@@ -5274,6 +5276,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // majority of rows, which read as "there's no column for this at
       // all." A little more clutter here is an explicit, accepted tradeoff.
       const dateEnteredCell = p.date_entered || p.event_date;
+      // Tier and Unit size are live, always-editable controls right in the
+      // table -- CONFIRMED as the actual workflow needed: sorting/filtering
+      // this table already lines picks up however makes sense against the
+      // group's own message order, and editing inline here (instead of a
+      // one-at-a-time queue elsewhere) means never losing that arrangement
+      // to jump to a different screen. Each one saves itself the moment it
+      // changes -- see the change/blur listeners near the bottom of this
+      // script -- there is no separate "Save" step for these two fields.
+      const tierCell = `<select class="inline-tier-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;">
+        <option value="-1" ${Number(p.pick_tier) === -1 ? 'selected' : ''}>Tier -1</option>
+        <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>Tier 0</option>
+        <option value="1" ${Number(p.pick_tier) === 1 ? 'selected' : ''}>Tier 1</option>
+        <option value="2" ${Number(p.pick_tier) === 2 ? 'selected' : ''}>Tier 2</option>
+        <option value="3" ${Number(p.pick_tier) === 3 ? 'selected' : ''}>Tier 3</option>
+        <option value="4" ${Number(p.pick_tier) === 4 ? 'selected' : ''}>Tier 4</option>
+      </select>`;
+      const unitSizeCell = `<input type="text" class="inline-unitsize-input" data-id="${p.id}" value="${escapeHtml(p.raw_unit_size || '')}" placeholder="e.g. 2U" style="width:80px;font-family:inherit;font-size:11px;padding:3px 4px;" />`;
       const cells = [
         p.event_date,
         dateEnteredCell,
@@ -5283,6 +5302,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         isProp ? (p.prop_player || '—') : '—',
         isProp ? (p.prop_stat || '—') : '—',
         pickText,
+        tierCell,
+        unitSizeCell,
         oddsText,
         `<span class="stamp ${p.result}">${p.result}</span>`,
         statusText,
@@ -5292,9 +5313,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // Sort/filter value must stay the PLAIN capper name (not the richer
         // HTML with the source_image reference now shown in this column) --
         // same reasoning as odds/result below, which also separate what's
-        // sorted/filtered from what's displayed.
-        const sortVal = i === 9 ? p.result : (i === 8 ? oddsStatus : (i === 2 ? capperName : String(c)));
-        const extraAttr = i === 9 ? ` data-result-cell="${p.id}"` : '';
+        // sorted/filtered from what's displayed. Tier/Unit size (8, 9) have
+        // no filter dropdown at all (see the header below), so their value
+        // here is only ever used as a plain display fallback, never read.
+        const sortVal = i === 11 ? p.result : (i === 10 ? oddsStatus : (i === 2 ? capperName : (i === 8 ? String(p.pick_tier ?? 0) : (i === 9 ? (p.raw_unit_size || '') : String(c)))));
+        const extraAttr = i === 11 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
       const gradeBtns = p.result === 'pending'
@@ -5322,14 +5345,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </tr>`;
     }).join('');
 
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source'];
+    // Tier and Unit size hold a live <select>/<input> instead of plain text,
+    // so they're deliberately left out of the generic sort/filter dropdown
+    // apparatus below (no filter-btn) -- that machinery reads a cell's own
+    // textContent for its filter-panel value list, which would return every
+    // <option>'s text concatenated together for a <select>, not just the
+    // one currently chosen.
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source'];
+    const noFilterCols = new Set(['Tier', 'Unit size']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
           <tr class="header-row">
             ${cols.map((label, i) => `<th data-col="${i}" data-type="str">
               <span class="th-label">${label}</span>
-              <button type="button" class="filter-btn" data-col="${i}">&#9662;</button>
+              ${noFilterCols.has(label) ? '' : `<button type="button" class="filter-btn" data-col="${i}">&#9662;</button>`}
             </th>`).join('')}
             <th>Actions</th>
           </tr>
@@ -5403,7 +5433,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <button type="button" class="quick-filter-btn" data-quick-col="3">Filter by Sport &#9662;</button>
     <button type="button" class="quick-filter-btn" data-quick-col="4">Filter by Bet type &#9662;</button>
     <button type="button" class="quick-filter-btn" data-quick-col="7">Filter by Selection &#9662;</button>
-    <button type="button" class="quick-filter-btn" data-quick-col="8">Filter by Odds Status &#9662;</button>
+    <button type="button" class="quick-filter-btn" data-quick-col="10">Filter by Odds Status &#9662;</button>
   </div>
   <div style="margin-bottom:14px;padding:10px;border:1px dashed #22281f;border-radius:3px;">
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#234d35;font-weight:bold;margin-bottom:8px;">Automation tools — sync schedule/odds &amp; grade results without SQL</div>
@@ -5416,7 +5446,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
   </div>
   ${tableHtml}
-  <div style="font-size:10px;color:#55584d;margin-top:8px;">Click the arrow on any column (or the quick-filter buttons above) to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the query. Use Refresh above after making changes elsewhere to bring this view up to date.</div>
+  <div style="font-size:10px;color:#55584d;margin-top:8px;">Click the arrow on any column (or the quick-filter buttons above) to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the query. Tier and Unit size are directly editable in this table -- change the dropdown or type into the box and it saves immediately, no separate Save step. Use Refresh above after making changes elsewhere to bring this view up to date.</div>
 <script>
 var __sourceQuery = ${JSON.stringify(sourceQuery)};
 var __filterSummary = ${JSON.stringify(filterSummary)};
@@ -5812,9 +5842,10 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           method: 'PATCH',
           body: JSON.stringify({ result: result, graded_at: new Date().toISOString() })
         });
-        // Update this row in place: Result column is the 10th cell (index 9)
-        // -- shifted by the new Date Entered column inserted at index 1.
-        const resultCell = row.children[9];
+        // Update this row in place: Result column is now index 11 -- shifted
+        // by the Date Entered column (index 1) and the Tier/Unit size
+        // columns (indices 8-9) inserted after Pick.
+        const resultCell = row.children[11];
         if (resultCell) { resultCell.innerHTML = stampHtml(result); resultCell.setAttribute('data-value', result); }
         btn.closest('.grade-btns').remove();
 
@@ -6051,7 +6082,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           const oddsParts = [];
           if (oo !== '') oddsParts.push('Open ' + (Number(oo) > 0 ? '+' : '') + oo);
           if (co !== '') oddsParts.push('Close ' + (Number(co) > 0 ? '+' : '') + co);
-          const oddsCell = row.children[8]; // shifted by the new Date Entered column at index 1
+          const oddsCell = row.children[10]; // shifted by Date Entered (index 1) and the new Tier/Unit size columns (8-9)
           if (oddsCell) {
             oddsCell.textContent = oddsParts.join(' / ') || '—';
             oddsCell.setAttribute('data-value', (oddsParts.join(' / ') || '—').toLowerCase());
@@ -6111,6 +6142,73 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     });
   });
 
+  // Tier and Unit size save themselves the instant they change -- no
+  // separate Save button, no confirmation, matching the "flip through the
+  // group/phone and edit as you go" workflow this table exists for. A tiny
+  // inline status word next to the control gives feedback without needing
+  // a popup that would interrupt moving straight to the next row.
+  function flashSaveStatus(el, ok, errMsg) {
+    const prev = el.nextElementSibling && el.nextElementSibling.classList.contains('inline-save-status') ? el.nextElementSibling : null;
+    if (prev) prev.remove();
+    const span = document.createElement('span');
+    span.className = 'inline-save-status';
+    span.style.cssText = 'font-size:9px;margin-left:4px;';
+    span.style.color = ok ? '#2d6a4f' : '#8a2f3a';
+    span.textContent = ok ? 'saved' : ('error: ' + errMsg);
+    el.insertAdjacentElement('afterend', span);
+    if (ok) setTimeout(() => span.remove(), 1500);
+  }
+
+  document.querySelectorAll('select.inline-tier-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const op = opener();
+      if (!op) return;
+      const id = sel.getAttribute('data-id');
+      sel.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ pick_tier: Number(sel.value) })
+        });
+        flashSaveStatus(sel, true);
+      } catch (e) {
+        flashSaveStatus(sel, false, e.message);
+      } finally {
+        sel.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('input.inline-unitsize-input').forEach(inp => {
+    let lastSaved = inp.value;
+    inp.addEventListener('blur', async () => {
+      const value = inp.value.trim();
+      if (value === lastSaved) return; // nothing actually changed -- skip the round trip
+      const op = opener();
+      if (!op) return;
+      const id = inp.getAttribute('data-id');
+      inp.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ raw_unit_size: value || null })
+        });
+        lastSaved = value;
+        flashSaveStatus(inp, true);
+      } catch (e) {
+        flashSaveStatus(inp, false, e.message);
+      } finally {
+        inp.disabled = false;
+      }
+    });
+    // Enter key blurs the field (triggering the save above) instead of
+    // doing nothing, so moving down a list of inputs works the way it
+    // would in a spreadsheet -- type, hit Enter, move to the next one.
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') inp.blur();
+    });
+  });
+
   const refreshBtn = document.getElementById('refreshTabBtn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async () => {
@@ -6136,7 +6234,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   const exportBtn = document.getElementById('exportCsvBtn');
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
-      const cols = ['Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Odds', 'Result', 'Status', 'Source Image'];
+      // CONFIRMED FIX: this used to be missing "Date entered" entirely,
+      // which silently shifted every column after it by one against the
+      // real table -- e.g. the "Capper" header sat over Date Entered's
+      // actual values. Must be kept in exact sync with the real column
+      // order built in allPicksRowsToHtml above.
+      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', 'Tier', 'Unit size', 'Odds', 'Result', 'Status', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6153,7 +6256,24 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // also one unambiguous column with just the filename, not merged
         // text. Derived from cols.length (not a hardcoded count) so adding
         // or removing a column here never silently drops/duplicates one.
-        const cellValues = cols.slice(0, -1).map((_, i) => csvField((row.children[i] || {}).textContent || '').trim());
+        // Tier (8) and Unit size (9) hold a live <select>/<input> instead
+        // of plain text -- textContent would return every option's text
+        // concatenated for the select, and nothing at all for the input
+        // (a form control's typed value is never reflected as textContent),
+        // so both need to read the control's actual .value instead.
+        const cellValues = cols.slice(0, -1).map((_, i) => {
+          const cell = row.children[i];
+          if (!cell) return csvField('');
+          if (i === 8) {
+            const sel = cell.querySelector('select');
+            return csvField(sel ? sel.value : '');
+          }
+          if (i === 9) {
+            const inp = cell.querySelector('input');
+            return csvField(inp ? inp.value.trim() : '');
+          }
+          return csvField(cell.textContent.trim());
+        });
         const sourceImage = csvField(row.dataset.sourceImage || '');
         return [...cellValues, sourceImage];
       });
@@ -11927,7 +12047,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 198; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 199; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
