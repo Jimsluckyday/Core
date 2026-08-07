@@ -544,12 +544,12 @@
           <select id="pickSport"></select>
         </div>
         <div class="field">
-          <label>Date of event</label>
-          <input id="pickDate" type="date" />
-        </div>
-        <div class="field">
           <label>Date entered <span style="font-weight:normal;color:var(--ink-soft);">(when this came from the capper)</span></label>
           <input id="pickDateEntered" type="date" />
+        </div>
+        <div class="field">
+          <label>Date of event</label>
+          <input id="pickDate" type="date" />
         </div>
       </div>
       <div style="font-size:10px;color:var(--ink-soft);margin:-10px 0 12px;">
@@ -5316,7 +5316,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // something to jog memory right there, editing a capper whose
       // history you don't remember means stopping to go dig it up
       // elsewhere, which defeats the point of editing inline at all.
-      const capperUsualCell = escapeHtml(capperUsualMap[p.capper_id] || 'no history yet');
+      // Not escaped again here -- capperUsualMap already escaped each
+      // line's own text individually before joining with a real <br>,
+      // so re-escaping here would show the literal "&lt;br&gt;" text
+      // instead of an actual line break.
+      const capperUsualCell = capperUsualMap[p.capper_id] || 'no history yet';
       const cells = [
         p.event_date,
         dateEnteredCell,
@@ -5415,24 +5419,49 @@ These are almost always the same day, so "Date entered" only fills in a starting
         const historyRows = await restAllPages(
           `picks?select=capper_id,pick_tier,raw_unit_size&capper_id=in.(${distinctCapperIds.join(',')})&is_parlay_leg=eq.false`
         );
-        const byCapperCombo = {};
+        // CONFIRMED, direct feedback: the original flat "top 3 combos
+        // overall" format collapsed exactly the number that matters --
+        // e.g. Nicky Cashin's 9 Tier 1 picks (5 of them at unit size "2",
+        // 4 with nothing recorded) rendered as a single opaque "T1 (9)",
+        // and a low-volume combo (like one Tier 0 pick that DID have a
+        // unit size) could get silently squeezed out of the top-3 cutoff
+        // entirely. Grouped by TIER first instead, same as the Add Pick
+        // tier-history tool this is meant to echo -- one line per tier,
+        // total pick count plus up to the two most common unit sizes
+        // WITHIN that tier, so "5 of 9 use size 2" is directly readable.
+        // Deliberately NOT the full multi-line breakdown with an images
+        // list (that's what the Add Pick tool is for) -- just enough
+        // detail to edit without leaving this table.
+        const byCapperTier = {};
         historyRows.forEach(r => {
-          if (!byCapperCombo[r.capper_id]) byCapperCombo[r.capper_id] = new Map();
           const tier = (r.pick_tier === null || r.pick_tier === undefined) ? '—' : r.pick_tier;
-          const unit = normalizeUnitSize(r.raw_unit_size) || '—';
-          const key = `${tier}|${unit}`;
-          const m = byCapperCombo[r.capper_id];
-          m.set(key, (m.get(key) || 0) + 1);
+          const unit = normalizeUnitSize(r.raw_unit_size);
+          if (!byCapperTier[r.capper_id]) byCapperTier[r.capper_id] = {};
+          if (!byCapperTier[r.capper_id][tier]) byCapperTier[r.capper_id][tier] = { total: 0, unitCounts: new Map() };
+          const bucket = byCapperTier[r.capper_id][tier];
+          bucket.total++;
+          if (unit) bucket.unitCounts.set(unit, (bucket.unitCounts.get(unit) || 0) + 1);
         });
-        Object.keys(byCapperCombo).forEach(capperId => {
-          const combos = [...byCapperCombo[capperId].entries()]
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([key, count]) => {
-              const [tier, unit] = key.split('|');
-              return `T${tier}${unit !== '—' ? '/' + unit : ''} (${count})`;
-            });
-          capperUsualMap[capperId] = combos.join(', ');
+        Object.keys(byCapperTier).forEach(capperId => {
+          const tierData = byCapperTier[capperId];
+          const tierKeys = Object.keys(tierData).sort((a, b) => {
+            if (a === '—') return 1;
+            if (b === '—') return -1;
+            return Number(b) - Number(a);
+          });
+          const lines = tierKeys.map(tier => {
+            const { total, unitCounts } = tierData[tier];
+            const label = tier === '—' ? 'No tier' : `T${tier}`;
+            const topUnits = [...unitCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
+            const unitsText = topUnits.length
+              ? topUnits.map(([u, c]) => `${u} ×${c}`).join(', ')
+              : 'no unit recorded';
+            return escapeHtml(`${label} (${total}): ${unitsText}`);
+          });
+          // Joined with a real <br>, not escaped -- each line's own text was
+          // already escaped individually above, so this stays safe while
+          // still rendering as separate lines in the cell.
+          capperUsualMap[capperId] = lines.join('<br>');
         });
       } catch (e) {
         console.warn('Could not load capper tier/unit-size history for the reference column:', e.message);
@@ -6340,10 +6369,21 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // concatenated for the select, and nothing at all for the input
         // (a form control's typed value is never reflected as textContent),
         // so both need to read the control's actual .value instead.
-        // Capper's usual (8) is plain read-only text, no special handling.
+        // Capper's usual (8) is multiple lines joined with real <br> tags
+        // (one per tier) -- plain .textContent would run them all together
+        // with no separator at all ("T1 (9): 2 x5T0 (35)..."), so this
+        // reads each <br>-separated line and joins them with "; " instead.
         const cellValues = cols.slice(0, -1).map((_, i) => {
           const cell = row.children[i];
           if (!cell) return csvField('');
+          if (i === 8) {
+            const lines = cell.innerHTML.split(/<br\s*\/?>/i).map(h => {
+              const tmp = document.createElement('div');
+              tmp.innerHTML = h;
+              return tmp.textContent.trim();
+            }).filter(Boolean);
+            return csvField(lines.join('; '));
+          }
           if (i === 9) {
             const sel = cell.querySelector('select');
             return csvField(sel ? sel.value : '');
@@ -12127,7 +12167,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 202; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 203; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
