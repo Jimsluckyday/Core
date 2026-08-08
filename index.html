@@ -1829,6 +1829,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 (function() {
   let config = null;   // { url, anonKey }
   let session = null;  // { access_token, refresh_token, user }
+  let refreshTimer = null; // see scheduleTokenRefresh below
   let cappers = [];
   let sports = [];
   let lastFetchedPicks = [];
@@ -1962,24 +1963,54 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return data;
   }
 
+  // CONFIRMED as a real interruption: a session left open continuously
+  // (e.g. working through a long batch of picks) outlives its own access
+  // token -- Supabase JWTs expire after about an hour by default -- and
+  // every call started failing mid-session with no recovery short of
+  // reloading the page. This schedules a silent background refresh well
+  // before that actually happens, using the token's own real "expires_in"
+  // instead of guessing, so the session renews itself indefinitely as long
+  // as the tab stays open and the refresh token itself stays valid.
+  function scheduleTokenRefresh(expiresInSeconds) {
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+    // Refresh 5 minutes before real expiry -- floored so an unexpectedly
+    // short expires_in can never turn this into a refresh loop.
+    const delayMs = Math.max(30, (expiresInSeconds || 3600) - 300) * 1000;
+    refreshTimer = setTimeout(async () => {
+      if (!session || !session.refresh_token) return;
+      try {
+        await refreshSession(session.refresh_token);
+      } catch (e) {
+        // Silent by design -- if the refresh token itself is no longer
+        // valid (e.g. the computer was asleep for days), the next real
+        // action will surface a normal auth error, and rest()'s own
+        // retry-once-on-401 below is a second safety net regardless.
+        console.warn('Background token refresh failed:', e.message);
+      }
+    }, delayMs);
+  }
+
   async function login(email, password) {
     const data = await authFetch('token?grant_type=password', { email, password });
     session = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user };
     await persistRefreshToken(data.refresh_token);
+    scheduleTokenRefresh(data.expires_in);
   }
 
   async function refreshSession(refresh_token) {
     const data = await authFetch('token?grant_type=refresh_token', { refresh_token });
     session = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user };
     await persistRefreshToken(data.refresh_token);
+    scheduleTokenRefresh(data.expires_in);
   }
 
   async function logout() {
     session = null;
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
     await clearStoredSession();
   }
 
-  async function rest(path, options = {}) {
+  async function rest(path, options = {}, isRetryAfterRefresh = false) {
     const headers = Object.assign({
       apikey: config.anonKey,
       Authorization: `Bearer ${session ? session.access_token : config.anonKey}`,
@@ -1989,6 +2020,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!res.ok) {
       let msg = res.statusText;
       try { const e = await res.json(); msg = e.message || msg; } catch (_) {}
+      // Safety net alongside scheduleTokenRefresh above -- covers the case
+      // the background timer can't (a laptop asleep through the scheduled
+      // refresh time wakes up with a real setTimeout that never fired
+      // early to compensate). One silent refresh-and-retry, gated so it
+      // can never loop more than once per call regardless of how it fails.
+      if (res.status === 401 && session && session.refresh_token && !isRetryAfterRefresh) {
+        try {
+          await refreshSession(session.refresh_token);
+          return rest(path, options, true);
+        } catch (e) {
+          // Refresh itself failed (refresh token also expired/revoked) --
+          // fall through and surface the original error below as normal.
+        }
+      }
       throw new Error(msg);
     }
     if (res.status === 204) return null;
@@ -2007,7 +2052,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // on the function itself. The service_role key those functions need to
   // actually write to the database stays entirely server-side, inside the
   // function's own secrets -- it's never touched or exposed here.
-  async function invokeEdgeFunction(functionName, queryString) {
+  async function invokeEdgeFunction(functionName, queryString, isRetryAfterRefresh = false) {
     const res = await fetch(`${config.url}/functions/v1/${functionName}${queryString || ''}`, {
       method: 'POST',
       headers: {
@@ -2018,7 +2063,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const text = await res.text();
     let data;
     try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
-    if (!res.ok) throw new Error(data.error || data.message || `Request failed (${res.status})`);
+    if (!res.ok) {
+      // Same retry-once-on-401 safety net as rest() above -- a sync/grade
+      // run started right as the token was about to expire shouldn't fail
+      // just because of that timing.
+      if (res.status === 401 && session && session.refresh_token && !isRetryAfterRefresh) {
+        try {
+          await refreshSession(session.refresh_token);
+          return invokeEdgeFunction(functionName, queryString, true);
+        } catch (e) {
+          // Refresh itself failed -- fall through to the normal error below.
+        }
+      }
+      throw new Error(data.error || data.message || `Request failed (${res.status})`);
+    }
     return data;
   }
   window.invokeEdgeFunction = invokeEdgeFunction;
@@ -12205,7 +12263,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 205; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 206; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
