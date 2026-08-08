@@ -1271,6 +1271,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <input id="fsTierMinus1Bonus" type="number" step="1" />
           </div>
           <div class="field">
+            <label>Tier -1 confluence weight (%)</label>
+            <input id="fsTierMinus1ConfluenceWeight" type="number" min="0" max="100" step="1" />
+          </div>
+          <div class="field">
             <label>Tier 1 bonus</label>
             <input id="fsTier1Bonus" type="number" step="1" />
           </div>
@@ -1288,7 +1292,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:14px;">
-          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. <strong>Tier -1</strong> is for a pick the capper explicitly signaled as below his normal base confidence (a lotto pick, an explicitly smaller unit size than usual) -- same scaling logic, just typically expected to be a negative number once backtesting shows the pattern is real, since it's meant to actively hurt a score, not just withhold a bonus. Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier away from 0, since one tier being worth adjusting doesn't mean they all are.
+          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. <strong>Tier -1</strong> is for a pick the capper explicitly signaled as below his normal base confidence (a lotto pick, an explicitly smaller unit size than usual) -- same scaling logic, just typically expected to be a negative number once backtesting shows the pattern is real, since it's meant to actively hurt a score, not just withhold a bonus. <strong>Tier -1 confluence weight</strong> is separate from the bonus above and solves a different problem: the bonus only affects a Tier -1 pick's OWN score, it does nothing to stop a pile of low-confidence "lotto"/dartboard picks from several cappers inflating a game's confluence signal at full weight, same as if they were real standalone calls. This is how much a Tier -1 pick counts as "agreement" toward some OTHER capper's confluence bonus on the same game -- defaults to 25%, lower than Parlay leg weight (50%), since an explicit reduced-confidence signal is reasoned as weaker evidence than even a parlay leg call. Combines multiplicatively with Parlay leg weight if a pick is both (a Tier -1 parlay leg counts for less on both counts at once, not just whichever discount is larger). Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier away from 0, since one tier being worth adjusting doesn't mean they all are.
         </div>
         <button id="saveFormulaSettingsBtn" class="btn-danger">Save Formula Changes</button>
         <button class="ghost" id="resetFormulaSettingsBtn">Reset to Defaults</button>
@@ -10117,7 +10121,19 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
     tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
-    parlayLegWeight: 0.5
+    parlayLegWeight: 0.5,
+    // How much a Tier -1 pick counts toward confluence for OTHER cappers'
+    // picks on the same game -- CONFIRMED, direct concern from the project
+    // owner: the tier bonus/penalty above only affects a Tier -1 pick's OWN
+    // score, it does nothing to stop a pile of low-confidence "lotto"/
+    // dartboard picks from a few high-volume cappers inflating a game's
+    // confluence signal at full weight, same as if they were real
+    // standalone calls. Defaults lower than parlayLegWeight (0.5) --
+    // reasoned as weaker evidence than even a parlay leg, since a parlay
+    // leg is still a real standalone-confidence call bundled for other
+    // reasons, while Tier -1 is an explicit statement of reduced
+    // confidence in the pick itself.
+    tierMinus1ConfluenceWeight: 0.25
   };
 
   async function loadScoringConfig() {
@@ -10140,7 +10156,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           tier2BonusPoints: num(r.tier2_bonus_points),
           tier3BonusPoints: num(r.tier3_bonus_points),
           tier4BonusPoints: num(r.tier4_bonus_points),
-          parlayLegWeight: r.parlay_leg_weight !== null && r.parlay_leg_weight !== undefined ? Number(r.parlay_leg_weight) : 0.5
+          parlayLegWeight: r.parlay_leg_weight !== null && r.parlay_leg_weight !== undefined ? Number(r.parlay_leg_weight) : 0.5,
+          tierMinus1ConfluenceWeight: r.tier_minus1_confluence_weight !== null && r.tier_minus1_confluence_weight !== undefined ? Number(r.tier_minus1_confluence_weight) : 0.25
         };
       }
     } catch (e) {
@@ -10181,6 +10198,19 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   // "the same pick" across different cappers.
   function confluenceKey(p) {
     return [p.event_date, p.sport_id, p.bet_type_id, p.selection, p.line, p.prop_player, p.prop_stat].join('|');
+  }
+
+  // How much ONE pick counts as "agreement" toward some OTHER pick's
+  // confluence score. Shared by both Publish Ranking and Formula Backtest
+  // so live scoring and backtesting can never quietly diverge on this.
+  // The two discounts multiply rather than one overriding the other -- a
+  // Tier -1 parlay leg is weaker evidence on both counts at once (a
+  // leg-only call AND an explicit reduced-confidence flag), not just
+  // whichever discount happens to be larger.
+  function confluenceWeightFor(pick) {
+    let w = pick.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
+    if (Number(pick.pick_tier) === -1) w *= scoringConfig.tierMinus1ConfluenceWeight;
+    return w;
   }
 
   // Four configurably-weighted signals: overall record, bet-type record,
@@ -10436,7 +10466,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const group = groups[confluenceKey(entry.pick)] || [];
         const others = group.filter(o => o.pick.capper_id !== entry.pick.capper_id);
         return {
-          confPts: confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: o.isLeg ? scoringConfig.parlayLegWeight : 1 }))),
+          confPts: confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) }))),
           agreeingCappers: others.map(o => ({
             name: o.pick.cappers ? o.pick.cappers.name : '—',
             overallRecord: o.overallRecord,
@@ -11219,7 +11249,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const finalScored = scored.filter(e => !e.pick.is_parlay_leg).map(e => {
         const group = byGameKey[e.gameKey];
         const others = group.filter(o => o.pick.capper_id !== e.pick.capper_id);
-        const confPts = confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: o.pick.is_parlay_leg ? scoringConfig.parlayLegWeight : 1 })));
+        const confPts = confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) })));
         const total = e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + confPts;
         return {
           pick: e.pick,
@@ -11345,7 +11375,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
     tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
-    parlayLegWeight: 0.5
+    parlayLegWeight: 0.5,
+    tierMinus1ConfluenceWeight: 0.25
   };
 
   function populateFormulaSettingsForm(cfg) {
@@ -11358,6 +11389,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     $('fsConfluenceCap').value = cfg.confluenceCapCappers;
     $('fsHotThreshold').value = cfg.hotPickStreakThreshold;
     $('fsTierMinus1Bonus').value = cfg.tierMinus1BonusPoints;
+    $('fsTierMinus1ConfluenceWeight').value = Math.round(cfg.tierMinus1ConfluenceWeight * 100);
     $('fsTier1Bonus').value = cfg.tier1BonusPoints;
     $('fsTier2Bonus').value = cfg.tier2BonusPoints;
     $('fsTier3Bonus').value = cfg.tier3BonusPoints;
@@ -11404,6 +11436,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       confluenceCapCappers: Number($('fsConfluenceCap').value),
       hotPickStreakThreshold: Number($('fsHotThreshold').value),
       tierMinus1BonusPoints: Number($('fsTierMinus1Bonus').value),
+      tierMinus1ConfluenceWeight: Number($('fsTierMinus1ConfluenceWeight').value) / 100,
       tier1BonusPoints: Number($('fsTier1Bonus').value),
       tier2BonusPoints: Number($('fsTier2Bonus').value),
       tier3BonusPoints: Number($('fsTier3Bonus').value),
@@ -11440,6 +11473,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           confluence_cap_cappers: newCfg.confluenceCapCappers,
           hot_pick_streak_threshold: newCfg.hotPickStreakThreshold,
           tier_minus1_bonus_points: newCfg.tierMinus1BonusPoints,
+          tier_minus1_confluence_weight: newCfg.tierMinus1ConfluenceWeight,
           tier1_bonus_points: newCfg.tier1BonusPoints,
           tier2_bonus_points: newCfg.tier2BonusPoints,
           tier3_bonus_points: newCfg.tier3BonusPoints,
@@ -12263,7 +12297,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 206; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 207; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
