@@ -1014,7 +1014,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Breaks down every graded pick by tier — count, win-loss-push, and win % for Tier -1 (explicitly below base, e.g. a lotto pick) through Tier 4 (a capper's highest-confidence pick, however they brand it — Whale of the Day, Lock of the Week, VIP pick, etc.). Select "All cappers" to break it down per capper instead, since cappers use different tiers differently and one capper's Tier 4 may perform very differently than another's. The Straight/Parlay column shows how many of that tier's picks were standalone bets vs. whole parlays (a parlay's tier comes from what the capper called the whole combo, not guessed from its legs) — a second table below shows how the individual games inside those parlays did, since every leg shares its parlay's own tier.
+          Breaks down every graded pick by tier — count, win-loss-push, and win % for Tier -1 (explicitly below base, e.g. a lotto pick) through Tier 4 (a capper's highest-confidence pick, however they brand it — Whale of the Day, Lock of the Week, VIP pick, etc.). Select "All cappers" to see an "all cappers combined" table first (e.g. "Tier 4 picks are 20 for 25 overall") — useful for judging whether a tier is a meaningful signal at all before deciding how much scoring weight to give it — followed by the same breakdown split out per capper, since cappers use tiers differently and one capper's Tier 4 may perform very differently than another's. The Straight/Parlay column shows how many of that tier's picks were standalone bets vs. whole parlays (a parlay's tier comes from what the capper called the whole combo, not guessed from its legs) — a further table below shows how the individual games inside those parlays did, since every leg shares its parlay's own tier.
         </div>
         <div id="potdPerfWrap"></div>
       </div>
@@ -7991,7 +7991,19 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const tiers = [-1, 0, 1, 2, 3, 4];
     const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
 
-    const mainSection = potdTierTableHtml(picks, tiers, tierLabel, 'By tier',
+    // Every capper's picks at each tier combined into one record -- e.g.
+    // "Tier 4 picks are 20 for 25 overall" -- for judging whether a tier is
+    // a meaningful signal at all before deciding how much scoring weight
+    // (if any) to give it. Only shown for "All cappers" -- with one capper
+    // selected, the table below IS already that capper's own combined
+    // numbers, so a second copy of the same table would be redundant.
+    const combinedSection = groupByCapper
+      ? potdTierTableHtml(picks, tiers, tierLabel, 'By tier — all cappers combined',
+          'Every capper\'s picks at each tier combined into one record. Useful for judging whether a tier level is a meaningful signal at all before deciding how much weight, if any, to give it in the scoring formula -- but since cappers use tiers differently, a strong combined number here doesn\'t guarantee any individual capper is personally reliable at that tier. See the per-capper breakdown below for that.',
+          { groupByCapper: false, showStraightParlay: true })
+      : '';
+
+    const mainSection = potdTierTableHtml(picks, tiers, tierLabel, groupByCapper ? 'By tier — by capper' : 'By tier',
       'Straight bets and parlays (counted as one unit each) together -- the Straight/Parlay column shows how many of that tier\'s picks were which. A parlay\'s own tier comes from what the capper called the WHOLE combo, not guessed from its legs -- every leg in a parlay shares that same tier by default. See the table below for how the individual legs did.',
       { groupByCapper, showStraightParlay: true });
 
@@ -8001,7 +8013,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           { groupByCapper, showStraightParlay: false })
       : '';
 
-    wrap.innerHTML = mainSection + legSection;
+    wrap.innerHTML = combinedSection + mainSection + legSection;
   }
 
   $('runPotdPerfBtn').addEventListener('click', runPotdPerf);
@@ -12636,7 +12648,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 208; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 209; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
