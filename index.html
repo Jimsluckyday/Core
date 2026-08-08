@@ -1010,6 +1010,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </div>
           <div style="align-self:flex-end;">
             <button id="runPotdPerfBtn">Run analysis</button>
+            <button class="ghost" id="popPotdPerfBtn">Pop out (sortable)</button>
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
@@ -7566,32 +7567,369 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     return `<tr><td>${label}</td><td>${total}</td>${spCell}<td>${wins}</td><td>${losses}</td><td>${pushes}</td><td><strong>${winPct !== null ? winPct + '%' : '—'}</strong></td></tr>`;
   }
 
-  async function runPotdPerf() {
+  async function fetchPotdPerfPicks() {
     const capperFilter = $('potdCapper').value;
     const sportFilter = $('potdSport').value;
     const from = $('potdFrom').value;
     const to = $('potdTo').value;
+
+    let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
+    if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
+    if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
+    if (from) baseQuery += `&event_date=gte.${from}`;
+    if (to) baseQuery += `&event_date=lte.${to}`;
+    const picks = await restAllPages(baseQuery + '&is_parlay_leg=eq.false');
+    // Legs never show up mixed into the standalone/parlay numbers above
+    // (that would double-count the same real game alongside its own
+    // parlay), but they're fetched separately so a capper's tier tags on
+    // his parlay legs are still visible somewhere -- otherwise a capper
+    // who tags a parlay Tier 3 would look like he's never called a Tier 3
+    // pick at all, even though the tier data genuinely exists and already
+    // feeds Publish Ranking's scoring.
+    const legPicks = await restAllPages(baseQuery + '&is_parlay_leg=eq.true');
+    return { picks, legPicks, capperFilter, sportFilter, from, to };
+  }
+
+  async function runPotdPerf() {
     const wrap = $('potdPerfWrap');
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
-
     try {
-      let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
-      if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
-      if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
-      if (from) baseQuery += `&event_date=gte.${from}`;
-      if (to) baseQuery += `&event_date=lte.${to}`;
-      const picks = await restAllPages(baseQuery + '&is_parlay_leg=eq.false');
-      // Legs never show up mixed into the standalone/parlay numbers above
-      // (that would double-count the same real game alongside its own
-      // parlay), but they're fetched separately so a capper's tier tags on
-      // his parlay legs are still visible somewhere -- otherwise a capper
-      // who tags a parlay Tier 3 would look like he's never called a Tier 3
-      // pick at all, even though the tier data genuinely exists and already
-      // feeds Publish Ranking's scoring.
-      const legPicks = await restAllPages(baseQuery + '&is_parlay_leg=eq.true');
+      const { picks, legPicks, capperFilter } = await fetchPotdPerfPicks();
       renderPotdPerf(picks, legPicks, !capperFilter);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  }
+
+  // ---- Pick Tier Performance pop-out: same underlying data as the inline
+  // report above, but flattened to one row per capper+tier so it can use
+  // the same sortable/filterable table machinery as Capper Performance by
+  // Bet Type -- lets the user sort by capper, by tier, or filter down to
+  // just the rows they care about instead of scanning the static tables.
+  function potdPerfRowsFlat(picks, includeStraightParlay) {
+    const byKey = {};
+    picks.forEach(p => {
+      const tier = Number(p.pick_tier) || 0;
+      const capperName = p.cappers ? p.cappers.name : '—';
+      const key = `${capperName}::${tier}`;
+      if (!byKey[key]) {
+        byKey[key] = { capper_name: capperName, tier, total_picks: 0, straight: 0, parlay: 0, wins: 0, losses: 0, pushes: 0 };
+      }
+      const b = byKey[key];
+      b.total_picks++;
+      if (p.result === 'win') b.wins++;
+      else if (p.result === 'loss') b.losses++;
+      else if (p.result === 'push') b.pushes++;
+      if (includeStraightParlay) {
+        if (p.bet_types && p.bet_types.name === 'Parlay') b.parlay++;
+        else b.straight++;
+      }
+    });
+    return Object.values(byKey).map(b => ({
+      ...b,
+      win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null
+    }));
+  }
+
+  function potdPerfTableHtml(rows, title, tierLabel, includeStraightParlay, filterNote, tableId) {
+    if (!rows.length) {
+      return `<p class="stub-title" style="margin-bottom:8px;">${title}</p><div class="empty-state" style="margin-bottom:20px;">No picks match these filters.</div>`;
+    }
+    const sorted = [...rows].sort((a, b) => a.capper_name.localeCompare(b.capper_name) || a.tier - b.tier);
+
+    function row(r) {
+      const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
+      const spCell = includeStraightParlay
+        ? `<td data-value="${r.straight}/${r.parlay}">${r.straight}/${r.parlay}</td>` : '';
+      return `<tr>
+        <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
+        <td data-value="${r.tier}">${escapeHtml(tierLabel(r.tier))}</td>
+        <td data-value="${r.total_picks}">${r.total_picks}</td>
+        ${spCell}
+        <td data-value="${r.wins}">${r.wins}</td>
+        <td data-value="${r.losses}">${r.losses}</td>
+        <td data-value="${r.pushes}">${r.pushes}</td>
+        <td data-value="${winPctVal}">${r.win_pct !== null && r.win_pct !== undefined ? r.win_pct + '%' : '—'}</td>
+      </tr>`;
+    }
+
+    const cols = [{ label: 'Capper', type: 'str' }, { label: 'Tier', type: 'num' }, { label: 'Total picks', type: 'num' }];
+    if (includeStraightParlay) cols.push({ label: 'Straight/Parlay', type: 'str' });
+    cols.push({ label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' });
+
+    const body = sorted.map(row).join('');
+    return `
+      <p class="stub-title" style="margin-bottom:8px;">${title}</p>
+      <table class="picks-table sortable-table" id="${tableId}">
+        <thead>
+          <tr class="header-row">
+            ${cols.map((c, i) => `<th data-col="${i}" data-type="${c.type}">
+              <span class="th-label">${c.label}</span>
+              <button type="button" class="filter-btn" data-col="${i}">&#9662;</button>
+            </th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:20px;">${filterNote}</div>`;
+  }
+
+  function openPotdPerfTab(picks, legPicks, filterSummary) {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
+    const mainRows = potdPerfRowsFlat(picks, true);
+    const legRows = potdPerfRowsFlat(legPicks, false);
+    const mainHtml = potdPerfTableHtml(mainRows, 'By tier', tierLabel, true,
+      'Straight bets and parlays (counted as one unit each) together — the Straight/Parlay column shows how many of that capper/tier\'s picks were which. A parlay\'s own tier comes from what the capper called the whole combo, not guessed from its legs. Click the arrow on Capper or Tier to sort or filter — e.g. check one tier to compare every capper at that confidence level side by side.',
+      'dataTableMain');
+    const legHtml = legRows.length
+      ? potdPerfTableHtml(legRows, 'By tier — parlay legs (individual games inside a parlay)', tierLabel, false,
+          'Every leg shares its parlay\'s own tier, so this isn\'t a separate confidence signal from the table above — it\'s about volume: how many games a capper is packaging at each level.',
+          'dataTableLegs')
+      : '';
+
+    win.document.open();
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Pick Tier Performance</title>
+<style>
+  :root { --ink-soft: #55584d; }
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
+  .stub-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: #234d35; font-weight: bold; }
+  .picks-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; position: relative; user-select: none; }
+  .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
+  .empty-state { font-style: italic; color: #55584d; }
+  .filter-btn { border: none; background: transparent; cursor: pointer; font-size: 10px; color: #55584d; padding: 2px 4px; margin-left: 4px; border-radius: 2px; }
+  .filter-btn:hover { background: rgba(35,77,53,0.15); }
+  .filter-btn.active { color: #234d35; font-weight: bold; }
+  .filter-panel {
+    position: absolute; top: 100%; left: 0; z-index: 100; background: #fff; color: #22281f;
+    border: 1px solid #22281f; border-radius: 3px; box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+    width: 200px; font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: normal;
+  }
+  .filter-panel .sort-opt { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #eae5d6; }
+  .filter-panel .sort-opt:hover { background: #eae5d6; }
+  .filter-panel .search-box { width: calc(100% - 16px); margin: 8px; padding: 5px 6px; border: 1px solid #b9b09a; border-radius: 2px; font-family: inherit; font-size: 11px; }
+  .filter-panel .value-list { max-height: 160px; overflow-y: auto; border-top: 1px solid #eae5d6; padding: 4px 0; }
+  .filter-panel .value-item { padding: 4px 10px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .filter-panel .value-item:hover { background: #eae5d6; }
+  .filter-panel .value-item input { margin: 0; }
+  .filter-panel .panel-actions { padding: 8px 10px; border-top: 1px solid #eae5d6; display: flex; justify-content: space-between; }
+  .filter-panel .panel-actions button { font-family: inherit; font-size: 11px; padding: 5px 10px; border-radius: 2px; cursor: pointer; }
+  .filter-panel .btn-ok { background: #234d35; color: #eae5d6; border: 1px solid #234d35; }
+  .filter-panel .btn-clear { background: transparent; border: 1px solid #b9b09a; }
+</style>
+</head><body>
+  <h1>Pick Tier Performance</h1>
+  <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${escapeHtml(filterSummary)}</div>
+  ${mainHtml}
+  ${legHtml}
+<script>
+(function() {
+  function wireSortableTable(table) {
+    const tbody = table.tBodies[0];
+    const headerCells = Array.from(table.querySelectorAll('.header-row th'));
+    const columnFilters = {}; // colIndex -> Set of allowed raw values, or null = no restriction
+    let openPanel = null;
+    let openPanelOwner = null;
+
+    function allRows() { return Array.from(tbody.querySelectorAll('tr')); }
+
+    function distinctValues(colIndex) {
+      const map = new Map(); // raw value -> display text
+      allRows().forEach(row => {
+        const cell = row.children[colIndex];
+        if (!cell) return;
+        const raw = cell.getAttribute('data-value');
+        if (!map.has(raw)) map.set(raw, cell.textContent);
+      });
+      return map;
+    }
+
+    function applyAllFilters() {
+      allRows().forEach(row => {
+        let visible = true;
+        for (const colIndex in columnFilters) {
+          const allowed = columnFilters[colIndex];
+          if (!allowed) continue;
+          const cell = row.children[colIndex];
+          if (!cell || !allowed.has(cell.getAttribute('data-value'))) { visible = false; break; }
+        }
+        row.style.display = visible ? '' : 'none';
+      });
+    }
+
+    function sortByColumn(colIndex, type, dir) {
+      const rows = allRows();
+      rows.sort((a, b) => {
+        const av = a.children[colIndex].getAttribute('data-value');
+        const bv = b.children[colIndex].getAttribute('data-value');
+        if (type === 'num') return (parseFloat(av) - parseFloat(bv)) * dir;
+        return av.localeCompare(bv) * dir;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+    }
+
+    function closePanel() {
+      if (openPanel) { openPanel.remove(); openPanel = null; openPanelOwner = null; }
+    }
+
+    function openPanelFor(th, colIndex, type) {
+      closePanel();
+      const values = distinctValues(colIndex);
+      const currentAllowed = columnFilters[colIndex]; // Set or null (null = all allowed)
+
+      const panel = document.createElement('div');
+      panel.className = 'filter-panel';
+
+      const sortAsc = document.createElement('div');
+      sortAsc.className = 'sort-opt';
+      sortAsc.textContent = type === 'num' ? 'Sort Smallest to Largest' : 'Sort A to Z';
+      sortAsc.addEventListener('click', () => { sortByColumn(colIndex, type, 1); closePanel(); });
+
+      const sortDesc = document.createElement('div');
+      sortDesc.className = 'sort-opt';
+      sortDesc.textContent = type === 'num' ? 'Sort Largest to Smallest' : 'Sort Z to A';
+      sortDesc.addEventListener('click', () => { sortByColumn(colIndex, type, -1); closePanel(); });
+
+      const searchBox = document.createElement('input');
+      searchBox.className = 'search-box';
+      searchBox.placeholder = 'Search values...';
+
+      const selectAllRow = document.createElement('label');
+      selectAllRow.className = 'value-item';
+      selectAllRow.style.borderBottom = '1px solid #b9b09a';
+      selectAllRow.style.fontWeight = 'bold';
+      const selectAllCb = document.createElement('input');
+      selectAllCb.type = 'checkbox';
+      const selectAllSpan = document.createElement('span');
+      selectAllSpan.textContent = '(Select All)';
+      selectAllRow.appendChild(selectAllCb);
+      selectAllRow.appendChild(selectAllSpan);
+
+      const valueList = document.createElement('div');
+      valueList.className = 'value-list';
+
+      const checkboxes = [];
+      function updateSelectAllState() {
+        selectAllCb.checked = checkboxes.length > 0 && checkboxes.every(cb => cb.checked);
+      }
+      function renderValueList(filterText) {
+        valueList.innerHTML = '';
+        checkboxes.length = 0;
+        const term = (filterText || '').toLowerCase();
+        Array.from(values.entries())
+          .filter(([raw, text]) => !term || text.toLowerCase().includes(term))
+          .forEach(([raw, text]) => {
+            const item = document.createElement('label');
+            item.className = 'value-item';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !currentAllowed || currentAllowed.has(raw);
+            cb.setAttribute('data-raw', raw);
+            cb.addEventListener('change', updateSelectAllState);
+            const span = document.createElement('span');
+            span.textContent = text || '(blank)';
+            item.appendChild(cb);
+            item.appendChild(span);
+            valueList.appendChild(item);
+            checkboxes.push(cb);
+          });
+        updateSelectAllState();
+      }
+      renderValueList('');
+      searchBox.addEventListener('input', () => renderValueList(searchBox.value));
+      selectAllCb.addEventListener('change', () => {
+        checkboxes.forEach(cb => { cb.checked = selectAllCb.checked; });
+      });
+
+      const actions = document.createElement('div');
+      actions.className = 'panel-actions';
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'btn-clear';
+      clearBtn.textContent = 'Clear filter';
+      clearBtn.addEventListener('click', () => {
+        delete columnFilters[colIndex];
+        th.querySelector('.filter-btn').classList.remove('active');
+        applyAllFilters();
+        closePanel();
+      });
+      const okBtn = document.createElement('button');
+      okBtn.className = 'btn-ok';
+      okBtn.textContent = 'OK';
+      okBtn.addEventListener('click', () => {
+        const allChecked = checkboxes.every(cb => cb.checked);
+        if (allChecked) {
+          delete columnFilters[colIndex];
+          th.querySelector('.filter-btn').classList.remove('active');
+        } else {
+          const allowedSet = new Set(checkboxes.filter(cb => cb.checked).map(cb => cb.getAttribute('data-raw')));
+          columnFilters[colIndex] = allowedSet;
+          th.querySelector('.filter-btn').classList.add('active');
+        }
+        applyAllFilters();
+        closePanel();
+      });
+      actions.appendChild(clearBtn);
+      actions.appendChild(okBtn);
+
+      panel.appendChild(sortAsc);
+      panel.appendChild(sortDesc);
+      panel.appendChild(searchBox);
+      panel.appendChild(selectAllRow);
+      panel.appendChild(valueList);
+      panel.appendChild(actions);
+      th.appendChild(panel);
+      openPanel = panel;
+      openPanelOwner = th;
+    }
+
+    headerCells.forEach((th, idx) => {
+      const btn = th.querySelector('.filter-btn');
+      if (!btn) return;
+      const type = th.getAttribute('data-type');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wasOpenForThis = openPanel && openPanelOwner === th;
+        closePanel();
+        if (!wasOpenForThis) openPanelFor(th, idx, type);
+      });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (openPanel && !openPanel.contains(e.target) && !e.target.classList.contains('filter-btn')) closePanel();
+    });
+  }
+
+  document.querySelectorAll('.sortable-table').forEach(wireSortableTable);
+})();
+<\/script>
+</body></html>`);
+    win.document.close();
+  }
+
+  async function popPotdPerf() {
+    const btn = $('popPotdPerfBtn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    try {
+      const { picks, legPicks, capperFilter, sportFilter, from, to } = await fetchPotdPerfPicks();
+      const capperName = capperFilter ? ($('potdCapper').selectedOptions[0]?.textContent || '') : 'All cappers';
+      const sportName = sportFilter ? ($('potdSport').selectedOptions[0]?.textContent || '') : 'All sports';
+      const summaryParts = [capperName, sportName];
+      summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
+      openPotdPerfTab(picks, legPicks, summaryParts.join(' · '));
+    } catch (e) {
+      alert('Could not open pop-out: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
     }
   }
 
@@ -7667,6 +8005,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   $('runPotdPerfBtn').addEventListener('click', runPotdPerf);
+  $('popPotdPerfBtn').addEventListener('click', popPotdPerf);
 
   async function runAnalytics() {
     const minPicks = Math.max(1, Number($('analyticsMinPicks').value) || 2);
@@ -12297,7 +12636,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 207; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 208; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
