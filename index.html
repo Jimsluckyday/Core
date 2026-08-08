@@ -1292,8 +1292,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <input id="fsTier4Bonus" type="number" step="1" />
           </div>
         </div>
+        <p class="stub-title" style="margin-bottom:8px;">Personal tier calibration (per-capper, independent of the bonuses above)</p>
+        <div class="row">
+          <div class="field">
+            <label>Tier calibration weight (%)</label>
+            <input id="fsTierCalibrationWeight" type="number" min="0" max="100" step="1" />
+          </div>
+          <div class="field">
+            <label>Tier calibration minimum sample</label>
+            <input id="fsTierCalibrationMinSample" type="number" min="1" step="1" />
+          </div>
+        </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:14px;">
-          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. <strong>Tier -1</strong> is for a pick the capper explicitly signaled as below his normal base confidence (a lotto pick, an explicitly smaller unit size than usual) -- same scaling logic, just typically expected to be a negative number once backtesting shows the pattern is real, since it's meant to actively hurt a score, not just withhold a bonus. <strong>Tier -1 confluence weight</strong> is separate from the bonus above and solves a different problem: the bonus only affects a Tier -1 pick's OWN score, it does nothing to stop a pile of low-confidence "lotto"/dartboard picks from several cappers inflating a game's confluence signal at full weight, same as if they were real standalone calls. This is how much a Tier -1 pick counts as "agreement" toward some OTHER capper's confluence bonus on the same game -- defaults to 25%, lower than Parlay leg weight (50%), since an explicit reduced-confidence signal is reasoned as weaker evidence than even a parlay leg call. Combines multiplicatively with Parlay leg weight if a pick is both (a Tier -1 parlay leg counts for less on both counts at once, not just whichever discount is larger). Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier away from 0, since one tier being worth adjusting doesn't mean they all are.
+          <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. <strong>Tier -1</strong> is for a pick the capper explicitly signaled as below his normal base confidence (a lotto pick, an explicitly smaller unit size than usual) -- same scaling logic, just typically expected to be a negative number once backtesting shows the pattern is real, since it's meant to actively hurt a score, not just withhold a bonus. <strong>Tier -1 confluence weight</strong> is separate from the bonus above and solves a different problem: the bonus only affects a Tier -1 pick's OWN score, it does nothing to stop a pile of low-confidence "lotto"/dartboard picks from several cappers inflating a game's confluence signal at full weight, same as if they were real standalone calls. This is how much a Tier -1 pick counts as "agreement" toward some OTHER capper's confluence bonus on the same game -- defaults to 25%, lower than Parlay leg weight (50%), since an explicit reduced-confidence signal is reasoned as weaker evidence than even a parlay leg call. Combines multiplicatively with Parlay leg weight if a pick is both (a Tier -1 parlay leg counts for less on both counts at once, not just whichever discount is larger). Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier away from 0, since one tier being worth adjusting doesn't mean they all are. <strong>Tier calibration</strong> is a completely separate signal from the tier bonuses above, and works even while every one of those stays at 0 -- a tier can look unremarkable in aggregate (e.g. Tier 3 sitting at 50% combined across everyone) while still hiding a real split underneath: one capper going 10-0 in his own Tier 3, another going 0-10 in his, roughly canceling out in the combined number. This compares each capper's OWN record at a tier against his OWN overall rate (not a flat 50%, and not the tier's combined rate either), so a capper who's genuinely better or worse AT a specific tier gets a real bonus or penalty for it, independent of whether that tier is worth anything as a blanket rule for every capper. <strong>Tier calibration minimum sample</strong> is a hard cutoff, not smoothing -- below this many picks at that exact tier for that exact capper, this returns zero, no partial credit. Defaults to 10: doesn't matter if he's called 50 or 500 picks overall, once his own sample at that one tier clears this number it's treated as a strong enough indicator to act on. Raise it if 10 turns out too low once real data comes in (check the Tier calibration points quartile section in Formula Backtest, which only appears once this weight is turned on).
         </div>
         <button id="saveFormulaSettingsBtn" class="btn-danger">Save Formula Changes</button>
         <button class="ghost" id="resetFormulaSettingsBtn">Reset to Defaults</button>
@@ -10484,7 +10495,17 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     // leg is still a real standalone-confidence call bundled for other
     // reasons, while Tier -1 is an explicit statement of reduced
     // confidence in the pick itself.
-    tierMinus1ConfluenceWeight: 0.25
+    tierMinus1ConfluenceWeight: 0.25,
+    // Personal tier calibration -- see tierCalibrationPoints() below for the
+    // full reasoning. Off by default (weight 0), same convention as the
+    // tier bonuses above: build the lever, prove it out via Backtest before
+    // turning it on. Minimum sample defaults to 10 picks at that tier for
+    // that specific capper -- explicit request: doesn't matter if he's
+    // called 50 or 500 picks overall, once his OWN sample at this ONE tier
+    // clears 10 that's judged a strong enough indicator to act on;
+    // adjustable later if that number turns out too low in practice.
+    tierCalibrationWeight: 0,
+    tierCalibrationMinSample: 10
   };
 
   async function loadScoringConfig() {
@@ -10508,7 +10529,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           tier3BonusPoints: num(r.tier3_bonus_points),
           tier4BonusPoints: num(r.tier4_bonus_points),
           parlayLegWeight: r.parlay_leg_weight !== null && r.parlay_leg_weight !== undefined ? Number(r.parlay_leg_weight) : 0.5,
-          tierMinus1ConfluenceWeight: r.tier_minus1_confluence_weight !== null && r.tier_minus1_confluence_weight !== undefined ? Number(r.tier_minus1_confluence_weight) : 0.25
+          tierMinus1ConfluenceWeight: r.tier_minus1_confluence_weight !== null && r.tier_minus1_confluence_weight !== undefined ? Number(r.tier_minus1_confluence_weight) : 0.25,
+          tierCalibrationWeight: r.tier_calibration_weight !== null && r.tier_calibration_weight !== undefined ? Number(r.tier_calibration_weight) : 0,
+          tierCalibrationMinSample: r.tier_calibration_min_sample !== null && r.tier_calibration_min_sample !== undefined ? Number(r.tier_calibration_min_sample) : 10
         };
       }
     } catch (e) {
@@ -10610,12 +10633,44 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     return nominal * trust;
   }
 
-  function scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct) {
+  // A capper's OWN performance at a specific tier, compared to HIS OWN
+  // overall rate -- not a flat 50%, and completely decoupled from the
+  // nominal tier bonus above (which only ever does anything once a tier's
+  // OWN bonus is set above 0). CONFIRMED gap, direct from the project
+  // owner: a tier can look unremarkable in aggregate (e.g. Tier 3 sitting
+  // at 50% combined, per the Pick Tier Performance rollup) while still
+  // hiding a real split underneath -- one capper going 10-0 in his own
+  // Tier 3, another going 0-10 in his, roughly canceling out in the
+  // combined number. That individual signal is worth rewarding/penalizing
+  // on its own, even while the tier-wide nominal bonus stays at 0.
+  // Blends toward the capper's own overall rate as the prior (same pattern
+  // as blendedWinPct for bet-type-within-sport), so it isolates whether
+  // he's unusually good/bad AT this tier specifically, not just generally
+  // good -- a capper who's simply a strong capper overall won't get credit
+  // here just for being himself at every tier.
+  // Gated by a HARD minimum sample size (tierCalibrationMinSample), not
+  // just smoothing -- direct request: a capper who's 2-for-2 at his own
+  // Tier 4 is a genuine standout worth flagging elsewhere (Notable
+  // Statistics), but too small a sample to actually move his score on
+  // every future Tier 4 pick. Below the minimum this returns 0 outright,
+  // same as the bonus above returning 0 outright when its nominal is 0 --
+  // no partial credit for an unproven sample.
+  function tierCalibrationPoints(tierWins, tierLosses, overallAdj) {
+    const weight = scoringConfig.tierCalibrationWeight;
+    if (!weight) return 0;
+    const sample = tierWins + tierLosses;
+    if (sample < scoringConfig.tierCalibrationMinSample) return 0;
+    const tierAdj = blendedWinPct(tierWins, tierLosses, overallAdj);
+    return (tierAdj - overallAdj) * 100 * weight;
+  }
+
+  function scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, tierWins, tierLosses) {
     return {
       overallPts: overallAdj * 100 * scoringConfig.overallWeight,
       betTypePts: betTypeAdj * 100 * scoringConfig.betTypeWeight,
       streakPts: streakFactor(streak) * 100 * scoringConfig.streakWeight,
-      tierPts: tierBonusPoints(tier, tierAdjWinPct)
+      tierPts: tierBonusPoints(tier, tierAdjWinPct),
+      tierCalibrationPts: tierCalibrationPoints(tierWins, tierLosses, overallAdj)
     };
   }
 
@@ -10788,8 +10843,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           betTypeAdjPct: Math.round(betTypeAdj * 1000) / 10, // final blended %, this is what's actually scored
           tierRecord: `${fmt(t.wins)}-${fmt(t.losses)}`, // this capper's own record specifically AT this tier
           tierAdjWinPctPct: Math.round(tierAdjWinPct * 1000) / 10,
+          tierSampleMet: (t.wins + t.losses) >= scoringConfig.tierCalibrationMinSample,
           streak,
-          base: scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct)
+          base: scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, t.wins, t.losses)
         };
       }
 
@@ -10869,7 +10925,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
       const scoredStraight = straightCandidateEntries.map(entry => {
         const { confPts, agreeingCappers } = scoreConfluenceFor(entry);
-        const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + confPts;
+        const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
         return {
           ...entry,
           agreeingCappers,
@@ -10879,6 +10935,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             betTypePts: Math.round(entry.base.betTypePts * 10) / 10,
             streakPts: Math.round(entry.base.streakPts * 10) / 10,
             tierPts: Math.round(entry.base.tierPts * 10) / 10,
+            tierCalibrationPts: Math.round(entry.base.tierCalibrationPts * 10) / 10,
             confluencePts: Math.round(confPts * 10) / 10
           }
         };
@@ -10886,7 +10943,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
       const scoredParlays = parlayBaseEntries.map(entry => {
         const { confPts, legBreakdown } = scoreParlayConfluence(entry);
-        const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + confPts;
+        const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
         return {
           ...entry,
           agreeingCappers: [],
@@ -10897,6 +10954,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             betTypePts: Math.round(entry.base.betTypePts * 10) / 10,
             streakPts: Math.round(entry.base.streakPts * 10) / 10,
             tierPts: Math.round(entry.base.tierPts * 10) / 10,
+            tierCalibrationPts: Math.round(entry.base.tierCalibrationPts * 10) / 10,
             confluencePts: Math.round(confPts * 10) / 10
           }
         };
@@ -11086,6 +11144,22 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             <div class="pr-stat-pts">${s.score.tierPts >= 0 ? '+' : ''}${s.score.tierPts}pt</div>
           </div>` : '';
 
+      // Separate from the nominal tier bonus above -- this compares his OWN
+      // tier record against his OWN overall rate, not a flat 50%, so it can
+      // reward/penalize individual calibration even while the nominal bonus
+      // for this tier sits at 0. Sample note only shows once the weight is
+      // actually on, since below-minimum is a non-issue while it's off anyway.
+      const calibColor = s.score.tierCalibrationPts > 0 ? 'var(--stamp-green)' : (s.score.tierCalibrationPts < 0 ? 'var(--stamp-red)' : 'var(--ink-soft)');
+      const sampleNote = (!s.tierSampleMet && scoringConfig.tierCalibrationWeight)
+        ? ` <span style="font-weight:normal;color:var(--ink-soft);">(sample too small yet -- needs ${scoringConfig.tierCalibrationMinSample})</span>` : '';
+      const tierCalibrationStatBox = p.pick_tier !== 0 ? `
+          <div class="pr-stat">
+            <div class="pr-stat-label">Tier calibration</div>
+            <div class="pr-stat-value" style="color:${calibColor};">${s.tierRecord} at this tier${sampleNote}</div>
+            <div class="pr-stat-sub">vs. his own ${s.overallAdjPct}% overall -- rewards/penalizes how THIS tier compares to HIS baseline</div>
+            <div class="pr-stat-pts">${s.score.tierCalibrationPts >= 0 ? '+' : ''}${s.score.tierCalibrationPts}pt</div>
+          </div>` : '';
+
       return `
       <div class="pr-card" data-pick-id="${p.id}">
         <div class="pr-card-head">
@@ -11115,6 +11189,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             <div class="pr-stat-pts">${s.score.streakPts >= 0 ? '+' : ''}${s.score.streakPts}pt</div>
           </div>
           ${tierStatBox}
+          ${tierCalibrationStatBox}
         </div>
         ${conflictHtml}
         ${confluenceHtml}
@@ -11545,7 +11620,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
         const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
         const streak = computeStreak(hist);
-        const base = scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct);
+        const base = scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, t.wins, t.losses);
 
         const entry = {
           pick: p, overallAdj, betTypeAdj, base,
@@ -11601,13 +11676,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const group = byGameKey[e.gameKey];
         const others = group.filter(o => o.pick.capper_id !== e.pick.capper_id);
         const confPts = confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) })));
-        const total = e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + confPts;
+        const total = e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + e.base.tierCalibrationPts + confPts;
         return {
           pick: e.pick,
           overallAdj: e.overallAdj,
           betTypeAdj: e.betTypeAdj,
           streakPts: e.base.streakPts,
           tierPts: e.base.tierPts,
+          tierCalibrationPts: e.base.tierCalibrationPts,
           tier: Number(e.pick.pick_tier) || 0,
           confPts,
           total: Math.round(total * 10) / 10
@@ -11699,6 +11775,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       <p class="stub-title" style="margin-bottom:8px;">Win % by tier</p>
       <div class="empty-state" style="margin-bottom:18px;">No picks outside Tier 0 in this date range yet -- mark some in the pick entry form to start building data here.</div>`;
 
+    // Only shown once there's real variance to bucket -- with the weight
+    // off (default) or every entry below the minimum sample, every value is
+    // a flat 0 and a quartile split of that is meaningless noise, not a
+    // signal either way.
+    const tierCalibrationSection = entries.some(e => e.tierCalibrationPts !== 0)
+      ? componentSection('Tier calibration points (component)', e => e.tierCalibrationPts)
+      : '';
+
     wrap.innerHTML = `
       <div style="font-size:11px;color:var(--ink-soft);margin-bottom:14px;">
         ${entries.length} graded picks backtested. Baseline win % across everything, with no formula applied at all: <strong>${baselineWinPct !== null ? baselineWinPct + '%' : '—'}</strong> (${overallWins}-${overallLosses}). If the formula is working, higher score buckets below should meaningfully beat this baseline, and lower buckets should fall below it.
@@ -11716,6 +11800,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       ${componentSection('Streak points (component)', e => e.streakPts)}
       ${componentSection('Confluence points (component)', e => e.confPts)}
       ${potdSection}
+      ${tierCalibrationSection}
     `;
   }
 
@@ -11727,7 +11812,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
     tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
     parlayLegWeight: 0.5,
-    tierMinus1ConfluenceWeight: 0.25
+    tierMinus1ConfluenceWeight: 0.25,
+    tierCalibrationWeight: 0, tierCalibrationMinSample: 10
   };
 
   function populateFormulaSettingsForm(cfg) {
@@ -11746,6 +11832,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     $('fsTier3Bonus').value = cfg.tier3BonusPoints;
     $('fsTier4Bonus').value = cfg.tier4BonusPoints;
     $('fsParlayLegWeight').value = Math.round(cfg.parlayLegWeight * 100);
+    $('fsTierCalibrationWeight').value = Math.round(cfg.tierCalibrationWeight * 100);
+    $('fsTierCalibrationMinSample').value = cfg.tierCalibrationMinSample;
     updateWeightTotal();
   }
 
@@ -11792,7 +11880,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       tier2BonusPoints: Number($('fsTier2Bonus').value),
       tier3BonusPoints: Number($('fsTier3Bonus').value),
       tier4BonusPoints: Number($('fsTier4Bonus').value),
-      parlayLegWeight: Number($('fsParlayLegWeight').value) / 100
+      parlayLegWeight: Number($('fsParlayLegWeight').value) / 100,
+      tierCalibrationWeight: Number($('fsTierCalibrationWeight').value) / 100,
+      tierCalibrationMinSample: Number($('fsTierCalibrationMinSample').value)
     };
     if (Object.values(newCfg).some(v => isNaN(v))) {
       alert('One or more fields are blank or not a number — fill in every field before saving.');
@@ -11830,6 +11920,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           tier3_bonus_points: newCfg.tier3BonusPoints,
           tier4_bonus_points: newCfg.tier4BonusPoints,
           parlay_leg_weight: newCfg.parlayLegWeight,
+          tier_calibration_weight: newCfg.tierCalibrationWeight,
+          tier_calibration_min_sample: newCfg.tierCalibrationMinSample,
           updated_at: new Date().toISOString()
         })
       });
@@ -12648,7 +12740,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 209; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 210; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
