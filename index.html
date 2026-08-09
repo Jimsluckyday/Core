@@ -852,11 +852,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button id="autoGradeBtn">Grade Results</button>
             </div>
             <div style="align-self:flex-end;">
+              <button class="ghost" id="autoGradeEspnBtn">Grade Results (ESPN backfill)</button>
+            </div>
+            <div style="align-self:flex-end;">
               <button class="ghost" id="autoBackfillBtn">Backfill Older Date</button>
             </div>
           </div>
           <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-            <strong>Sync Schedule &amp; Odds</strong> fills in start time, home/away, and closing odds for one date — pick a sport, or leave "All sports" to run every sport one at a time automatically. For MLB and NBA specifically, this now also fills in start time (and prop_team, if blank) for Player Props, by matching the player's name against each sport's real roster data (MLB Stats API, and BALLDONTLIE for NBA if a BALLDONTLIE_API_KEY secret is set) — every other sport's props still require manual research via Start Time Exceptions, same as before. <strong>Grade Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. <strong>Backfill Older Date</strong> does the same schedule/home-away sync (no odds) for a date further in the past, all sports at once — meant for catching up historical test data, one day at a time.
+            <strong>Sync Schedule &amp; Odds</strong> fills in start time, home/away, and closing odds for one date — pick a sport, or leave "All sports" to run every sport one at a time automatically. For MLB and NBA specifically, this now also fills in start time (and prop_team, if blank) for Player Props, by matching the player's name against each sport's real roster data (MLB Stats API, and BALLDONTLIE for NBA if a BALLDONTLIE_API_KEY secret is set) — every other sport's props still require manual research via Start Time Exceptions, same as before. <strong>Grade Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. <strong>Grade Results (ESPN backfill)</strong> does the exact same grading job, but pulls final scores from ESPN instead of TheRundown — use this one for dates older than about a week, since TheRundown's free plan only keeps a rolling window of recent history and 403s on anything older; TheRundown-based Grade Results stays the normal choice for anything recent. <strong>Backfill Older Date</strong> does the same schedule/home-away sync (no odds) for a date further in the past, all sports at once — meant for catching up historical test data, one day at a time.
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -5680,6 +5683,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <label style="font-size:11px;margin-right:10px;">Sport (Sync &amp; Grade) <select id="popAutoSport" style="font-family:inherit;font-size:11px;padding:4px 6px;"><option value="">All sports</option></select></label>
     <button type="button" class="quick-filter-btn" id="popAutoSyncBtn">Sync Schedule &amp; Odds</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeBtn">Grade Results</button>
+    <button type="button" class="quick-filter-btn" id="popAutoGradeEspnBtn">Grade Results (ESPN backfill)</button>
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Backfill Older Date</button>
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
   </div>
@@ -5995,6 +5999,38 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         }
       }
       renderPopAutomationResult('Grading results for ' + date, allResults);
+    } catch (e) {
+      alert('Grading failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('popAutoGradeEspnBtn').addEventListener('click', async () => {
+    const op = opener();
+    if (!op) return;
+    const date = document.getElementById('popAutoDate').value;
+    if (!date) { alert('Pick a date first -- this will not run without one.'); return; }
+    const sportId = document.getElementById('popAutoSport').value;
+    const sportsListForLabel = op.getSports() || [];
+    const sportLabel = sportId ? ((sportsListForLabel.find(s => String(s.id) === sportId) || {}).name || 'that sport') : 'ALL sports';
+    if (!confirm('This will grade Moneyline/Spread/Total picks for ' + sportLabel + ' on ' + date + ', using ESPN scores instead of TheRundown -- use this for dates too old for the TheRundown free plan to reach (older than about a week).\\n\\nThis writes real win/loss results and cannot be automatically undone (a manual Undo Grading tool exists separately, but it is a real fix, not a click-to-undo). Continue?')) return;
+    const btn = document.getElementById('popAutoGradeEspnBtn');
+    btn.disabled = true;
+    document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Checking final scores on ESPN and grading -- one sport at a time...</div>';
+    try {
+      const sportsList = op.getSports() || [];
+      const sportsToRun = sportId ? sportsList.filter(s => String(s.id) === sportId) : sportsList;
+      const allResults = [];
+      for (const sp of sportsToRun) {
+        try {
+          const data = await op.invokeEdgeFunction('grade_picks_espn_backfill', '?date=' + date + '&sport=' + encodeURIComponent(sp.name));
+          allResults.push(Object.assign({ sport: sp.name }, data));
+        } catch (e) {
+          allResults.push({ sport: sp.name, error: e.message });
+        }
+      }
+      renderPopAutomationResult('Grading results (ESPN backfill) for ' + date, allResults);
     } catch (e) {
       alert('Grading failed: ' + e.message);
     } finally {
@@ -6878,6 +6914,40 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     } finally {
       btn.disabled = false;
       btn.textContent = 'Grade Results';
+    }
+  });
+
+  $('autoGradeEspnBtn').addEventListener('click', async () => {
+    const date = $('autoDate').value;
+    if (!date) { alert('Pick a date first — this will not run without one.'); return; }
+    const sportId = $('autoSport').value;
+    const sportLabel = sportId ? (sports.find(s => String(s.id) === sportId)?.name || 'that sport') : 'ALL sports';
+    if (!confirm(`This will grade Moneyline/Spread/Total picks for ${sportLabel} on ${date}, using ESPN's scores instead of TheRundown -- use this for dates too old for TheRundown's free plan to reach (older than about a week).\n\nThis writes real win/loss results and cannot be automatically undone (a manual Undo Grading tool is available separately, but it's a real fix, not a click-to-undo). Continue?`)) return;
+    const btn = $('autoGradeEspnBtn');
+    btn.disabled = true;
+    btn.textContent = 'Grading...';
+    $('automationResultsWrap').innerHTML = '<div class="empty-state">Checking final scores on ESPN and grading -- one sport at a time...</div>';
+    try {
+      // Same one-sport-per-call reasoning as the TheRundown version above --
+      // keeps each call comfortably inside Supabase's execution ceiling and
+      // means one sport failing never blocks or slows the others.
+      const sportsToRun = sportId ? sports.filter(s => String(s.id) === sportId) : sports;
+      const allResults = [];
+      for (const sp of sportsToRun) {
+        try {
+          const data = await invokeEdgeFunction('grade_picks_espn_backfill', `?date=${date}&sport=${encodeURIComponent(sp.name)}`);
+          allResults.push({ sport: sp.name, ...data });
+        } catch (e) {
+          allResults.push({ sport: sp.name, error: e.message });
+        }
+      }
+      renderAutomationResult(`Grading results (ESPN backfill) for ${date}`, allResults);
+      await refreshPicksList();
+    } catch (e) {
+      alert('Grading failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Grade Results (ESPN backfill)';
     }
   });
 
@@ -12855,7 +12925,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 211; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 212; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
