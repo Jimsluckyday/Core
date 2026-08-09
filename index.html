@@ -5429,7 +5429,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const sportName = p.sports ? p.sports.name : '—';
       const betTypeName = p.bet_types ? p.bet_types.name : '—';
       const isProp = p.bet_types && p.bet_types.uses_prop_fields;
-      let pickText = escapeHtml(p.selection);
+      // Selection is a live input, not plain text -- direct request to fix
+      // typos (e.g. "Cincinatti", "Aryana Sabalenka") inline instead of
+      // needing Full edit, which switches away to the other browser tab
+      // entirely. Home/Away and Line stay plain trailing annotations here
+      // (Home/Away already has its own inline expanding editor via "Edit
+      // odds/H-A"; Line wasn't part of this request).
+      let pickText = `<input type="text" class="inline-selection-input" data-id="${p.id}" value="${escapeHtml(p.selection)}" style="width:150px;font-family:inherit;font-size:11px;padding:3px 4px;" />`;
       if (p.home_away) pickText += ` (${p.home_away})`;
       if (p.line !== null && p.line !== undefined) pickText += isProp ? ` (${p.line})` : ` (${p.line > 0 ? '+' : ''}${p.line})`;
       // Event name now has its own editable column (below) instead of being
@@ -5534,13 +5540,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // Sort/filter value must stay the PLAIN capper name (not the richer
         // HTML with the source_image reference now shown in this column) --
         // same reasoning as odds/result below, which also separate what's
-        // sorted/filtered from what's displayed. Capper's usual/Tier/Unit
-        // size/Event name/Start time (8, 9, 10, 14, 15) have no filter
-        // dropdown at all (see the header below), so their value here is
-        // only ever a plain display fallback, never read -- except Start
-        // time, whose raw ISO string sorts correctly as plain text too
-        // (lexicographic ISO order matches chronological order).
-        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : String(c)))))));
+        // sorted/filtered from what's displayed. Pick/Capper's usual/Tier/
+        // Unit size/Event name/Start time (7, 8, 9, 10, 14, 15) have no
+        // filter dropdown at all (see the header below), so their value
+        // here is only ever a plain display fallback, never read -- except
+        // Pick and Start time, whose plain selection text / raw ISO string
+        // sort correctly as plain text too (lexicographic ISO order matches
+        // chronological order for Start time).
+        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : String(c))))))));
         const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
@@ -5581,7 +5588,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
     const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing'];
-    const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time']);
+    const noFilterCols = new Set(['Pick', "Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -6534,7 +6541,18 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       if (!op) return;
       const id = btn.getAttribute('data-id');
       const row = btn.closest('tr');
-      const summary = row ? (row.children[7] ? row.children[7].textContent.trim() : '') : ''; // Pick column, shifted by the new Date Entered column at index 1
+      // Pick column (shifted by the new Date Entered column at index 1) now
+      // holds a live <input> for Selection -- .textContent would read as
+      // empty (inputs have no text content), so the confirm dialog would
+      // otherwise show a blank pick description. Built from the input's
+      // value plus the Home/Away data attribute directly, NOT the cell's
+      // own textContent -- that cell can also transiently hold a "saved"
+      // status indicator right after an edit (see flashSaveStatus), which
+      // would otherwise bleed into this confirmation text.
+      const pickCell = row ? row.children[7] : null;
+      const selInput = pickCell ? pickCell.querySelector('input') : null;
+      let summary = selInput ? selInput.value.trim() : '';
+      if (row && row.dataset.homeAway) summary += ' (' + row.dataset.homeAway + ')';
       if (!confirm('Delete this pick permanently?\\n\\n' + summary + '\\n\\nThis cannot be undone.')) return;
       btn.disabled = true;
       try {
@@ -6636,6 +6654,35 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') inp.blur();
     });
+  });
+
+  document.querySelectorAll('input.inline-selection-input').forEach(inp => {
+    let lastSaved = inp.value;
+    inp.addEventListener('blur', async () => {
+      const value = inp.value.trim();
+      // Selection is a required field on every pick -- unlike Event
+      // name/Start time, it can't legitimately be blanked out, so an
+      // empty value just reverts rather than saving.
+      if (!value) { inp.value = lastSaved; return; }
+      if (value === lastSaved) return;
+      const op = opener();
+      if (!op) return;
+      const id = inp.getAttribute('data-id');
+      inp.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ selection: value })
+        });
+        lastSaved = value;
+        flashSaveStatus(inp, true);
+      } catch (e) {
+        flashSaveStatus(inp, false, e.message);
+      } finally {
+        inp.disabled = false;
+      }
+    });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
   });
 
   document.querySelectorAll('input.inline-eventname-input').forEach(inp => {
@@ -6786,6 +6833,27 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
               return tmp.textContent.trim();
             }).filter(Boolean);
             return csvField(lines.join('; '));
+          }
+          if (i === 7) {
+            // Pick also holds a live <input> now (the Selection text) --
+            // same reasoning as Tier/Unit size below, read .value instead
+            // of textContent. The Home/Away and Line annotations that used
+            // to be baked into this same plain-text cell aren't part of
+            // the input itself anymore, so they're reconstructed here from
+            // the row's own data attributes (already present for the
+            // parlay-leg cascade autofill) rather than dropped from the
+            // export entirely.
+            const inp = cell.querySelector('input');
+            let val = inp ? inp.value.trim() : cell.textContent.trim();
+            // Plain string concatenation, NOT a template literal -- this
+            // whole block is text inside the outer template literal that
+            // builds this entire pop-out, so an actual backtick anywhere in
+            // this region (even inside a comment) breaks that outer
+            // literal's own parsing, the exact trap already documented
+            // elsewhere in this file.
+            if (row.dataset.homeAway) val += ' (' + row.dataset.homeAway + ')';
+            if (row.dataset.cascadeLine) val += ' (' + row.dataset.cascadeLine + ')';
+            return csvField(val);
           }
           if (i === 9) {
             const sel = cell.querySelector('select');
@@ -12962,7 +13030,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 217; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 218; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
