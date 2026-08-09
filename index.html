@@ -2208,7 +2208,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
   // ---------- Main app: cappers ----------
   async function refreshCappers(selectId) {
-    cappers = await rest('cappers?select=id,name&order=name.asc');
+    cappers = await rest('cappers?select=id,name,no_tier_signal&order=name.asc');
     const sel = $('pickCapper');
     const keep = selectId || sel.value;
     sel.innerHTML = cappers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
@@ -2323,9 +2323,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <button type="button" class="capper-cancel-edit-btn" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;font-weight:bold;padding:0;" title="Cancel">&times;</button>
           </span>`;
       }
+      // "No tiers" toggle -- direct request: some cappers never give a
+      // confidence signal at all, and their picks legitimately sit at
+      // Tier 0 forever. Without this, scanning their picks in a report or
+      // Missing Data looks identical to 95 unreviewed picks. Setting it
+      // ONCE here labels every one of that capper's picks as "None given"
+      // instead of "Tier 0" wherever tier is shown -- pick_tier itself
+      // never changes, so scoring is untouched.
+      const noTierChecked = c.no_tier_signal ? ' checked' : '';
       return `
         <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
           ${escapeHtml(c.name)}
+          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
+            <input type="checkbox" class="capper-no-tier-toggle" data-id="${c.id}"${noTierChecked} style="margin:0;"> No tiers
+          </label>
           <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--paper);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
           <button type="button" class="capper-delete-btn" data-id="${c.id}" data-name="${escapeHtml(c.name)}" style="border:none;background:none;color:var(--stamp-red-on-dark);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
         </span>`;
@@ -2366,6 +2377,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') wrap.querySelector(`.capper-save-btn[data-id="${input.getAttribute('data-id')}"]`).click();
         if (e.key === 'Escape') { capperEditingId = null; renderCapperList(); }
+      });
+    });
+
+    wrap.querySelectorAll('.capper-no-tier-toggle').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        const id = cb.getAttribute('data-id');
+        cb.disabled = true;
+        try {
+          await rest(`cappers?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ no_tier_signal: cb.checked }) });
+          const capper = cappers.find(c => String(c.id) === String(id));
+          if (capper) capper.no_tier_signal = cb.checked;
+        } catch (e) {
+          cb.checked = !cb.checked;
+          alert('Could not save: ' + e.message);
+        } finally {
+          cb.disabled = false;
+        }
       });
     });
 
@@ -3288,6 +3316,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('activeCapperBanner').textContent = opt && opt.value ? `Adding picks for: ${opt.textContent}` : '';
   }
   $('pickCapper').addEventListener('change', updateActiveCapperBanner);
+
+  // Direct request: a capper flagged (Setup tab, "No tiers") as never
+  // giving a confidence signal shows "None given" here instead of "Tier 0
+  // — base pick (default)" -- so the person entering a new pick sees the
+  // same expected-pattern signal at entry time, not just when reviewing
+  // later. Only relabels the option text; the saved value stays 0.
+  function updatePickTierZeroLabel() {
+    const sel = $('pickCapper');
+    const capper = cappers.find(c => String(c.id) === String(sel.value));
+    const opt = $('pickTier').querySelector('option[value="0"]');
+    if (!opt) return;
+    opt.textContent = (capper && capper.no_tier_signal) ? 'None given — this capper never gives a tier signal' : 'Tier 0 — base pick (default)';
+  }
+  $('pickCapper').addEventListener('change', updatePickTierZeroLabel);
 
   // ---------- Main app: pick type conditional fields ----------
   // Suggestions keyed by bet type NAME (case-insensitive) — only applies
@@ -4676,6 +4718,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const n = (betTypeName || '').toLowerCase();
     return !!usesPropFields || n.includes('spread') || n.includes('total');
   }
+  // Direct feedback: a Parlay spans multiple games (no single home/away
+  // side to pick) and a game Total/Over-Under is on the COMBINED score of
+  // both teams (also no single side) -- flagging Home/Away as "missing" on
+  // either was pure noise. Checked against the real bet_types list: this
+  // matches "Parlay" and "Total"/"Over/Under" (plus its 1st Half/Period/
+  // First 5/First 7 variants) exactly, without also matching "Team Total"
+  // (id 21) -- a team total DOES pick one specific team, so home/away still
+  // applies there. Player Props are excluded separately at every call site
+  // (a prop already has no home/away side of its own, unrelated to bet
+  // type), so this helper doesn't duplicate that check.
+  function betTypeUsesHomeAway(betTypeName) {
+    const n = (betTypeName || '').toLowerCase().trim();
+    if (n.includes('parlay')) return false;
+    if (n.includes('over/under')) return false;
+    if (n === 'total') return false;
+    return true;
+  }
 
   // Drives the All Picks pop-out's "Missing" column -- a single glance at
   // exactly which fields are actually absent on THIS pick, instead of
@@ -4687,9 +4746,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // checkbox. Flagging it here would just be wrong on every single row.
   function missingFieldsSummary(p, sportName, betTypeName, isProp) {
     const missing = [];
-    if (p.opening_odds === null || p.opening_odds === undefined) missing.push('Opening odds');
-    if (p.closing_odds === null || p.closing_odds === undefined) missing.push('Closing odds');
-    if (!p.home_away && !isProp) missing.push('Home/Away');
+    if (!p.odds_unavailable) {
+      if (p.opening_odds === null || p.opening_odds === undefined) missing.push('Opening odds');
+      if (p.closing_odds === null || p.closing_odds === undefined) missing.push('Closing odds');
+    }
+    if (!p.home_away && !isProp && betTypeUsesHomeAway(betTypeName)) missing.push('Home/Away');
     if (!p.raw_unit_size) missing.push('Unit size');
     if (!p.game_start_time) missing.push('Start time');
     if (sportUsesEventName(sportName) && !p.event_name) missing.push('Event name');
@@ -4724,7 +4785,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const completeness = $('filterCompleteness').value;
     const tierFilter = $('filterTier').value;
 
-    let query = `picks?select=id,selection,line,opening_odds,closing_odds,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
+    let query = `picks?select=id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
     // Supabase silently caps any single response at its own server-side max
     // (confirmed: 1000 rows, regardless of what limit= asks for) -- a limit
     // here only makes sense for a single, non-paginated rest() call safely
@@ -5453,8 +5514,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // below) so the column's own filter dropdown groups picks into clean
       // categories -- "missing both", "missing opening", etc. -- instead of
       // every row's raw odds text being its own unique, unfilterable value.
+      // Direct request: for old picks (especially parlays) where accurate
+      // odds genuinely can't be found months later, a confirmed "checked,
+      // unrecoverable" state reads very differently from "still needs
+      // research" -- odds_unavailable is a real, separate flag (not a fake
+      // odds number), set via the checkbox in the Edit odds expander below.
       let oddsStatus, oddsText;
-      if (!hasOpening && !hasClosing) {
+      if (p.odds_unavailable) {
+        oddsStatus = 'n/a'; oddsText = '<span style="color:#55584d;font-style:italic;">N/A -- confirmed unavailable</span>';
+      } else if (!hasOpening && !hasClosing) {
         oddsStatus = 'missing both'; oddsText = '<span style="color:#8a2f3a;font-weight:bold;">&#9888; NO ODDS</span>';
       } else if (!hasOpening) {
         oddsStatus = 'missing opening'; oddsText = `${oddsParts} <span style="color:#b8860b;font-weight:bold;">&#9888; no opening</span>`;
@@ -5477,9 +5545,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // to jump to a different screen. Each one saves itself the moment it
       // changes -- see the change/blur listeners near the bottom of this
       // script -- there is no separate "Save" step for these two fields.
+      // Direct request: a capper who's flagged as never giving a tier
+      // signal (cappers.no_tier_signal) shows "None given" here instead of
+      // "Tier 0" -- so scanning a batch of 95 picks all sitting at Tier 0
+      // reads as a confirmed, expected pattern for that specific capper
+      // instead of looking like 95 unreviewed picks. Purely a display
+      // label -- the underlying pick_tier value stays 0, untouched, so
+      // scoring is completely unaffected. Still a real dropdown (not
+      // locked), since a capper who's usually blank can still send a real
+      // signal on an individual pick.
+      const tierZeroLabel = (p.cappers && p.cappers.no_tier_signal) ? 'None given' : 'Tier 0';
       const tierCell = `<select class="inline-tier-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;">
         <option value="-1" ${Number(p.pick_tier) === -1 ? 'selected' : ''}>Tier -1</option>
-        <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>Tier 0</option>
+        <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>${tierZeroLabel}</option>
         <option value="1" ${Number(p.pick_tier) === 1 ? 'selected' : ''}>Tier 1</option>
         <option value="2" ${Number(p.pick_tier) === 2 ? 'selected' : ''}>Tier 2</option>
         <option value="3" ${Number(p.pick_tier) === 3 ? 'selected' : ''}>Tier 3</option>
@@ -5528,11 +5606,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // that this made it impossible to even SEE the current value without
       // an extra click, let alone validate it at a glance while scanning a
       // batch. Now a real, always-visible column, same red-border-when-
-      // empty treatment as Start time above. Not shown for Player Props,
-      // same as everywhere else this field is handled -- a prop bet doesn't
-      // have a home/away side of its own.
-      const homeAwayBorder = (p.home_away || isProp) ? '' : 'border:1.5px solid #8a2f3a;';
-      const homeAwayCell = isProp ? '—' : `<select class="inline-homeaway-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;${homeAwayBorder}">
+      // empty treatment as Start time above. Not shown for Player Props
+      // (no home/away side of its own) or for bet types that don't have a
+      // single side either (Parlay, game Total/Over-Under -- see
+      // betTypeUsesHomeAway).
+      const homeAwayApplies = !isProp && betTypeUsesHomeAway(betTypeName);
+      const homeAwayBorder = (p.home_away || !homeAwayApplies) ? '' : 'border:1.5px solid #8a2f3a;';
+      const homeAwayCell = !homeAwayApplies ? '—' : `<select class="inline-homeaway-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;${homeAwayBorder}">
         <option value="" ${!p.home_away ? 'selected' : ''}>—</option>
         <option value="home" ${p.home_away === 'home' ? 'selected' : ''}>Home</option>
         <option value="away" ${p.home_away === 'away' ? 'selected' : ''}>Away</option>
@@ -5580,7 +5660,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
              <button class="mini push" data-id="${p.id}" data-result="push">Push</button>
            </span>`
         : '';
-      return `<tr data-pick-id="${p.id}" data-home-away="${p.home_away || ''}" data-opening-odds="${p.opening_odds ?? ''}" data-closing-odds="${p.closing_odds ?? ''}" data-source-image="${escapeHtml(p.source_image || '')}"
+      return `<tr data-pick-id="${p.id}" data-home-away="${p.home_away || ''}" data-opening-odds="${p.opening_odds ?? ''}" data-closing-odds="${p.closing_odds ?? ''}" data-odds-unavailable="${p.odds_unavailable ? '1' : ''}" data-source-image="${escapeHtml(p.source_image || '')}"
         data-cascade-event-date="${p.event_date}"
         data-cascade-sport-id="${p.sport_id ?? ''}"
         data-cascade-bet-type-id="${p.bet_type_id ?? ''}"
@@ -6481,13 +6561,20 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const id = btn.getAttribute('data-id');
       const openingOdds = row.getAttribute('data-opening-odds');
       const closingOdds = row.getAttribute('data-closing-odds');
+      const oddsUnavailable = row.getAttribute('data-odds-unavailable') === '1';
       const colCount = row.children.length;
 
       const tr = document.createElement('tr');
       tr.className = 'inline-editor-row';
+      // Direct request: for old picks (especially parlays) where accurate
+      // odds genuinely can't be found months later, a confirmed "checked,
+      // unrecoverable" state should be recordable as its own thing rather
+      // than just leaving the fields blank forever, which reads the same
+      // as "still needs research."
       tr.innerHTML = '<td colspan="' + colCount + '">' +
         '<label>Opening odds <input class="editOpeningOdds" type="number" step="1" value="' + openingOdds + '" style="width:80px;"></label>' +
         '<label>Closing odds <input class="editClosingOdds" type="number" step="1" value="' + closingOdds + '" style="width:80px;"></label>' +
+        '<label style="margin-left:8px;"><input type="checkbox" class="editOddsUnavailable"' + (oddsUnavailable ? ' checked' : '') + '> Odds unavailable (checked, cannot be found)</label>' +
         '<button class="mini saveEditBtn">Save</button>' +
         '<button class="mini cancelEditBtn">Cancel</button>' +
       '</td>';
@@ -6499,20 +6586,33 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         if (!op) return;
         const oo = tr.querySelector('.editOpeningOdds').value;
         const co = tr.querySelector('.editClosingOdds').value;
+        const unavailable = tr.querySelector('.editOddsUnavailable').checked;
         try {
           await op.rest('picks?id=eq.' + id, {
             method: 'PATCH',
             body: JSON.stringify({
-              opening_odds: oo === '' ? null : Number(oo),
-              closing_odds: co === '' ? null : Number(co)
+              // Marking unavailable clears any partial odds rather than
+              // leaving a stale number sitting alongside the N/A flag.
+              opening_odds: unavailable ? null : (oo === '' ? null : Number(oo)),
+              closing_odds: unavailable ? null : (co === '' ? null : Number(co)),
+              odds_unavailable: unavailable
             })
           });
-          row.setAttribute('data-opening-odds', oo);
-          row.setAttribute('data-closing-odds', co);
+          row.setAttribute('data-opening-odds', unavailable ? '' : oo);
+          row.setAttribute('data-closing-odds', unavailable ? '' : co);
+          row.setAttribute('data-odds-unavailable', unavailable ? '1' : '');
+          const oddsCell = row.children[11]; // shifted by Date Entered (index 1) and Capper's usual/Tier/Unit size (8-10)
+          if (unavailable) {
+            if (oddsCell) {
+              oddsCell.innerHTML = '<span style="color:#55584d;font-style:italic;">N/A -- confirmed unavailable</span>';
+              oddsCell.setAttribute('data-value', 'n/a');
+            }
+            tr.remove();
+            return;
+          }
           const oddsParts = [];
           if (oo !== '') oddsParts.push('Open ' + (Number(oo) > 0 ? '+' : '') + oo);
           if (co !== '') oddsParts.push('Close ' + (Number(co) > 0 ? '+' : '') + co);
-          const oddsCell = row.children[11]; // shifted by Date Entered (index 1) and Capper's usual/Tier/Unit size (8-10)
           if (oddsCell) {
             oddsCell.textContent = oddsParts.join(' / ') || '—';
             oddsCell.setAttribute('data-value', (oddsParts.join(' / ') || '—').toLowerCase());
@@ -10311,7 +10411,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
     wrap.innerHTML = '<div class="empty-state">Loading incomplete picks...</div>';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,game_start_time,result,pick_tier,raw_unit_size,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,pick_tier,raw_unit_size,capper_id,sport_id,bet_type_id,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -10324,13 +10424,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // scope (see sportUsesEventName/betTypeUsesLine) -- re-check every
       // checked field explicitly here rather than trusting the raw OR
       // above, same reasoning as the Missing Data tool's post-fetch filter.
+      // odds_unavailable/betTypeUsesHomeAway are the same idea for
+      // confirmed-can't-find odds and Parlay/Total's lack of a single side.
       picks = picks.filter(p => {
         const sportName = p.sports ? p.sports.name : '';
         const betTypeName = p.bet_types ? p.bet_types.name : '';
         const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
-        if (checkClosing && (p.closing_odds === null || p.closing_odds === undefined)) return true;
-        if (checkOpening && (p.opening_odds === null || p.opening_odds === undefined)) return true;
-        if (checkHomeAway && !p.home_away) return true;
+        if (checkClosing && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+        if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+        if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName)) return true;
         if (checkUnitSize && !p.raw_unit_size) return true;
         if (checkStartTime && !p.game_start_time) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
@@ -10363,10 +10465,13 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const betTypeName = p.bet_types ? p.bet_types.name : '';
     const eventNameScoped = sportUsesEventName(sportName);
     const lineScoped = betTypeUsesLine(betTypeName, isProp);
+    const homeAwayApplies = !isProp && betTypeUsesHomeAway(betTypeName);
     const missingParts = [];
-    if (p.opening_odds === null || p.opening_odds === undefined) missingParts.push('opening odds');
-    if (p.closing_odds === null || p.closing_odds === undefined) missingParts.push('closing odds');
-    if (!p.home_away && !isProp) missingParts.push('home/away');
+    if (!p.odds_unavailable) {
+      if (p.opening_odds === null || p.opening_odds === undefined) missingParts.push('opening odds');
+      if (p.closing_odds === null || p.closing_odds === undefined) missingParts.push('closing odds');
+    }
+    if (!p.home_away && homeAwayApplies) missingParts.push('home/away');
     if (!p.raw_unit_size) missingParts.push('unit size');
     if (!p.game_start_time) missingParts.push('start time');
     if (eventNameScoped && !p.event_name) missingParts.push('event name');
@@ -10397,7 +10502,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')} · ${escapeHtml(p.bet_types ? p.bet_types.name : '—')} · Result: ${p.result}${p.event_name ? ' · ' + escapeHtml(p.event_name) : ''}</div>
         <div style="font-size:12px;color:var(--stamp-red);font-weight:bold;margin-bottom:12px;">Missing: ${missingParts.length ? missingParts.join(', ') : 'nothing currently flagged'}</div>
         <div class="row">
-          ${!isProp ? `<div class="field">
+          ${homeAwayApplies ? `<div class="field">
             <label>Home / Away</label>
             <select id="rqHomeAway">
               <option value="">—</option>
@@ -10407,17 +10512,23 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           </div>` : ''}
           <div class="field">
             <label>Opening odds</label>
-            <input id="rqOpeningOdds" type="number" step="1" value="${p.opening_odds ?? ''}" />
+            <input id="rqOpeningOdds" type="number" step="1" value="${p.opening_odds ?? ''}" ${p.odds_unavailable ? 'disabled' : ''} />
           </div>
           <div class="field">
             <label>Closing odds</label>
-            <input id="rqClosingOdds" type="number" step="1" value="${p.closing_odds ?? ''}" />
+            <input id="rqClosingOdds" type="number" step="1" value="${p.closing_odds ?? ''}" ${p.odds_unavailable ? 'disabled' : ''} />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <label style="font-weight:normal;display:flex;align-items:center;gap:4px;height:32px;">
+              <input type="checkbox" id="rqOddsUnavailable" ${p.odds_unavailable ? 'checked' : ''} /> Odds unavailable
+            </label>
           </div>
           <div class="field">
             <label>Tier</label>
             <select id="rqTier">
               <option value="-1" ${Number(p.pick_tier) === -1 ? 'selected' : ''}>Tier -1</option>
-              <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>Tier 0</option>
+              <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>${(p.cappers && p.cappers.no_tier_signal) ? 'None given' : 'Tier 0'}</option>
               <option value="1" ${Number(p.pick_tier) === 1 ? 'selected' : ''}>Tier 1</option>
               <option value="2" ${Number(p.pick_tier) === 2 ? 'selected' : ''}>Tier 2</option>
               <option value="3" ${Number(p.pick_tier) === 3 ? 'selected' : ''}>Tier 3</option>
@@ -10447,6 +10558,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       <button class="ghost" id="rqExitBtn">Exit Review</button>
     `;
 
+    $('rqOddsUnavailable').addEventListener('change', () => {
+      const checked = $('rqOddsUnavailable').checked;
+      $('rqOpeningOdds').disabled = checked;
+      $('rqClosingOdds').disabled = checked;
+    });
+
     $('rqSaveNextBtn').addEventListener('click', async () => {
       const btn = $('rqSaveNextBtn');
       btn.disabled = true;
@@ -10455,10 +10572,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const payload = {};
         const homeAwayEl = document.getElementById('rqHomeAway');
         if (homeAwayEl) payload.home_away = homeAwayEl.value || null;
+        const oddsUnavailable = $('rqOddsUnavailable').checked;
+        payload.odds_unavailable = oddsUnavailable;
         const openingVal = $('rqOpeningOdds').value;
         const closingVal = $('rqClosingOdds').value;
-        payload.opening_odds = openingVal ? Number(openingVal) : null;
-        payload.closing_odds = closingVal ? Number(closingVal) : null;
+        // Marking unavailable clears any partial odds rather than leaving a
+        // stale number sitting alongside the N/A flag.
+        payload.opening_odds = oddsUnavailable ? null : (openingVal ? Number(openingVal) : null);
+        payload.closing_odds = oddsUnavailable ? null : (closingVal ? Number(closingVal) : null);
         payload.pick_tier = Number($('rqTier').value);
         payload.raw_unit_size = normalizeUnitSize($('rqUnitSize').value) || null;
         const startTimeVal = $('rqStartTime').value;
@@ -10543,7 +10664,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -10560,14 +10681,17 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // MLB pick isn't a gap; MLB picks never have one. Re-checking every
       // checked field explicitly here (rather than trusting the raw OR)
       // also protects against a pick matching only on an UNCHECKED
-      // field's null condition through some other branch.
+      // field's null condition through some other branch. odds_unavailable
+      // and betTypeUsesHomeAway are the same idea applied to odds/Home-Away:
+      // a confirmed-can't-find-it odds flag or a Parlay/Total's lack of a
+      // single side aren't gaps, so they're excluded here too.
       picks = picks.filter(p => {
         const sportName = p.sports ? p.sports.name : '';
         const betTypeName = p.bet_types ? p.bet_types.name : '';
         const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
-        if (checkClosing && (p.closing_odds === null || p.closing_odds === undefined)) return true;
-        if (checkOpening && (p.opening_odds === null || p.opening_odds === undefined)) return true;
-        if (checkHomeAway && !p.home_away) return true;
+        if (checkClosing && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+        if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+        if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName)) return true;
         if (checkUnitSize && !p.raw_unit_size) return true;
         if (checkStartTime && !p.game_start_time) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
@@ -13082,7 +13206,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 219; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 220; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
