@@ -4677,6 +4677,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return !!usesPropFields || n.includes('spread') || n.includes('total');
   }
 
+  // Drives the All Picks pop-out's "Missing" column -- a single glance at
+  // exactly which fields are actually absent on THIS pick, instead of
+  // needing to scan every column by eye to notice a gap. Deliberately does
+  // NOT include Tier: pick_tier is a NOT NULL column that defaults to 0,
+  // so there is no way to tell a genuine Tier 0 apart from "nobody ever
+  // reviewed this pick's tier" at the database level -- the same limitation
+  // that keeps the Data Review Queue from having a real "Tier missing"
+  // checkbox. Flagging it here would just be wrong on every single row.
+  function missingFieldsSummary(p, sportName, betTypeName, isProp) {
+    const missing = [];
+    if (p.opening_odds === null || p.opening_odds === undefined) missing.push('Opening odds');
+    if (p.closing_odds === null || p.closing_odds === undefined) missing.push('Closing odds');
+    if (!p.home_away && !isProp) missing.push('Home/Away');
+    if (!p.raw_unit_size) missing.push('Unit size');
+    if (!p.game_start_time) missing.push('Start time');
+    if (sportUsesEventName(sportName) && !p.event_name) missing.push('Event name');
+    if (betTypeUsesLine(betTypeName, isProp) && (p.line === null || p.line === undefined)) missing.push('Line');
+    return missing.length ? missing.join(', ') : 'Complete';
+  }
+
   // Opens a full HTML document in a new tab as a real page load (via a
   // Blob URL), rather than opening a blank window and injecting content
   // into it with document.write(). Some browsers/extensions silently
@@ -5486,6 +5506,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
         return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
       })();
       const startTimeCell = `<input type="datetime-local" class="inline-starttime-input" data-id="${p.id}" value="${startTimeLocalVal}" style="font-family:inherit;font-size:11px;padding:2px 3px;" />`;
+      // A single glance at exactly which fields are absent on THIS pick --
+      // direct request so sorting/filtering by this column groups "missing
+      // closing odds" rows together, "missing start time" rows together,
+      // etc., instead of scanning every column by eye to notice a gap.
+      const missingCell = missingFieldsSummary(p, sportName, betTypeName, isProp);
       const cells = [
         p.event_date,
         dateEnteredCell,
@@ -5502,7 +5527,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         `<span class="stamp ${p.result}">${p.result}</span>`,
         escapeHtml(p.source_image || '—'),
         eventNameCell,
-        startTimeCell
+        startTimeCell,
+        missingCell
       ];
       const cellsHtml = cells.map((c, i) => {
         // Sort/filter value must stay the PLAIN capper name (not the richer
@@ -5554,7 +5580,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // "Status" (Published/Draft) removed -- direct feedback that it wasn't
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time'];
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing'];
     const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
@@ -6714,7 +6740,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // masking this gap until Missing Data (v215) made this the only
       // export path for that workflow. Added as the first column, reading
       // the same data-pick-id attribute the row itself already carries.
-      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Source Image'];
+      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6779,9 +6805,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const eventNameVal = csvField(eventNameCell ? (eventNameCell.querySelector('input')?.value.trim() || '') : '');
         const startTimeCell = row.children[15];
         const startTimeVal = csvField(startTimeCell ? (startTimeCell.querySelector('input')?.value || '') : '');
+        // Missing (table col 16) is plain text, same as columns 0-12 --
+        // read directly by position like those, just not part of that
+        // contiguous 0-12 range since it sits after the two input columns.
+        const missingCell = row.children[16];
+        const missingVal = csvField(missingCell ? missingCell.textContent.trim() : '');
         const sourceImage = csvField(row.dataset.sourceImage || '');
         const id = csvField(row.dataset.pickId || '');
-        return [id, ...cellValues, eventNameVal, startTimeVal, sourceImage];
+        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, sourceImage];
       });
       const csvContent = [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -12931,7 +12962,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 216; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 217; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
