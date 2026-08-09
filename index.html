@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1710,96 +1710,72 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div class="checkbox-row"><input type="checkbox" id="rqCheckOpening" /><label for="rqCheckOpening">Opening odds</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckOpening">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="rqCheckHomeAway" checked /><label for="rqCheckHomeAway">Home / Away</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckHomeAway">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="rqCheckUnitSize" /><label for="rqCheckUnitSize">No unit size recorded</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckUnitSize">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckStartTime" /><label for="rqCheckStartTime">Start time</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckStartTime">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckEventName" /><label for="rqCheckEventName">Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA)</span></label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckEventName">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckLine" /><label for="rqCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckLine">Only</button></div>
             <button type="button" class="ghost small" id="rqSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Click "Only" next to any field to isolate to just that one in a single click (unchecks the other three), or "Select all" to go back to checking everything at once — handy for switching between "just clear out closing odds today" and "show me everything incomplete" without manually clicking each box. Once started, each pick is shown one at a time — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left. Tier and Unit size are always editable on every card regardless of which boxes are checked above, since there's no reason to make a separate trip back here just to fix the tier while a pick is already open for something else.
+          Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Click "Only" next to any field to isolate to just that one in a single click (unchecks the others), or "Select all" to go back to checking everything at once — handy for switching between "just clear out closing odds today" and "show me everything incomplete" without manually clicking each box. Once started, each pick is shown one at a time — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left. Tier and Unit size are always editable on every card regardless of which boxes are checked above, since there's no reason to make a separate trip back here just to fix the tier while a pick is already open for something else.
         </div>
         <button id="startReviewQueueBtn">Start review</button>
         <div id="reviewQueueWrap" style="margin-top:14px;"></div>
       </div>
     </div>
 
-    <!-- ODDS EXCEPTIONS (internal only -- picks missing odds, any grading status) -->
+    <!-- MISSING DATA (internal only -- unified finder for any incomplete field on any pick, regardless of grading status. Replaces the old separate Odds Exceptions and Start Time Exceptions tools -- both were the same idea (find picks with a hole in a specific field) split across separate panels, which made it easy to forget one existed while chasing the other. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Odds exceptions <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— picks missing odds, regardless of grading status</span>
-        <button class="ghost small" id="toggleOddsExceptionsBtn">Show tool</button>
+        Missing data <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— find picks missing any field, regardless of grading status</span>
+        <button class="ghost small" id="toggleMissingDataBtn">Show tool</button>
       </p>
-      <div id="oddsExceptionsPanel" style="display:none;">
+      <div id="missingDataPanel" style="display:none;">
         <div class="row">
           <div class="field">
             <label>Capper</label>
-            <select id="oeCapper"><option value="">All cappers</option></select>
+            <select id="mdCapper"><option value="">All cappers</option></select>
           </div>
           <div class="field">
             <label>Sport</label>
-            <select id="oeSport"><option value="">All sports</option></select>
+            <select id="mdSport"><option value="">All sports</option></select>
           </div>
           <div class="field">
-            <label>Missing</label>
-            <select id="oeMissing">
-              <option value="closing_any">Missing closing (don't care about opening)</option>
-              <option value="opening_any">Missing opening (don't care about closing)</option>
-              <option value="either">Missing anything (opening, closing, or both)</option>
-              <option value="closing">Missing closing, but has opening</option>
-              <option value="opening">Missing opening, but has closing</option>
-              <option value="both">Missing both entirely</option>
+            <label>Status</label>
+            <select id="mdStatus">
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="win">Win</option>
+              <option value="loss">Loss</option>
+              <option value="push">Push</option>
             </select>
           </div>
           <div class="field">
             <label>From date</label>
-            <input id="oeFrom" type="date" />
+            <input id="mdFrom" type="date" />
           </div>
           <div class="field">
             <label>To date</label>
-            <input id="oeTo" type="date" />
+            <input id="mdTo" type="date" />
           </div>
-          <div style="align-self:flex-end;display:flex;gap:8px;">
-            <button id="findOddsExceptionsBtn">Find missing odds</button>
-            <button class="ghost" id="openOddsExceptionsPopoutBtn">Open in new tab &#8599;</button>
+        </div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Find picks missing:</label>
+          <div style="display:flex;gap:20px;margin-top:6px;flex-wrap:wrap;align-items:center;">
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckClosing" checked /><label for="mdCheckClosing">Closing odds</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckClosing">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckOpening" checked /><label for="mdCheckOpening">Opening odds</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckOpening">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckHomeAway" /><label for="mdCheckHomeAway">Home / Away</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckHomeAway">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckUnitSize" /><label for="mdCheckUnitSize">Unit size</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckUnitSize">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckStartTime" /><label for="mdCheckStartTime">Start time</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckStartTime">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckEventName" /><label for="mdCheckEventName">Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckEventName">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckLine" /><label for="mdCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLine">Only</button></div>
+            <button type="button" class="ghost small" id="mdSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Unlike Grading Exceptions above (which only looks at still-pending picks), this checks EVERY pick regardless of result — a pick can already be graded win/loss/push and still be missing odds entirely, which matters just as much for published data integrity. Export to CSV, research the approximate odds (an AI chat search, Covers, Flashscore, etc. all work fine — this is for historical backfill, so exact precision isn't required), then paste the results into Grading Corrections below using just id and opening_odds/closing_odds — no need to touch result at all if grading is already correct. "Open in new tab" gives you the same sortable, filterable spreadsheet view used elsewhere — useful for grouping by Selection when several cappers picked the same player/team, so you can update them together instead of hunting through a mixed list.
+          Checks EVERY pick regardless of result — a pick can already be graded win/loss/push and still be missing a field entirely, which matters just as much for published data integrity. Click "Only" next to any field to isolate to just that one, or "Select all" to check everything at once. Results open in the same sortable, filterable, inline-editable spreadsheet used for All Picks — sort or filter by any column, edit odds/tier/unit size/event name/start time directly in the table, or export to CSV for offline research (e.g. finding historical odds via Covers/Flashscore, or a game's actual start time).
         </div>
-        <div id="oddsExceptionsWrap"></div>
-      </div>
-    </div>
-
-    <!-- START TIME EXCEPTIONS (internal only -- picks missing a game start time) -->
-    <div class="stub" data-tab="tools">
-      <p class="stub-title">
-        Start time exceptions <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— picks missing a start time, for publishing without going one-by-one</span>
-        <button class="ghost small" id="toggleStartTimeExceptionsBtn">Show tool</button>
-      </p>
-      <div id="startTimeExceptionsPanel" style="display:none;">
-        <div class="row">
-          <div class="field">
-            <label>Capper</label>
-            <select id="steCapper"><option value="">All cappers</option></select>
-          </div>
-          <div class="field">
-            <label>Sport</label>
-            <select id="steSport"><option value="">All sports</option></select>
-          </div>
-          <div class="field">
-            <label>From date</label>
-            <input id="steFrom" type="date" />
-          </div>
-          <div class="field">
-            <label>To date</label>
-            <input id="steTo" type="date" />
-          </div>
-          <div style="align-self:flex-end;">
-            <button id="findStartTimeExceptionsBtn">Find missing start times</button>
-          </div>
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          For when schedule sync hasn't run yet, or couldn't confidently match a game -- rather than opening picks one at a time to find each start time, export the list, research the real start times (an AI chat search works fine), then paste the results into Grading Corrections above using id and a new game_start_time_et column, formatted as "YYYY-MM-DD HH:MM" in US Eastern Time (e.g. "2026-06-05 19:05" for a 7:05 PM ET start) -- it's converted to the correct UTC timestamp automatically, correctly accounting for EDT/EST depending on the date.
-        </div>
-        <div id="startTimeExceptionsWrap"></div>
+        <button id="findMissingDataBtn">Find missing data</button>
       </div>
     </div>
 
@@ -2295,17 +2271,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
       cappers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
     apCapperSel.value = keepApCapper;
 
-    const oeCapperSel = $('oeCapper');
-    const keepOeCapper = oeCapperSel.value;
-    oeCapperSel.innerHTML = '<option value="">All cappers</option>' +
+    const mdCapperSel = $('mdCapper');
+    const keepMdCapper = mdCapperSel.value;
+    mdCapperSel.innerHTML = '<option value="">All cappers</option>' +
       cappers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-    oeCapperSel.value = keepOeCapper;
-
-    const steCapperSel = $('steCapper');
-    const keepSteCapper = steCapperSel.value;
-    steCapperSel.innerHTML = '<option value="">All cappers</option>' +
-      cappers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-    steCapperSel.value = keepSteCapper;
+    mdCapperSel.value = keepMdCapper;
 
     const rqCapperSel = $('rqCapper');
     const keepRqCapper = rqCapperSel.value;
@@ -2677,17 +2647,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     apSportSel.value = keepApSport;
 
-    const oeSportSel = $('oeSport');
-    const keepOeSport = oeSportSel.value;
-    oeSportSel.innerHTML = '<option value="">All sports</option>' +
+    const mdSportSel = $('mdSport');
+    const keepMdSport = mdSportSel.value;
+    mdSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-    oeSportSel.value = keepOeSport;
-
-    const steSportSel = $('steSport');
-    const keepSteSport = steSportSel.value;
-    steSportSel.innerHTML = '<option value="">All sports</option>' +
-      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-    steSportSel.value = keepSteSport;
+    mdSportSel.value = keepMdSport;
 
     const tfSportSel = $('tfSport');
     const keepTfSport = tfSportSel.value;
@@ -4699,6 +4663,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return trimmed.replace(/^(-?\d+(?:\.\d+)?)u\b/i, '$1');
   }
 
+  // Shared scope rules for the "missing data" checks below (Missing Data
+  // tool + Data Review Queue) -- event_name and line are only meaningful
+  // fields for certain sports/bet types, so flagging them as "missing"
+  // outside that scope would just create noise (e.g. every MLB moneyline
+  // pick has no line and never will, that's not a data gap).
+  function sportUsesEventName(sportName) {
+    const n = (sportName || '').toLowerCase();
+    return n.includes('tennis') || n.includes('golf') || n.includes('mma');
+  }
+  function betTypeUsesLine(betTypeName, usesPropFields) {
+    const n = (betTypeName || '').toLowerCase();
+    return !!usesPropFields || n.includes('spread') || n.includes('total');
+  }
+
   // Opens a full HTML document in a new tab as a real page load (via a
   // Blob URL), rather than opening a blank window and injecting content
   // into it with document.write(). Some browsers/extensions silently
@@ -5434,11 +5412,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
       let pickText = escapeHtml(p.selection);
       if (p.home_away) pickText += ` (${p.home_away})`;
       if (p.line !== null && p.line !== undefined) pickText += isProp ? ` (${p.line})` : ` (${p.line > 0 ? '+' : ''}${p.line})`;
-      if (p.event_name) pickText += ` — ${escapeHtml(p.event_name)}`;
-      // Tier now has its own editable column (below) instead of being
-      // baked into this text -- the inline star/arrow badge would just be a
-      // second, stale-looking copy of the same number the moment someone
-      // edits it in the new dropdown.
+      // Event name now has its own editable column (below) instead of being
+      // baked into this text.
       if (betTypeName.toLowerCase() === 'parlay') {
         pickText += ` <button type="button" class="mini parlay-legs-toggle" data-parlay-id="${p.id}" style="padding:1px 6px;font-size:10px;">&#9662; legs</button>`;
       }
@@ -5495,6 +5470,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // so re-escaping here would show the literal "&lt;br&gt;" text
       // instead of an actual line break.
       const capperUsualCell = capperUsualMap[p.capper_id] || 'no history yet';
+      // Event name and Start time are the two new editable columns added
+      // for the unified Missing Data tool -- appended at the END rather
+      // than inserted alongside the fields they're conceptually closest to
+      // (Pick, Event date), so every existing hardcoded column-index check
+      // below (result at 12, odds at 11, capper at 2, tier at 9, unit size
+      // at 10) stays correct without renumbering. Start time reuses the
+      // exact same datetime-local + toISOString conversion Add Pick's own
+      // game_start_time field already uses, for consistency.
+      const eventNameCell = `<input type="text" class="inline-eventname-input" data-id="${p.id}" value="${escapeHtml(p.event_name || '')}" placeholder="e.g. Wimbledon R1" style="width:120px;font-family:inherit;font-size:11px;padding:3px 4px;" />`;
+      const startTimeLocalVal = (() => {
+        if (!p.game_start_time) return '';
+        const dt = new Date(p.game_start_time);
+        const pad = n => String(n).padStart(2, '0');
+        return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+      })();
+      const startTimeCell = `<input type="datetime-local" class="inline-starttime-input" data-id="${p.id}" value="${startTimeLocalVal}" style="font-family:inherit;font-size:11px;padding:2px 3px;" />`;
       const cells = [
         p.event_date,
         dateEnteredCell,
@@ -5509,17 +5500,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
         unitSizeCell,
         oddsText,
         `<span class="stamp ${p.result}">${p.result}</span>`,
-        escapeHtml(p.source_image || '—')
+        escapeHtml(p.source_image || '—'),
+        eventNameCell,
+        startTimeCell
       ];
       const cellsHtml = cells.map((c, i) => {
         // Sort/filter value must stay the PLAIN capper name (not the richer
         // HTML with the source_image reference now shown in this column) --
         // same reasoning as odds/result below, which also separate what's
         // sorted/filtered from what's displayed. Capper's usual/Tier/Unit
-        // size (8, 9, 10) have no filter dropdown at all (see the header
-        // below), so their value here is only ever a plain display
-        // fallback, never read.
-        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : String(c)))));
+        // size/Event name/Start time (8, 9, 10, 14, 15) have no filter
+        // dropdown at all (see the header below), so their value here is
+        // only ever a plain display fallback, never read -- except Start
+        // time, whose raw ISO string sorts correctly as plain text too
+        // (lexicographic ISO order matches chronological order).
+        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : String(c)))))));
         const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
@@ -5559,8 +5554,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // "Status" (Published/Draft) removed -- direct feedback that it wasn't
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source'];
-    const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size']);
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time'];
+    const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -6617,6 +6612,62 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     });
   });
 
+  document.querySelectorAll('input.inline-eventname-input').forEach(inp => {
+    let lastSaved = inp.value;
+    inp.addEventListener('blur', async () => {
+      const value = inp.value.trim();
+      if (value === lastSaved) return;
+      const op = opener();
+      if (!op) return;
+      const id = inp.getAttribute('data-id');
+      inp.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ event_name: value || null })
+        });
+        lastSaved = value;
+        flashSaveStatus(inp, true);
+      } catch (e) {
+        flashSaveStatus(inp, false, e.message);
+      } finally {
+        inp.disabled = false;
+      }
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') inp.blur();
+    });
+  });
+
+  // datetime-local has no separate "typing done" moment the way a text
+  // input's blur does -- the browser's own picker UI commits a value via
+  // the 'change' event, which only fires once a full valid date/time is
+  // set, so this uses 'change' instead of 'blur' (blur alone would fire on
+  // every tab-away even mid-edit, before a full value exists).
+  document.querySelectorAll('input.inline-starttime-input').forEach(inp => {
+    let lastSaved = inp.value;
+    inp.addEventListener('change', async () => {
+      if (inp.value === lastSaved) return;
+      const op = opener();
+      if (!op) return;
+      const id = inp.getAttribute('data-id');
+      inp.disabled = true;
+      try {
+        const isoValue = inp.value ? new Date(inp.value).toISOString() : null;
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ game_start_time: isoValue })
+        });
+        lastSaved = inp.value;
+        flashSaveStatus(inp, true);
+      } catch (e) {
+        flashSaveStatus(inp, false, e.message);
+      } finally {
+        inp.disabled = false;
+      }
+    });
+  });
+
   const refreshBtn = document.getElementById('refreshTabBtn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async () => {
@@ -6647,7 +6698,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // real table -- e.g. the "Capper" header sat over Date Entered's
       // actual values. Must be kept in exact sync with the real column
       // order built in allPicksRowsToHtml above.
-      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source Image'];
+      //
+      // Event name and Start time were added to the TABLE after Source
+      // (table columns 14, 15), but "Source Image" stays LAST in this CSV
+      // on purpose, reading a clean data attribute instead of the table's
+      // own Source column -- so this loop maps table indices to CSV
+      // columns EXPLICITLY below rather than assuming they line up
+      // position-for-position, the exact mistake the "Date entered" fix
+      // above was written to prevent from recurring.
+      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6657,22 +6716,17 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const visibleRows = Array.from(table.tBodies[0].querySelectorAll('tr')).filter(row => row.style.display !== 'none');
       if (!visibleRows.length) { alert('No rows to export -- check your current filters.'); return; }
       const dataRows = visibleRows.map(row => {
-        // All columns EXCEPT the last (Source Image) come from the visible
-        // cells (capper cell's textContent will include the source_image
-        // note text merged in -- that's fine, it's still readable). Source
-        // Image reads the clean data attribute directly instead, so there's
-        // also one unambiguous column with just the filename, not merged
-        // text. Derived from cols.length (not a hardcoded count) so adding
-        // or removing a column here never silently drops/duplicates one.
-        // Tier (9) and Unit size (10) hold a live <select>/<input> instead
-        // of plain text -- textContent would return every option's text
-        // concatenated for the select, and nothing at all for the input
-        // (a form control's typed value is never reflected as textContent),
-        // so both need to read the control's actual .value instead.
-        // Capper's usual (8) is multiple lines joined with real <br> tags
-        // (one per tier) -- plain .textContent would run them all together
-        // with no separator at all ("T1 (9): 2 x5T0 (35)..."), so this
-        // reads each <br>-separated line and joins them with "; " instead.
+        // Table columns 0-12 (Event date through Result) read directly by
+        // position, same as before. Tier (9) and Unit size (10) hold a
+        // live <select>/<input> instead of plain text -- textContent would
+        // return every option's text concatenated for the select, and
+        // nothing at all for the input (a form control's typed value is
+        // never reflected as textContent), so both need to read the
+        // control's actual .value instead. Capper's usual (8) is multiple
+        // lines joined with real <br> tags (one per tier) -- plain
+        // .textContent would run them all together with no separator at
+        // all ("T1 (9): 2 x5T0 (35)..."), so this reads each <br>-separated
+        // line and joins them with "; " instead.
         // CRITICAL, CONFIRMED REAL REGRESSION: a backslash-escaped regex
         // here (originally /<br\s*\/?>/i) silently breaks, because this
         // whole block is itself text inside the outer template literal
@@ -6688,7 +6742,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // safe pattern going forward for anything written inside this
         // specific template -- same lesson as the backtick and dollar-brace
         // rule documented on escapeHtml above, just for backslash escapes.
-        const cellValues = cols.slice(0, -1).map((_, i) => {
+        const cellValues = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => {
           const cell = row.children[i];
           if (!cell) return csvField('');
           if (i === 8) {
@@ -6709,8 +6763,16 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           }
           return csvField(cell.textContent.trim());
         });
+        // Event name (table col 14) and Start time (table col 15) also
+        // hold a live <input> instead of plain text, same reasoning as
+        // Tier/Unit size above -- read .value directly rather than
+        // textContent, which returns nothing for an <input>.
+        const eventNameCell = row.children[14];
+        const eventNameVal = csvField(eventNameCell ? (eventNameCell.querySelector('input')?.value.trim() || '') : '');
+        const startTimeCell = row.children[15];
+        const startTimeVal = csvField(startTimeCell ? (startTimeCell.querySelector('input')?.value || '') : '');
         const sourceImage = csvField(row.dataset.sourceImage || '');
-        return [...cellValues, sourceImage];
+        return [...cellValues, eventNameVal, startTimeVal, sourceImage];
       });
       const csvContent = [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -9700,8 +9762,6 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   });
 
   let lastGradingExceptions = [];
-  let lastOddsExceptions = [];
-  let lastOddsExceptionsQuery = '';
 
   async function findGradingExceptions() {
     const capperFilter = $('geCapper').value;
@@ -10046,7 +10106,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   let reviewIndex = 0;
   let reviewSkippedCount = 0;
 
-  const RQ_CHECKBOX_IDS = ['rqCheckClosing', 'rqCheckOpening', 'rqCheckHomeAway', 'rqCheckUnitSize'];
+  const RQ_CHECKBOX_IDS = ['rqCheckClosing', 'rqCheckOpening', 'rqCheckHomeAway', 'rqCheckUnitSize', 'rqCheckStartTime', 'rqCheckEventName', 'rqCheckLine'];
   document.querySelectorAll('.rq-only-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const onlyId = btn.getAttribute('data-only');
@@ -10067,6 +10127,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     const checkOpening = $('rqCheckOpening').checked;
     const checkHomeAway = $('rqCheckHomeAway').checked;
     const checkUnitSize = $('rqCheckUnitSize').checked;
+    const checkStartTime = $('rqCheckStartTime').checked;
+    const checkEventName = $('rqCheckEventName').checked;
+    const checkLine = $('rqCheckLine').checked;
 
     // Only the CHECKED data types count toward "incomplete" -- unchecking
     // one (e.g. opening odds during testing) means a pick missing only
@@ -10076,6 +10139,9 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     if (checkOpening) conditions.push('opening_odds.is.null');
     if (checkHomeAway) conditions.push('home_away.is.null');
     if (checkUnitSize) conditions.push('raw_unit_size.is.null');
+    if (checkStartTime) conditions.push('game_start_time.is.null');
+    if (checkEventName) conditions.push('event_name.is.null');
+    if (checkLine) conditions.push('line.is.null');
 
     const wrap = $('reviewQueueWrap');
     if (!conditions.length) {
@@ -10085,14 +10151,34 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
     wrap.innerHTML = '<div class="empty-state">Loading incomplete picks...</div>';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,result,pick_tier,raw_unit_size,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,game_start_time,result,pick_tier,raw_unit_size,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
       query += '&order=event_date.asc';
-      reviewQueue = await restAllPages(query);
+      let picks = await restAllPages(query);
+
+      // Event name and line are only real gaps within their specific
+      // scope (see sportUsesEventName/betTypeUsesLine) -- re-check every
+      // checked field explicitly here rather than trusting the raw OR
+      // above, same reasoning as the Missing Data tool's post-fetch filter.
+      picks = picks.filter(p => {
+        const sportName = p.sports ? p.sports.name : '';
+        const betTypeName = p.bet_types ? p.bet_types.name : '';
+        const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
+        if (checkClosing && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+        if (checkOpening && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+        if (checkHomeAway && !p.home_away) return true;
+        if (checkUnitSize && !p.raw_unit_size) return true;
+        if (checkStartTime && !p.game_start_time) return true;
+        if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
+        if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
+        return false;
+      });
+
+      reviewQueue = picks;
       reviewIndex = 0;
       reviewSkippedCount = 0;
       if (!reviewQueue.length) {
@@ -10113,11 +10199,25 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
     }
     const p = reviewQueue[reviewIndex];
     const isProp = p.bet_types && p.bet_types.uses_prop_fields;
+    const sportName = p.sports ? p.sports.name : '';
+    const betTypeName = p.bet_types ? p.bet_types.name : '';
+    const eventNameScoped = sportUsesEventName(sportName);
+    const lineScoped = betTypeUsesLine(betTypeName, isProp);
     const missingParts = [];
     if (p.opening_odds === null || p.opening_odds === undefined) missingParts.push('opening odds');
     if (p.closing_odds === null || p.closing_odds === undefined) missingParts.push('closing odds');
     if (!p.home_away && !isProp) missingParts.push('home/away');
     if (!p.raw_unit_size) missingParts.push('unit size');
+    if (!p.game_start_time) missingParts.push('start time');
+    if (eventNameScoped && !p.event_name) missingParts.push('event name');
+    if (lineScoped && (p.line === null || p.line === undefined)) missingParts.push('line');
+
+    const startTimeLocalVal = (() => {
+      if (!p.game_start_time) return '';
+      const dt = new Date(p.game_start_time);
+      const pad = n => String(n).padStart(2, '0');
+      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    })();
 
     // Tier and unit size are always editable here, not just when they're
     // the reason a pick showed up in the queue -- once a card is already up
@@ -10168,6 +10268,18 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             <label>Unit size</label>
             <input id="rqUnitSize" type="text" placeholder="e.g. 2U, 1.5U, Whale" value="${escapeHtml(p.raw_unit_size || '')}" />
           </div>
+          <div class="field">
+            <label>Start time</label>
+            <input id="rqStartTime" type="datetime-local" value="${startTimeLocalVal}" />
+          </div>
+          ${eventNameScoped ? `<div class="field">
+            <label>Event name</label>
+            <input id="rqEventName" type="text" placeholder="e.g. Wimbledon R1" value="${escapeHtml(p.event_name || '')}" />
+          </div>` : ''}
+          ${lineScoped ? `<div class="field">
+            <label>Line</label>
+            <input id="rqLine" type="number" step="0.5" value="${p.line ?? ''}" />
+          </div>` : ''}
         </div>
       </div>
       <button id="rqSaveNextBtn">Save &amp; Next</button>
@@ -10189,6 +10301,12 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         payload.closing_odds = closingVal ? Number(closingVal) : null;
         payload.pick_tier = Number($('rqTier').value);
         payload.raw_unit_size = normalizeUnitSize($('rqUnitSize').value) || null;
+        const startTimeVal = $('rqStartTime').value;
+        payload.game_start_time = startTimeVal ? new Date(startTimeVal).toISOString() : null;
+        const eventNameEl = document.getElementById('rqEventName');
+        if (eventNameEl) payload.event_name = eventNameEl.value.trim() || null;
+        const lineEl = document.getElementById('rqLine');
+        if (lineEl) payload.line = lineEl.value !== '' ? Number(lineEl.value) : null;
         await rest(`picks?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
         reviewIndex++;
         renderReviewCard();
@@ -10212,279 +10330,106 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 
   $('startReviewQueueBtn').addEventListener('click', startReviewQueue);
 
-  $('toggleOddsExceptionsBtn').addEventListener('click', () => {
-    const panel = $('oddsExceptionsPanel');
+  $('toggleMissingDataBtn').addEventListener('click', () => {
+    const panel = $('missingDataPanel');
     const showing = panel.style.display !== 'none';
     panel.style.display = showing ? 'none' : 'block';
-    $('toggleOddsExceptionsBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+    $('toggleMissingDataBtn').textContent = showing ? 'Show tool' : 'Hide tool';
   });
 
-  async function findOddsExceptions() {
-    const capperFilter = $('oeCapper').value;
-    const sportFilter = $('oeSport').value;
-    const missing = $('oeMissing').value;
-    const from = $('oeFrom').value;
-    const to = $('oeTo').value;
-    const wrap = $('oddsExceptionsWrap');
-    wrap.innerHTML = '<div class="empty-state">Looking up picks missing odds...</div>';
+  const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine'];
+  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line' };
+  document.querySelectorAll('.md-only-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const onlyId = btn.getAttribute('data-only');
+      MD_CHECKBOX_IDS.forEach(id => { $(id).checked = (id === onlyId); });
+    });
+  });
+  $('mdSelectAllBtn').addEventListener('click', () => {
+    MD_CHECKBOX_IDS.forEach(id => { $(id).checked = true; });
+  });
 
-    try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)`;
-      if (missing === 'closing_any') query += `&closing_odds=is.null`;
-      else if (missing === 'opening_any') query += `&opening_odds=is.null`;
-      else if (missing === 'opening') query += `&opening_odds=is.null&closing_odds=not.is.null`;
-      else if (missing === 'closing') query += `&closing_odds=is.null&opening_odds=not.is.null`;
-      else if (missing === 'both') query += `&opening_odds=is.null&closing_odds=is.null`;
-      else query += `&or=(opening_odds.is.null,closing_odds.is.null)`;
-      if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
-      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
-      if (from) query += `&event_date=gte.${from}`;
-      if (to) query += `&event_date=lte.${to}`;
-      query += '&order=event_date.asc';
-      const picks = await restAllPages(query);
-      lastOddsExceptions = picks;
-      lastOddsExceptionsQuery = query;
-      renderOddsExceptions(picks);
-    } catch (e) {
-      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
-    }
-  }
+  async function findMissingData() {
+    const capperFilter = $('mdCapper').value;
+    const sportFilter = $('mdSport').value;
+    const statusFilter = $('mdStatus').value;
+    const from = $('mdFrom').value;
+    const to = $('mdTo').value;
+    const checkClosing = $('mdCheckClosing').checked;
+    const checkOpening = $('mdCheckOpening').checked;
+    const checkHomeAway = $('mdCheckHomeAway').checked;
+    const checkUnitSize = $('mdCheckUnitSize').checked;
+    const checkStartTime = $('mdCheckStartTime').checked;
+    const checkEventName = $('mdCheckEventName').checked;
+    const checkLine = $('mdCheckLine').checked;
 
-  function renderOddsExceptions(picks) {
-    const wrap = $('oddsExceptionsWrap');
-    if (!picks.length) {
-      wrap.innerHTML = '<div class="empty-state">No picks match these filters -- odds are complete.</div>';
+    // Only the CHECKED fields count toward "missing" -- unchecking one
+    // means a pick missing only that specific thing won't show up at all.
+    const conditions = [];
+    if (checkClosing) conditions.push('closing_odds.is.null');
+    if (checkOpening) conditions.push('opening_odds.is.null');
+    if (checkHomeAway) conditions.push('home_away.is.null');
+    if (checkUnitSize) conditions.push('raw_unit_size.is.null');
+    if (checkStartTime) conditions.push('game_start_time.is.null');
+    if (checkEventName) conditions.push('event_name.is.null');
+    if (checkLine) conditions.push('line.is.null');
+
+    if (!conditions.length) {
+      alert('Check at least one field to look for.');
       return;
     }
-    const rowsHtml = picks.map(p => {
-      const hasOpening = p.opening_odds !== null && p.opening_odds !== undefined;
-      const hasClosing = p.closing_odds !== null && p.closing_odds !== undefined;
-      const missingLabel = !hasOpening && !hasClosing ? '<span style="color:var(--stamp-red);font-weight:bold;">Missing both</span>'
-        : !hasOpening ? '<span style="color:var(--stamp-amber);">Missing opening</span>'
-        : '<span style="color:var(--stamp-amber);">Missing closing</span>';
-      const isProp = p.bet_types && p.bet_types.uses_prop_fields;
-      const selectionDisplay = isProp && p.prop_player
-        ? `${escapeHtml(p.prop_player)} — ${escapeHtml(p.prop_stat || '?')} ${escapeHtml(p.selection)}`
-        : escapeHtml(p.selection);
-      return `<tr>
-        <td>${p.event_date}</td>
-        <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
-        <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
-        <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
-        <td>${selectionDisplay}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
-        <td>${p.result}</td>
-        <td>${missingLabel}</td>
-        <td><button type="button" class="ghost small edit-odds-exception-btn" data-id="${p.id}">Edit</button></td>
-      </tr>`;
-    }).join('');
 
-    wrap.innerHTML = `
-      <div style="font-size:12px;margin-bottom:10px;">
-        <strong>${picks.length}</strong> pick${picks.length === 1 ? '' : 's'} missing odds.
-      </div>
-      <button id="exportOddsExceptionsBtn" style="margin-bottom:10px;">&#8681; Export to CSV</button>
-      <table class="picks-table">
-        <thead><tr><th>Event date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Result</th><th>Missing</th><th></th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>`;
-
-    wrap.querySelectorAll('.edit-odds-exception-btn').forEach(btn => {
-      btn.addEventListener('click', () => enterPickEditMode(btn.getAttribute('data-id')));
-    });
-
-    $('exportOddsExceptionsBtn').addEventListener('click', () => {
-      const cols = ['id', 'event_date', 'capper', 'sport', 'bet_type', 'selection', 'line', 'result', 'opening_odds', 'closing_odds'];
-      const rows = picks.map(p => {
-        // For player props, "selection" alone is just "Under"/"Over" -- the
-        // player and stat live in separate columns and were previously
-        // left out of this export entirely, making a perfectly fine prop
-        // look like an unidentifiable data gap. Fold them in here so the
-        // exported selection is actually self-describing.
-        const isProp = p.bet_types && p.bet_types.uses_prop_fields;
-        const selectionText = isProp && p.prop_player
-          ? `${p.prop_player} -- ${p.prop_stat || '?'} ${p.selection}`
-          : p.selection;
-        return [
-          p.id, p.event_date, p.cappers ? p.cappers.name : '', p.sports ? p.sports.name : '',
-          p.bet_types ? p.bet_types.name : '', selectionText, p.line ?? '', p.result,
-          p.opening_odds ?? '', p.closing_odds ?? ''
-        ];
-      });
-
-      const instructions = [
-        '=== INSTRUCTIONS FOR FINDING MISSING ODDS (read this whole block first) ===',
-        '',
-        'This file lists picks missing opening and/or closing odds -- some already have a final result (win/loss/push), others may still be pending. This is for HISTORICAL BACKFILL, so an approximate value is perfectly acceptable -- exact precision is not required, and this becomes far less of an issue once picks are entered in real time rather than backfilled after the fact.',
-        '',
-        'FIRST -- before searching for odds, confirm the entered event_date is actually correct, especially for tennis/golf. Unlike a team\'s line moving, a WRONG DATE means you will never find the right match no matter how long you search on the date given -- you will just come up empty and wrongly conclude there is no reliable source. If a player/selection genuinely does not appear anywhere on the entered date, check up to 4 days AFTER it (never before) for when that specific match actually happened, and use that confirmed date\'s odds instead -- note the date correction plainly, since this is common enough with individual-competitor sports that it is worth checking every time a name does not turn up right away, not just as a last resort.',
-        '',
-        'IMPORTANT -- always look up odds for the line exactly as entered, regardless of what the current/final line for this game looks like. Sports betting lines move constantly between when a capper sends a pick and when it gets researched later -- this is normal and expected, not an error, and does not need investigating. If you cannot find odds for the exact entered line (a common result of normal line movement), it is fine to note the closest available line\'s odds as an approximation, but say so clearly in notes rather than silently substituting it. Do NOT suggest changing the line itself for this reason -- the only exception is an obvious transcription error (see OUTPUT FORMAT), and even then, still look up odds for the originally entered line, not a "corrected" one.',
-        '',
-        'For each row, look up the odds for that specific selection and line on that event_date. A quick search in any AI chat (asking it to search the web) is often enough for well-known matchups; for smaller/lower-profile events, try Covers.com, Flashscore, or a similar public odds/results site by name. If a genuinely reliable number cannot be found, leave that row out of the corrected file entirely rather than guessing.',
-        'TENNIS SPECIFICALLY -- do not assume every tennis pick on a given date belongs to whichever major tournament (e.g. a Grand Slam) other picks that same day happen to be from. There are typically SEVERAL Challenger/125-level events running concurrently in any given week, worldwide, not just one -- if a player name doesn\'t appear in the major tournament\'s draw for that date, do NOT conclude the row is unresolvable after checking just one or two alternatives. Search that specific player\'s name directly (via Flashscore or general search) to find whichever actual tournament they were playing. If that still doesn\'t turn up a confident answer, check Wikipedia\'s "[year] ATP Challenger Tour" page (or the equivalent WTA 125/ITF calendar) for that exact week -- it lists every concurrent smaller event in one place, which is far more systematic than piecing it together from scattered individual searches. IMPORTANT for common surnames (e.g. "Jones", "Garcia") -- a bare surname search gets drowned out by every other player worldwide sharing it. Once you have the list of concurrent tournaments for that week, search the surname specifically alongside EACH tournament/draw (e.g. "Jones Birmingham June 2026", not just "Jones tennis June 2026") rather than one generic search and giving up.',
-        'SOCCER SPECIFICALLY -- a single-team selection (e.g. "Spain") does not tell you the opponent. Confirm the actual match first, checking FRIENDLIES specifically in addition to any league/tournament/cup match, since national and club teams play friendlies year-round (very commonly right before major tournaments) and this is easy to miss if you only check the obvious tournament. State the confirmed opponent in notes. In the run-up to a major tournament, if a pick is dated shortly before the tournament starts and no concrete friendly can be found for that team on that date, default to assuming it\'s for that team\'s tournament OPENING match instead of leaving it unresolved -- some cappers genuinely do send picks well ahead of a tournament opener even though it isn\'t ideal practice, so a large gap between the entered date and the actual match isn\'t necessarily a data-entry mistake. Either way the fix is the same: resolve to the date the game is actually played. IMPORTANT -- when a date correction comes from this default assumption rather than direct confirmation, label the notes clearly as "ASSUMED tournament opener (default rule, not directly confirmed)" rather than stating it as settled fact, so whoever reviews it knows how much scrutiny it deserves.',
-        'MMA SPECIFICALLY -- do not assume every MMA pick is UFC just because that\'s the most common promotion by far. A fighter\'s name that doesn\'t appear on a UFC card for the entered date may still be fighting that night on a different promotion entirely (Bellator, PFL, ONE Championship, and others are all active and get picks made on them). If a name doesn\'t turn up in the obvious UFC event, check the other major promotions before concluding the row is unresolvable.',
-        'LOW-VARIANCE MARKETS (e.g. No Run First Inning) -- these rarely have an archived historical price anywhere findable, but they also barely move: NRFI is consistently priced in a narrow, well-known range across virtually every game (roughly -130 to -155 for the "yes" side, depending on the specific pitchers involved), regardless of matchup. For a market like this specifically, it is fine to use a reasonable typical industry price as a clearly-labeled estimate rather than leaving the row out entirely -- note plainly in notes that this is a standard estimate, not a game-specific researched number (e.g. "Standard NRFI price estimate, not game-specific -- actual historical price not found"). This does NOT apply to markets that genuinely do vary a lot game-to-game (regular game totals, spreads, player props) -- those still need an actual researched number or should be left out.',
-        '',
-        'OUTPUT FORMAT -- please return a corrected CSV with exactly these columns: id,opening_odds,closing_odds,line_flag,notes',
-        '  - id is REQUIRED on every row.',
-        '  - opening_odds and closing_odds are OPTIONAL -- only include a value for whichever one you actually found.',
-        '  - line_flag is OPTIONAL and does NOT change the line -- put "yes" here only for the rare case of an obvious transcription error (e.g. clearly a decimal point slipped, or a value that could not plausibly be a real line for this bet type), so it can be glanced at later without holding anything up today. Leave it blank for normal line movement, which is the vast majority of cases and needs no flag at all.',
-        '  - Do NOT include a result column in your reply for these rows -- this file is for adding odds only, not for changing grading.',
-        '  - notes should briefly say where the number came from (e.g. "Approx. from Covers.com historical odds archive").',
-        '  - Any row you cannot confidently find odds for: LEAVE IT OUT of the corrected CSV entirely rather than guessing -- but list it in the SKIPPED ROWS SUMMARY below instead of just dropping it silently.',
-        '',
-        'SKIPPED ROWS SUMMARY -- for every row you left out of the corrected CSV, list it here using exactly one of these four categories, so it can be triaged quickly instead of read as one long block of prose:',
-        '  - DATA GAP: the row is missing something only the original capper message or the person who entered it could supply (e.g. a Player Prop with no player name) -- research cannot fix this at all, no matter how much time is spent on it.',
-        '  - QUICK FIX: you found an obvious, easy explanation (a misspelled team name, a clearly wrong date, etc.) and know what the correct value should be -- state the correct value plainly so it can be fixed in seconds.',
-        '  - NO RELIABLE SOURCE: you identified the actual match/context correctly, but no trustworthy odds figure could be found anywhere -- further research on this specific row is unlikely to help.',
-        '  - NEEDS DEEPER RESEARCH: you found conflicting or incomplete information and a confident answer is possible, just not within a quick pass -- worth a longer, dedicated look later rather than writing off.',
-        'Format each line as: id | CATEGORY | brief reason. Group them by category so all four DATA GAP rows are together, all QUICK FIX rows are together, and so on -- this is what actually makes a big leftover pile fast to triage instead of a wall of text to read one at a time.',
-        '',
-        '=== END INSTRUCTIONS -- the actual data starts below this line ==='
-      ].join('\r\n');
-
-      downloadCsv(`odds-exceptions-${new Date().toISOString().split('T')[0]}.csv`, cols, rows, instructions);
-    });
-  }
-
-  $('findOddsExceptionsBtn').addEventListener('click', findOddsExceptions);
-
-  $('openOddsExceptionsPopoutBtn').addEventListener('click', async () => {
-    const btn = $('openOddsExceptionsPopoutBtn');
+    const btn = $('findMissingDataBtn');
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      await findOddsExceptions(); // always fresh, matching whatever filters are set right now
-      if (!lastOddsExceptions.length) {
-        alert('Nothing matches these filters -- odds are complete.');
-        return;
-      }
-      openAllPicksTab(lastOddsExceptions, 'Odds Exceptions — picks missing odds', lastOddsExceptionsQuery);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Open in new tab \u2197';
-    }
-  });
-
-  // ---------- Start time exceptions (internal) ----------
-  $('toggleStartTimeExceptionsBtn').addEventListener('click', () => {
-    const panel = $('startTimeExceptionsPanel');
-    const showing = panel.style.display !== 'none';
-    panel.style.display = showing ? 'none' : 'block';
-    $('toggleStartTimeExceptionsBtn').textContent = showing ? 'Show tool' : 'Hide tool';
-  });
-
-  async function findStartTimeExceptions() {
-    const capperFilter = $('steCapper').value;
-    const sportFilter = $('steSport').value;
-    const from = $('steFrom').value;
-    const to = $('steTo').value;
-    const wrap = $('startTimeExceptionsWrap');
-    wrap.innerHTML = '<div class="empty-state">Looking up picks missing a start time...</div>';
-
-    try {
-      let query = `picks?select=id,event_date,event_name,selection,line,result,is_published,schedule_sync_status,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&game_start_time=is.null`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
       query += '&order=event_date.asc';
-      const picks = await restAllPages(query);
-      renderStartTimeExceptions(picks);
-    } catch (e) {
-      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
-    }
-  }
+      let picks = await restAllPages(query);
 
-  function renderStartTimeExceptions(picks) {
-    const wrap = $('startTimeExceptionsWrap');
-    if (!picks.length) {
-      wrap.innerHTML = '<div class="empty-state">No picks match these filters -- start times are complete.</div>';
-      return;
-    }
-    const rowsHtml = picks.map(p => {
-      const isProp = p.bet_types && p.bet_types.uses_prop_fields;
-      const selectionDisplay = isProp && p.prop_player
-        ? `${escapeHtml(p.prop_player)} — ${escapeHtml(p.prop_stat || '?')} ${escapeHtml(p.selection)}`
-        : escapeHtml(p.selection);
-      const syncNote = p.schedule_sync_status === 'unmatched'
-        ? '<span style="color:var(--stamp-amber);font-weight:bold;">&#9888; sync couldn\'t match</span>'
-        : '<span style="color:var(--ink-soft);">not yet synced</span>';
-      return `<tr>
-        <td>${p.event_date}</td>
-        <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
-        <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
-        <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
-        <td>${selectionDisplay}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
-        <td>${p.is_published ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span>' : '—'}</td>
-        <td>${syncNote}</td>
-        <td><button type="button" class="ghost small edit-starttime-exception-btn" data-id="${p.id}">Edit</button></td>
-      </tr>`;
-    }).join('');
-
-    const publishedMissingCount = picks.filter(p => p.is_published).length;
-
-    wrap.innerHTML = `
-      <div style="font-size:12px;margin-bottom:10px;">
-        <strong>${picks.length}</strong> pick${picks.length === 1 ? '' : 's'} missing a start time.
-        ${publishedMissingCount > 0 ? `<strong style="color:var(--stamp-amber);">${publishedMissingCount} already published</strong> without one -- these are showing on the public page with no start time bar right now.` : ''}
-      </div>
-      <button id="exportStartTimeExceptionsBtn" style="margin-bottom:10px;">&#8681; Export to CSV</button>
-      <table class="picks-table">
-        <thead><tr><th>Event date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Published</th><th>Sync status</th><th></th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>`;
-
-    wrap.querySelectorAll('.edit-starttime-exception-btn').forEach(btn => {
-      btn.addEventListener('click', () => enterPickEditMode(btn.getAttribute('data-id')));
-    });
-
-    $('exportStartTimeExceptionsBtn').addEventListener('click', () => {
-      const cols = ['id', 'event_date', 'capper', 'sport', 'bet_type', 'selection', 'line', 'result'];
-      const rows = picks.map(p => {
-        const isProp = p.bet_types && p.bet_types.uses_prop_fields;
-        const selectionText = isProp && p.prop_player
-          ? `${p.prop_player} -- ${p.prop_stat || '?'} ${p.selection}`
-          : p.selection;
-        return [
-          p.id, p.event_date, p.cappers ? p.cappers.name : '', p.sports ? p.sports.name : '',
-          p.bet_types ? p.bet_types.name : '', selectionText, p.line ?? '', p.result
-        ];
+      // The OR above fetches a broad candidate set -- event_name and line
+      // are only real "missing data" within their specific scope (see
+      // sportUsesEventName/betTypeUsesLine above), since PostgREST's OR
+      // syntax can't cleanly express "AND scoped to this sport" alongside
+      // the other plain null checks in one clause. A null event_name on an
+      // MLB pick isn't a gap; MLB picks never have one. Re-checking every
+      // checked field explicitly here (rather than trusting the raw OR)
+      // also protects against a pick matching only on an UNCHECKED
+      // field's null condition through some other branch.
+      picks = picks.filter(p => {
+        const sportName = p.sports ? p.sports.name : '';
+        const betTypeName = p.bet_types ? p.bet_types.name : '';
+        const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
+        if (checkClosing && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+        if (checkOpening && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+        if (checkHomeAway && !p.home_away) return true;
+        if (checkUnitSize && !p.raw_unit_size) return true;
+        if (checkStartTime && !p.game_start_time) return true;
+        if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
+        if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
+        return false;
       });
 
-      const instructions = [
-        '=== INSTRUCTIONS FOR FINDING MISSING START TIMES (read this whole block first) ===',
-        '',
-        'This file lists picks missing a game/match start time -- schedule sync either hasn\'t run for these yet, or ran and couldn\'t confidently match the game. Some of these may already be published without a start time showing on the public page.',
-        '',
-        'For each row, find the actual scheduled start time of that specific game/match on that event_date, in US Eastern Time. A quick search in any AI chat (asking it to search the web) is usually enough (e.g. "what time does [team] play [opponent] on [date]" or "[player] match start time [date]").',
-        'IF THE EVENT ISN\'T FOUND ON THE ENTERED DATE, CHECK THE DAY BEFORE AND AFTER before giving up -- this is a common, recurring issue, not a rare edge case. It happens constantly with KBO (Korea is ~13-14 hours ahead of US Eastern, so a game "tonight" in Korea is very often already tomorrow\'s date, or even the day after, depending on when the pick was entered) and with World Cup/international soccer (host country time zones routinely shift a match to a different calendar date in the US). If you find the event on a DIFFERENT date than entered, do not just skip the row -- include a corrected event_date column alongside game_start_time_et (both for the CORRECT date), so whoever is applying this can fix it in one step instead of needing to separately track down which sport/date pairs are wrong. Nobody applying this file has time to know off the top of their head which of a dozen different sports quietly shifted a day -- that is exactly what this check is for.',
-        'CONFIRM THE RIGHT GAME FIRST if a team played more than once that day (doubleheaders), or if multiple concurrent tournaments/events could apply (see the tennis/MMA guidance below) -- a start time for the wrong game is worse than no start time at all, since it would show confidently on the public page but be wrong.',
-        'TENNIS SPECIFICALLY -- do not assume every tennis pick belongs to whichever major tournament other picks that same day happen to be from; several smaller concurrent tournaments run most weeks. If a name doesn\'t appear in the obvious tournament\'s order of play, search that player directly rather than concluding it can\'t be found.',
-        'MMA SPECIFICALLY -- do not assume UFC by default; check other promotions (Bellator, PFL, ONE Championship) if the fighter isn\'t on a UFC card that date.',
-        'SOCCER SPECIFICALLY -- confirm the actual opponent/match first (checking friendlies too) before looking up its start time, since a single-team selection alone doesn\'t say who they\'re playing. In the run-up to a major tournament (World Cup, Euros, etc.), if a pick is dated in the window between roughly a week before the tournament starts and the tournament\'s actual opening match, and no concrete friendly can be found for that team on that specific date, default to assuming it\'s for that team\'s TOURNAMENT OPENING MATCH instead of leaving it unresolved. Some cappers genuinely do send picks well ahead of a tournament opener, even though it isn\'t ideal practice since odds will still shift considerably -- a large gap between the entered date and the actual match date does not necessarily mean a data-entry mistake happened, and whoever enters these picks generally has no way to know which of a dozen different sports/teams this applies to. Either way, the correct fix is the same: resolve to the date the game is actually played, however far out that turns out to be. IMPORTANT -- when a date correction comes from this default assumption rather than direct confirmation that this specific pick was for the opener, label the notes clearly as "ASSUMED tournament opener (default rule, not directly confirmed)" rather than stating it as settled fact -- this tells whoever reviews the correction (visible directly in the Grading Corrections preview) how much scrutiny it actually deserves before accepting it.',
-        'PLAYER PROPS -- finding a prop player\'s game start time already requires figuring out which team they\'re on that day. Capture that as a prop_team column too while you have it (e.g. "Rangers", "Brewers") -- this shows on the public page so casual fans don\'t have to look up who a player plays for, and doing it now avoids a completely separate research pass later just to fill in the same information.',
-        '',
-        'OUTPUT FORMAT -- return a corrected CSV with exactly these columns: id,event_date,game_start_time_et,prop_team,notes',
-        '  - id is REQUIRED on every row.',
-        '  - event_date is OPTIONAL -- only include it when the event actually happened on a DIFFERENT date than what was entered (format "YYYY-MM-DD"). Leave it blank otherwise; do not repeat the original date back if it was already correct.',
-        '  - game_start_time_et is REQUIRED for any row you include -- format as "YYYY-MM-DD HH:MM" in US Eastern Time, 24-hour clock (e.g. "2026-06-05 19:05" for a 7:05 PM ET start), using whichever date is actually correct. This gets converted to the correct UTC timestamp automatically on import.',
-        '  - prop_team is OPTIONAL and only applies to Player Prop rows -- include it whenever you\'ve identified the player\'s team as part of finding their game.',
-        '  - notes should briefly say where the time (and team, if included) came from, and flag plainly if the date was corrected (e.g. "Entered as June 5, actual game was June 6 KST -- corrected").',
-        '  - Any row you cannot confidently find a start time for: LEAVE IT OUT of the corrected CSV entirely rather than guessing -- list it in the skipped rows summary below instead.',
-        '  - Paste the corrected CSV into the "Grading corrections" tool -- it accepts this same id + event_date + game_start_time_et + prop_team format directly.',
-        '',
-        'SKIPPED ROWS -- for any row you left out, list it as: id | brief reason (e.g. doubleheader game number unclear, event not found, date looks wrong).',
-        '',
-        '=== END INSTRUCTIONS -- the actual data starts below this line ==='
-      ].join('\r\n');
-
-      downloadCsv(`start-time-exceptions-${new Date().toISOString().split('T')[0]}.csv`, cols, rows, instructions);
-    });
+      if (!picks.length) {
+        alert('Nothing matches these filters -- data is complete.');
+        return;
+      }
+      const checkedLabels = MD_CHECKBOX_IDS.filter(id => $(id).checked).map(id => MD_FIELD_LABELS[id]);
+      openAllPicksTab(picks, `Missing data — ${checkedLabels.join(', ')}`, query);
+    } catch (e) {
+      alert('Could not load picks: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Find missing data';
+    }
   }
 
-  $('findStartTimeExceptionsBtn').addEventListener('click', findStartTimeExceptions);
+  $('findMissingDataBtn').addEventListener('click', findMissingData);
 
   // ---------- Grading corrections (bulk apply back onto exact picks) ----------
   $('toggleGradingCorrectionsBtn').addEventListener('click', () => {
@@ -12977,7 +12922,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 214; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 215; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
