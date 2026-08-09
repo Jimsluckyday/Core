@@ -581,7 +581,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="10">Parlay 10</option>
           </select>
           <div id="pickParlayHint" style="font-size:10px;color:var(--ink-soft);margin-top:4px;">
-            If this same selection is ALSO their own standalone bet (not just a parlay leg), save it twice — once with this left blank, once with the parlay number set. Numbers are just YOUR local labels for today's parlays from this capper, e.g. "their first parlay" — reused automatically if you pick the same number again for another leg today.
+            If this same selection is ALSO their own standalone bet (not just a parlay leg), save it twice — once with this left blank, once with the parlay number set. Numbers are just YOUR local labels for today's parlays from this capper, e.g. "their first parlay" — reused automatically if you pick the same number again for another leg today. If the exact same game shows up again as a leg of a DIFFERENT parlay number, the Tier and Unit size you type here are saved specifically for that parlay — they won't get overwritten, and won't overwrite another parlay's own tier/unit for that same shared game (see that parlay's "legs" list on the main picks table to review or fix them afterward).
           </div>
           <div id="pickParlayExistingPreview" style="display:none;font-size:11px;margin-top:6px;padding:7px 10px;border-radius:2px;"></div>
         </div>
@@ -3842,20 +3842,31 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // again later, from a completely separate save action -- the CSV
   // pipeline's parlay_id never needed this since a whole image uploads in
   // one atomic run, but Add Pick entries don't have that guarantee.
-  // legTier is OPTIONAL and only ever pushes a genuinely NEW leg's tier to
-  // match its parlay -- never the other way, and never touching a leg that
-  // already exists under a DIFFERENT parlay (a leg shared across parlays
-  // keeps its own already-reconciled tier; see the tierConflict warning in
-  // savePick() for that specific, more delicate case). Confirmed directly
-  // by the owner: the parlay's own tier is the real signal -- if he calls a
-  // Tier 3 parlay, every leg in it falls under that same confidence
-  // umbrella, it's never independently "Tier 0" just because nobody typed
-  // a number on that specific leg.
-  async function linkLegToParlay(capperId, eventDate, sportId, parlayNumber, legId, legTier) {
+  //
+  // The WHOLE PARLAY's own combo-level tier (parlayTier, on the summary
+  // row) is unchanged by this and still works exactly as before: whichever
+  // leg is entered first for a brand-new parlay number sets it, since
+  // that's the capper's real confidence in the whole combo, not something
+  // to guess from individual legs.
+  //
+  // legTier/legRawUnitSize are DIFFERENT from that -- they're THIS leg's
+  // own tier/unit size AS ENTERED for THIS specific parlay, stored on the
+  // parlay_legs join row itself rather than the leg's own shared base row.
+  // CONFIRMED real, regular behavior from a capper who reuses the same 1-2
+  // games across 5-7 same-day parlays, often at meaningfully different
+  // unit sizes (e.g. 0.17 to 0.29 the same day) depending on the odds
+  // value in each specific combo. Previously this was silently discarded
+  // the instant a leg got reused for a second parlay -- upserting onto the
+  // join row instead means every parlay keeps what was actually typed for
+  // it, no matter how many other parlays also reuse the same real leg.
+  // (Scoring itself is unaffected by this -- it still reads tier off the
+  // leg's own base row, exactly as before; this only fixes what's stored
+  // and displayed per-parlay.)
+  async function linkLegToParlay(capperId, eventDate, sportId, parlayNumber, legId, legTier, legRawUnitSize) {
     const parlayBetType = findByNameCI(betTypes, 'Parlay');
     if (!parlayBetType) throw new Error('No "Parlay" bet type is registered -- add it in Setup first.');
 
-    let summaryId, parlayTier, tierReconciled = false;
+    let summaryId, parlayTier;
     const existingSummary = await rest(
       `picks?select=id,pick_tier&capper_id=eq.${capperId}&event_date=eq.${eventDate}` +
       `&parlay_local_number=eq.${parlayNumber}&bet_type_id=eq.${parlayBetType.id}`
@@ -3863,10 +3874,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (existingSummary.length) {
       summaryId = existingSummary[0].id;
       parlayTier = Number(existingSummary[0].pick_tier) || 0;
-      if (legTier !== undefined && legTier !== null && Number(legTier) !== parlayTier) {
-        await rest(`picks?id=eq.${legId}`, { method: 'PATCH', body: JSON.stringify({ pick_tier: parlayTier }) });
-        tierReconciled = true;
-      }
     } else {
       parlayTier = (legTier !== undefined && legTier !== null) ? Number(legTier) : 0;
       const inserted = await rest('picks', {
@@ -3883,19 +3890,25 @@ These are almost always the same day, so "Date entered" only fills in a starting
     try {
       await rest('parlay_legs', {
         method: 'POST',
-        headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-        body: JSON.stringify({ parlay_pick_id: summaryId, leg_pick_id: legId })
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({
+          parlay_pick_id: summaryId,
+          leg_pick_id: legId,
+          pick_tier: (legTier !== undefined && legTier !== null) ? Number(legTier) : null,
+          raw_unit_size: legRawUnitSize || null
+        })
       });
     } catch (e) {
-      // Tolerated -- the link may already exist, or (before the SQL for
-      // parlay_legs has been run) the table may not exist yet at all.
+      // Tolerated -- before the SQL adding pick_tier/raw_unit_size to
+      // parlay_legs has been run, this insert/update may fail outright.
       // Either way this must never block saving the pick itself.
-      console.warn('Could not create parlay_legs link:', e.message);
+      console.warn('Could not create/update parlay_legs link:', e.message);
     }
 
     await refreshParlaySummary(summaryId);
-    return { summaryId, parlayTier, tierReconciled };
+    return { summaryId, parlayTier };
   }
+
 
   async function savePick() {
     const capper_id = $('pickCapper').value;
@@ -3971,11 +3984,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         await rest(`picks?id=eq.${editingId}`, { method: 'PATCH', body: JSON.stringify(payload) });
         let msg = 'Pick updated.';
         if (parlayNumberVal) {
-          const linkResult = await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, editingId, payload.pick_tier);
-          msg += ` Linked to Parlay ${parlayNumberVal}.`;
-          if (linkResult.tierReconciled) {
-            msg += ` Tier automatically set to Tier ${linkResult.parlayTier} to match this parlay's existing tag -- every leg in a parlay shares the same confidence tier.`;
-          }
+          await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, editingId, payload.pick_tier, payload.raw_unit_size);
+          msg += ` Linked to Parlay ${parlayNumberVal}, with this parlay's own tier/unit size recorded for it specifically.`;
         }
         showMsg($('pickMsg'), msg, 'ok');
         exitPickEditMode();
@@ -3992,12 +4002,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
           legId = existingLeg.id;
           const newOdds = payload.opening_odds;
           const oddsConflict = newOdds !== null && existingLeg.opening_odds !== null && newOdds !== existingLeg.opening_odds;
-          const tierConflict = payload.pick_tier !== existingLeg.pick_tier;
-          msg = `Matched an existing leg for this capper/date/selection -- linked to Parlay ${parlayNumberVal} instead of creating a duplicate.`;
-          if (oddsConflict || tierConflict) {
-            msg += ` NOTE: what you just typed (odds ${newOdds ?? '—'}, tier ${payload.pick_tier}) doesn't match ` +
-                   `the existing leg (odds ${existingLeg.opening_odds ?? '—'}, tier ${existingLeg.pick_tier}) -- ` +
-                   `nothing was overwritten; use Find & Edit if the existing one needs correcting.`;
+          msg = `Matched an existing leg for this capper/date/selection -- linked to Parlay ${parlayNumberVal} instead of creating a duplicate. This parlay's own tier (${payload.pick_tier}) and unit size (${payload.raw_unit_size || 'none'}) are recorded just for this parlay, even though the underlying game is shared with others.`;
+          if (oddsConflict) {
+            msg += ` NOTE: the odds you just typed (${newOdds}) don't match the existing leg's own odds (${existingLeg.opening_odds}) -- nothing was overwritten there; use Find & Edit if those need correcting.`;
           }
         } else {
           const inserted = await rest('picks', {
@@ -4008,28 +4015,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
           legId = inserted[0].id;
           msg = `Pick saved and linked to Parlay ${parlayNumberVal}.`;
         }
-        // A dedup-matched EXISTING leg only needs its typed tier withheld
-        // if it's ALREADY linked to some other, differently-tiered parlay --
-        // that's the genuine ambiguity the tierConflict warning above
-        // exists for. An existing-but-orphaned leg (matched by natural key,
-        // but never actually linked to any parlay yet -- e.g. older
-        // standalone/backtested data being folded into a parlay for the
-        // first time) has no established tier to protect, so the tier just
-        // typed applies normally, same as any brand-new leg. CONFIRMED from
-        // a real failure: a leg that pre-existed from unrelated historical
-        // data silently defaulted its brand-new parlay to Tier 0, discarding
-        // the Tier -1 actually selected on the form, purely because the
-        // row happened to already exist -- not because it was genuinely
-        // shared with anything.
-        let legTierArg = payload.pick_tier;
-        if (existingLeg) {
-          const existingLinks = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${legId}`);
-          if (existingLinks.length) legTierArg = undefined;
-        }
-        const linkResult = await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, legId, legTierArg);
-        if (linkResult.tierReconciled) {
-          msg += ` Tier automatically set to Tier ${linkResult.parlayTier} to match this parlay's existing tag -- every leg in a parlay shares the same confidence tier.`;
-        }
+        // Tier and unit size are no longer withheld for a reused leg --
+        // each parlay keeps its OWN values on its own parlay_legs link, so
+        // there's nothing to protect against overwriting anymore (see
+        // linkLegToParlay for the full reasoning).
+        await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, legId, payload.pick_tier, payload.raw_unit_size);
         showMsg($('pickMsg'), msg, 'ok');
         // Deliberately NOT resetting capper/sport/pick_type/date, so entering
         // a dozen picks from the same capper for the same slate is fast.
@@ -4941,8 +4931,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
     btn.disabled = true;
     btn.innerHTML = 'loading…';
     try {
-      const links = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${parlayId}`);
+      // pick_tier/raw_unit_size now live on the JOIN row, not just the
+      // leg's own shared pick row -- the same real leg can be a genuinely
+      // different confidence claim, at a genuinely different unit size,
+      // depending on which parlay wraps it (confirmed regular behavior:
+      // a capper reusing 1-2 games across 5-7 same-day parlays at
+      // meaningfully different unit sizes each time). Reading them from
+      // this specific parlay's own link is what makes that survive instead
+      // of collapsing to whichever parlay happened to claim the leg first.
+      const links = await rest(`parlay_legs?select=leg_pick_id,pick_tier,raw_unit_size&parlay_pick_id=eq.${parlayId}`);
       const legIds = links.map(l => l.leg_pick_id);
+      const linkByLegId = {};
+      links.forEach(l => { linkByLegId[l.leg_pick_id] = l; });
       let legsHtml;
       let legs = [];
       if (!legIds.length) {
@@ -4975,9 +4975,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  <button class="mini push" data-leg-grade="${leg.id}" data-result="push">Push</button>
                </span>`
             : stampHtml(leg.result);
+          const link = linkByLegId[leg.id] || {};
+          const linkTier = link.pick_tier;
+          const tierSelectHtml = `<select class="leg-tier-select" data-parlay-id="${parlayId}" data-leg-id="${leg.id}" style="font-family:inherit;font-size:10px;padding:1px 2px;margin-left:6px;">
+              <option value="-1" ${Number(linkTier) === -1 ? 'selected' : ''}>Tier -1</option>
+              <option value="0" ${linkTier === null || linkTier === undefined || Number(linkTier) === 0 ? 'selected' : ''}>Tier 0</option>
+              <option value="1" ${Number(linkTier) === 1 ? 'selected' : ''}>Tier 1</option>
+              <option value="2" ${Number(linkTier) === 2 ? 'selected' : ''}>Tier 2</option>
+              <option value="3" ${Number(linkTier) === 3 ? 'selected' : ''}>Tier 3</option>
+              <option value="4" ${Number(linkTier) === 4 ? 'selected' : ''}>Tier 4</option>
+            </select>`;
+          const unitSizeInputHtml = `<input type="text" class="leg-unitsize-input" data-parlay-id="${parlayId}" data-leg-id="${leg.id}" value="${escapeHtml(link.raw_unit_size || '')}" placeholder="unit size" style="width:70px;font-family:inherit;font-size:10px;padding:1px 3px;margin-left:4px;" />`;
           return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}
               <button type="button" class="ghost small" data-leg-edit="${leg.id}" style="padding:1px 6px;font-size:10px;margin-left:6px;">Edit</button>
               <button type="button" class="ghost small" data-leg-delete="${leg.id}" data-leg-summary="${escapeHtml(leg.selection)}${lineTxt}${propBit}" style="padding:1px 6px;font-size:10px;color:var(--stamp-red);border-color:var(--stamp-red);">Delete</button>
+              <span style="color:var(--ink-soft);font-size:10px;margin-left:6px;">this parlay's tier/unit:</span>${tierSelectHtml}${unitSizeInputHtml}
+              <span class="leg-tier-save-status" data-leg-id="${leg.id}" style="font-size:10px;margin-left:4px;"></span>
             </li>`;
         }).join('') + '</ul>';
       }
@@ -4991,6 +5004,50 @@ These are almost always the same day, so "Date entered" only fills in a starting
       row.innerHTML = `<td colspan="${colspan}" style="background:rgba(35,77,53,0.06);font-size:11px;">${legsHtml}</td>`;
       parentRow.insertAdjacentElement('afterend', row);
       btn.innerHTML = '&#9652; legs';
+
+      function legStatusSpan(legId) {
+        return row.querySelector(`.leg-tier-save-status[data-leg-id="${legId}"]`);
+      }
+      row.querySelectorAll('select.leg-tier-select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const legId = sel.getAttribute('data-leg-id');
+          const status = legStatusSpan(legId);
+          sel.disabled = true;
+          try {
+            await rest(`parlay_legs?parlay_pick_id=eq.${parlayId}&leg_pick_id=eq.${legId}`, {
+              method: 'PATCH', body: JSON.stringify({ pick_tier: Number(sel.value) })
+            });
+            if (status) { status.textContent = 'saved'; status.style.color = 'var(--stamp-green)'; }
+          } catch (e) {
+            if (status) { status.textContent = 'error: ' + e.message; status.style.color = 'var(--stamp-red)'; }
+          } finally {
+            sel.disabled = false;
+          }
+        });
+      });
+      row.querySelectorAll('input.leg-unitsize-input').forEach(inp => {
+        let lastSaved = inp.value;
+        inp.addEventListener('blur', async () => {
+          const value = normalizeUnitSize(inp.value);
+          if (value === lastSaved) { inp.value = value; return; }
+          const legId = inp.getAttribute('data-leg-id');
+          const status = legStatusSpan(legId);
+          inp.disabled = true;
+          try {
+            await rest(`parlay_legs?parlay_pick_id=eq.${parlayId}&leg_pick_id=eq.${legId}`, {
+              method: 'PATCH', body: JSON.stringify({ raw_unit_size: value || null })
+            });
+            lastSaved = value;
+            inp.value = value;
+            if (status) { status.textContent = 'saved'; status.style.color = 'var(--stamp-green)'; }
+          } catch (e) {
+            if (status) { status.textContent = 'error: ' + e.message; status.style.color = 'var(--stamp-red)'; }
+          } finally {
+            inp.disabled = false;
+          }
+        });
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+      });
 
       row.querySelectorAll('button[data-leg-grade]').forEach(gbtn => {
         gbtn.addEventListener('click', async () => {
@@ -6083,8 +6140,16 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       try {
         const op = opener();
         if (!op) { btn.disabled = false; btn.innerHTML = '&#9662; legs'; return; }
-        const links = await op.rest('parlay_legs?select=leg_pick_id&parlay_pick_id=eq.' + parlayId);
-        const legIds = links.map(l => l.leg_pick_id);
+        // pick_tier/raw_unit_size now live on the JOIN row, not just the
+        // leg's own shared pick row -- the same real leg can be a genuinely
+        // different confidence claim, at a genuinely different unit size,
+        // depending on which parlay wraps it. Reading them from THIS
+        // parlay's own link is what makes that survive instead of
+        // collapsing to whichever parlay happened to claim the leg first.
+        const links = await op.rest('parlay_legs?select=leg_pick_id,pick_tier,raw_unit_size&parlay_pick_id=eq.' + parlayId);
+        const legIds = links.map(function(l) { return l.leg_pick_id; });
+        const linkByLegId = {};
+        links.forEach(function(l) { linkByLegId[l.leg_pick_id] = l; });
         let legsHtml;
         let legs = [];
         if (!legIds.length) {
@@ -6107,9 +6172,22 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
                   '<button class="mini push" data-leg-grade="' + leg.id + '" data-result="push">Push</button>' +
                 '</span>'
               : '<span class="stamp ' + leg.result + '">' + leg.result + '</span>';
+            const link = linkByLegId[leg.id] || {};
+            const linkTier = link.pick_tier;
+            const tierSelectHtml = '<select class="leg-tier-select" data-parlay-id="' + parlayId + '" data-leg-id="' + leg.id + '" style="font-family:inherit;font-size:10px;padding:1px 2px;margin-left:6px;">' +
+              '<option value="-1"' + (Number(linkTier) === -1 ? ' selected' : '') + '>Tier -1</option>' +
+              '<option value="0"' + ((linkTier === null || linkTier === undefined || Number(linkTier) === 0) ? ' selected' : '') + '>Tier 0</option>' +
+              '<option value="1"' + (Number(linkTier) === 1 ? ' selected' : '') + '>Tier 1</option>' +
+              '<option value="2"' + (Number(linkTier) === 2 ? ' selected' : '') + '>Tier 2</option>' +
+              '<option value="3"' + (Number(linkTier) === 3 ? ' selected' : '') + '>Tier 3</option>' +
+              '<option value="4"' + (Number(linkTier) === 4 ? ' selected' : '') + '>Tier 4</option>' +
+              '</select>';
+            const unitSizeInputHtml = '<input type="text" class="leg-unitsize-input" data-parlay-id="' + parlayId + '" data-leg-id="' + leg.id + '" value="' + escLocal(link.raw_unit_size || '') + '" placeholder="unit size" style="width:70px;font-family:inherit;font-size:10px;padding:1px 3px;margin-left:4px;" />';
             return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml +
               ' <button type="button" class="mini leg-edit-btn" data-leg-edit="' + leg.id + '" style="padding:1px 6px;">Edit</button>' +
               ' <button type="button" class="mini leg-delete-btn" data-leg-delete="' + leg.id + '" data-leg-summary="' + escLocal(leg.selection) + lineTxt + propBit + '" style="padding:1px 6px;border-color:#8a2f3a;color:#8a2f3a;">Delete</button>' +
+              ' <span style="color:#55584d;font-size:10px;margin-left:6px;">Tier/unit for this parlay:</span>' + tierSelectHtml + unitSizeInputHtml +
+              ' <span class="leg-tier-save-status" data-leg-id="' + leg.id + '" style="font-size:10px;margin-left:4px;"></span>' +
               '</li>';
           }).join('') + '</ul>';
         }
@@ -6154,6 +6232,54 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
               span.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
             }
           });
+        });
+
+        function legStatusSpanLocal(legId) {
+          return tr.querySelector('.leg-tier-save-status[data-leg-id="' + legId + '"]');
+        }
+        tr.querySelectorAll('select.leg-tier-select').forEach(function(sel) {
+          sel.addEventListener('change', async () => {
+            const op5 = opener();
+            if (!op5) return;
+            const legId = sel.getAttribute('data-leg-id');
+            const status = legStatusSpanLocal(legId);
+            sel.disabled = true;
+            try {
+              await op5.rest('parlay_legs?parlay_pick_id=eq.' + parlayId + '&leg_pick_id=eq.' + legId, {
+                method: 'PATCH', body: JSON.stringify({ pick_tier: Number(sel.value) })
+              });
+              if (status) { status.textContent = 'saved'; status.style.color = '#2d6a4f'; }
+            } catch (e) {
+              if (status) { status.textContent = 'error: ' + e.message; status.style.color = '#8a2f3a'; }
+            } finally {
+              sel.disabled = false;
+            }
+          });
+        });
+        tr.querySelectorAll('input.leg-unitsize-input').forEach(function(inp) {
+          let lastSaved = inp.value;
+          inp.addEventListener('blur', async () => {
+            const value = normalizeUnitSizeLocal(inp.value);
+            if (value === lastSaved) { inp.value = value; return; }
+            const op6 = opener();
+            if (!op6) return;
+            const legId = inp.getAttribute('data-leg-id');
+            const status = legStatusSpanLocal(legId);
+            inp.disabled = true;
+            try {
+              await op6.rest('parlay_legs?parlay_pick_id=eq.' + parlayId + '&leg_pick_id=eq.' + legId, {
+                method: 'PATCH', body: JSON.stringify({ raw_unit_size: value || null })
+              });
+              lastSaved = value;
+              inp.value = value;
+              if (status) { status.textContent = 'saved'; status.style.color = '#2d6a4f'; }
+            } catch (e) {
+              if (status) { status.textContent = 'error: ' + e.message; status.style.color = '#8a2f3a'; }
+            } finally {
+              inp.disabled = false;
+            }
+          });
+          inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
         });
 
         tr.querySelectorAll('button[data-leg-edit]').forEach(function(ebtn) {
@@ -12507,26 +12633,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
               legId = inserted[0].id;
               importedCount++;
             }
-            // A dedup-matched EXISTING leg only needs its typed tier
-            // withheld if it's ALREADY linked to some other parlay -- an
-            // existing-but-orphaned leg (matched by natural key, but never
-            // actually linked to any parlay before) has no established tier
-            // to protect, same reasoning as Add Pick's equivalent fix.
-            let existingLinksCount = 0;
-            if (existingLeg) {
-              const existingLinks = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${legId}`);
-              existingLinksCount = existingLinks.length;
-            }
-            // Only reconcile tier on the FIRST parlay this leg links to in
-            // THIS pass -- if it also belongs to a second parlay number in
-            // the same paste, that parlay's own tier isn't silently
-            // overwritten by this leg's tier a second time (same "don't
-            // auto-resolve a shared-leg conflict" principle as Add Pick's
-            // tierConflict warning).
-            for (let mi = 0; mi < v.parlayMemberships.length; mi++) {
-              const m = v.parlayMemberships[mi];
-              const legTier = (existingLinksCount === 0 && mi === 0) ? v.resolved.pick_tier : undefined;
-              await linkLegToParlay(v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id, m.number, legId, legTier);
+            // Each parlay this leg belongs to gets its own tier/unit size on
+            // its own parlay_legs link (see linkLegToParlay) -- a single CSV
+            // row only ever has one tier/unit-size column, so that one value
+            // is applied to every membership listed for it. If this exact
+            // leg genuinely needs a DIFFERENT tier/unit size in one of its
+            // other parlays, that's not something a flat CSV row can express
+            // -- correct it afterward in the parlay's own expanded legs view.
+            for (const m of v.parlayMemberships) {
+              await linkLegToParlay(v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id, m.number, legId, v.resolved.pick_tier, v.resolved.raw_unit_size);
             }
           }
 
@@ -12740,7 +12855,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 210; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 211; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
