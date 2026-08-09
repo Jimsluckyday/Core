@@ -4422,7 +4422,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
   let pickSearchCache = null;
 
   async function loadPickSearchCache() {
-    pickSearchCache = await rest('picks?select=id,event_date,selection,line,result,is_published,prop_player,prop_stat,source_image,cappers(name),sports(name),bet_types(name,uses_prop_fields)&order=event_date.desc&limit=1000');
+    pickSearchCache = await rest('picks?select=id,event_date,selection,line,result,is_published,prop_player,prop_stat,source_image,pick_tier,cappers(name),sports(name),bet_types(name,uses_prop_fields)&order=event_date.desc&limit=1000');
   }
 
   function renderPickSearchResults(matches) {
@@ -4470,6 +4470,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="capper_id">Capper</option>
             <option value="sport_id">Sport</option>
             <option value="bet_type_id">Bet type</option>
+            <option value="pick_tier">Tier</option>
           </select>
         </div>
         <div class="field" style="flex:0 0 auto;">
@@ -4478,6 +4479,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <select id="bulkValueCapper" style="display:none;"></select>
           <select id="bulkValueSport" style="display:none;"></select>
           <select id="bulkValueBetType" style="display:none;"></select>
+          <select id="bulkValueTier" style="display:none;">
+            <option value="-1">Tier -1</option>
+            <option value="0">Base</option>
+            <option value="1">Tier 1</option>
+            <option value="2">Tier 2</option>
+            <option value="3">Tier 3</option>
+            <option value="4">Tier 4</option>
+          </select>
+        </div>
+        <div class="checkbox-row" id="bulkTierGuardRow" style="display:none;flex:0 0 auto;">
+          <input type="checkbox" id="bulkTierOnlyIfUnset" checked />
+          <label for="bulkTierOnlyIfUnset">Only picks with no tier set yet (skip anything already non-Base)</label>
         </div>
         <div style="align-self:flex-end;">
           <button id="applyBulkFieldBtn" class="small">Apply to ${shown.length} selected</button>
@@ -4522,18 +4535,45 @@ These are almost always the same day, so "Date entered" only fills in a starting
       $('bulkValueCapper').style.display = field === 'capper_id' ? 'block' : 'none';
       $('bulkValueSport').style.display = field === 'sport_id' ? 'block' : 'none';
       $('bulkValueBetType').style.display = field === 'bet_type_id' ? 'block' : 'none';
+      $('bulkValueTier').style.display = field === 'pick_tier' ? 'block' : 'none';
+      $('bulkTierGuardRow').style.display = field === 'pick_tier' ? 'flex' : 'none';
     });
 
     $('applyBulkFieldBtn').addEventListener('click', async () => {
-      const selectedIds = Array.from(wrap.querySelectorAll('.search-select-checkbox:checked')).map(cb => cb.getAttribute('data-search-id'));
+      let selectedIds = Array.from(wrap.querySelectorAll('.search-select-checkbox:checked')).map(cb => cb.getAttribute('data-search-id'));
       if (!selectedIds.length) { alert('Check at least one pick first.'); return; }
       const field = $('bulkFieldSelect').value;
-      const valueInputs = { event_date: 'bulkValueDate', capper_id: 'bulkValueCapper', sport_id: 'bulkValueSport', bet_type_id: 'bulkValueBetType' };
-      const fieldLabels = { event_date: 'date', capper_id: 'capper', sport_id: 'sport', bet_type_id: 'bet type' };
-      const newValue = $(valueInputs[field]).value;
-      if (!newValue) { alert('Pick a value first.'); return; }
-      const displayValue = field === 'event_date' ? newValue : $(valueInputs[field]).selectedOptions[0].textContent;
-      if (!confirm(`Change ${fieldLabels[field]} to "${displayValue}" for the ${selectedIds.length} selected pick${selectedIds.length === 1 ? '' : 's'}?\n\nThis cannot be undone.`)) return;
+      const valueInputs = { event_date: 'bulkValueDate', capper_id: 'bulkValueCapper', sport_id: 'bulkValueSport', bet_type_id: 'bulkValueBetType', pick_tier: 'bulkValueTier' };
+      const fieldLabels = { event_date: 'date', capper_id: 'capper', sport_id: 'sport', bet_type_id: 'bet type', pick_tier: 'tier' };
+      const tierLabels = { '-1': 'Tier -1', '0': 'Base', '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '4': 'Tier 4' };
+      const rawValue = $(valueInputs[field]).value;
+      if (!rawValue && field !== 'pick_tier') { alert('Pick a value first.'); return; }
+      const newValue = field === 'pick_tier' ? Number(rawValue) : rawValue;
+      const displayValue = field === 'event_date' ? rawValue : (field === 'pick_tier' ? tierLabels[rawValue] : $(valueInputs[field]).selectedOptions[0].textContent);
+
+      // Skip any pick that already has a real, non-Base tier -- a mass
+      // "set this whole capper to Base" pass shouldn't be able to clobber
+      // a pick someone already deliberately tiered, just because it
+      // happened to be sitting in the same search result set. Uses the
+      // already-loaded search cache (which includes pick_tier) rather than
+      // a second round trip, since it already covers every match, not just
+      // what's currently shown.
+      let skippedCount = 0;
+      if (field === 'pick_tier' && $('bulkTierOnlyIfUnset').checked) {
+        const beforeCount = selectedIds.length;
+        selectedIds = selectedIds.filter(id => {
+          const cached = pickSearchCache.find(p => String(p.id) === String(id));
+          return !cached || !cached.pick_tier || Number(cached.pick_tier) === 0;
+        });
+        skippedCount = beforeCount - selectedIds.length;
+        if (!selectedIds.length) {
+          alert(`All ${beforeCount} selected pick${beforeCount === 1 ? '' : 's'} already ha${beforeCount === 1 ? 's' : 've'} a tier set -- nothing to change with this guard on.`);
+          return;
+        }
+      }
+
+      const skipNote = skippedCount ? ` (${skippedCount} skipped -- already had a tier set)` : '';
+      if (!confirm(`Change ${fieldLabels[field]} to "${displayValue}" for ${selectedIds.length} pick${selectedIds.length === 1 ? '' : 's'}${skipNote}?\n\nThis cannot be undone.`)) return;
       const btn = $('applyBulkFieldBtn');
       btn.disabled = true;
       btn.textContent = 'Updating...';
@@ -4546,7 +4586,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         await refreshPicksList();
         $('pickSearchBox').value = '';
         $('pickSearchResults').innerHTML = '';
-        alert(`Updated ${fieldLabels[field]} on ${selectedIds.length} pick${selectedIds.length === 1 ? '' : 's'}.`);
+        alert(`Updated ${fieldLabels[field]} on ${selectedIds.length} pick${selectedIds.length === 1 ? '' : 's'}.${skipNote}`);
       } catch (e) {
         alert('Could not update: ' + e.message);
         btn.disabled = false;
@@ -12937,7 +12977,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 213; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 214; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
