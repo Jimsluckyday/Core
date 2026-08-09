@@ -2334,7 +2334,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       return `
         <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
           ${escapeHtml(c.name)}
-          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
+          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;text-transform:none;letter-spacing:normal;color:var(--paper);cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
             <input type="checkbox" class="capper-no-tier-toggle" data-id="${c.id}"${noTierChecked} style="margin:0;"> No tiers
           </label>
           <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--paper);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
@@ -13206,7 +13206,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 220; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 221; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
