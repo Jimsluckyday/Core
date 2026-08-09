@@ -1705,15 +1705,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
         </div>
         <div class="field" style="margin-bottom:10px;">
           <label>Flag a pick as incomplete if it's missing:</label>
-          <div style="display:flex;gap:20px;margin-top:6px;">
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckClosing" checked /><label for="rqCheckClosing">Closing odds</label></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckOpening" /><label for="rqCheckOpening">Opening odds</label></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckHomeAway" checked /><label for="rqCheckHomeAway">Home / Away</label></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckUnitSize" /><label for="rqCheckUnitSize">No unit size recorded</label></div>
+          <div style="display:flex;gap:20px;margin-top:6px;flex-wrap:wrap;align-items:center;">
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckClosing" checked /><label for="rqCheckClosing">Closing odds</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckClosing">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckOpening" /><label for="rqCheckOpening">Opening odds</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckOpening">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckHomeAway" checked /><label for="rqCheckHomeAway">Home / Away</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckHomeAway">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="rqCheckUnitSize" /><label for="rqCheckUnitSize">No unit size recorded</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckUnitSize">Only</button></div>
+            <button type="button" class="ghost small" id="rqSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Once started, each pick is shown one at a time — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left. Tier and Unit size are always editable on every card regardless of which boxes are checked above, since there's no reason to make a separate trip back here just to fix the tier while a pick is already open for something else.
+          Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Click "Only" next to any field to isolate to just that one in a single click (unchecks the other three), or "Select all" to go back to checking everything at once — handy for switching between "just clear out closing odds today" and "show me everything incomplete" without manually clicking each box. Once started, each pick is shown one at a time — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left. Tier and Unit size are always editable on every card regardless of which boxes are checked above, since there's no reason to make a separate trip back here just to fix the tier while a pick is already open for something else.
         </div>
         <button id="startReviewQueueBtn">Start review</button>
         <div id="reviewQueueWrap" style="margin-top:14px;"></div>
@@ -10005,6 +10006,17 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   let reviewIndex = 0;
   let reviewSkippedCount = 0;
 
+  const RQ_CHECKBOX_IDS = ['rqCheckClosing', 'rqCheckOpening', 'rqCheckHomeAway', 'rqCheckUnitSize'];
+  document.querySelectorAll('.rq-only-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const onlyId = btn.getAttribute('data-only');
+      RQ_CHECKBOX_IDS.forEach(id => { $(id).checked = (id === onlyId); });
+    });
+  });
+  $('rqSelectAllBtn').addEventListener('click', () => {
+    RQ_CHECKBOX_IDS.forEach(id => { $(id).checked = true; });
+  });
+
   async function startReviewQueue() {
     const capperFilter = $('rqCapper').value;
     const sportFilter = $('rqSport').value;
@@ -12925,7 +12937,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 212; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 213; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
