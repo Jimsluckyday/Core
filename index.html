@@ -6706,7 +6706,15 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // columns EXPLICITLY below rather than assuming they line up
       // position-for-position, the exact mistake the "Date entered" fix
       // above was written to prevent from recurring.
-      const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Source Image'];
+      // CONFIRMED REAL GAP (found 2026-08-09): this export never included
+      // the pick's own id, which is fine for a read-only reference export
+      // but silently blocked re-importing corrections (e.g. researched
+      // odds) via Grading Corrections, which matches rows by id -- the
+      // OLD standalone Odds Exceptions tool's own export DID include id,
+      // masking this gap until Missing Data (v215) made this the only
+      // export path for that workflow. Added as the first column, reading
+      // the same data-pick-id attribute the row itself already carries.
+      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6772,7 +6780,8 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         const startTimeCell = row.children[15];
         const startTimeVal = csvField(startTimeCell ? (startTimeCell.querySelector('input')?.value || '') : '');
         const sourceImage = csvField(row.dataset.sourceImage || '');
-        return [...cellValues, eventNameVal, startTimeVal, sourceImage];
+        const id = csvField(row.dataset.pickId || '');
+        return [id, ...cellValues, eventNameVal, startTimeVal, sourceImage];
       });
       const csvContent = [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -12922,7 +12931,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 215; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 216; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
