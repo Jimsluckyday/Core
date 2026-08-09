@@ -5432,11 +5432,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // Selection is a live input, not plain text -- direct request to fix
       // typos (e.g. "Cincinatti", "Aryana Sabalenka") inline instead of
       // needing Full edit, which switches away to the other browser tab
-      // entirely. Home/Away and Line stay plain trailing annotations here
-      // (Home/Away already has its own inline expanding editor via "Edit
-      // odds/H-A"; Line wasn't part of this request).
+      // entirely. Line stays a plain trailing annotation here (wasn't part
+      // of this request). Home/Away used to be baked in here too, but now
+      // has its own always-visible column (below) instead -- showing it in
+      // both places would just be the same fact rendered twice.
       let pickText = `<input type="text" class="inline-selection-input" data-id="${p.id}" value="${escapeHtml(p.selection)}" style="width:150px;font-family:inherit;font-size:11px;padding:3px 4px;" />`;
-      if (p.home_away) pickText += ` (${p.home_away})`;
       if (p.line !== null && p.line !== undefined) pickText += isProp ? ` (${p.line})` : ` (${p.line > 0 ? '+' : ''}${p.line})`;
       // Event name now has its own editable column (below) instead of being
       // baked into this text.
@@ -5511,12 +5511,32 @@ These are almost always the same day, so "Date entered" only fills in a starting
         const pad = n => String(n).padStart(2, '0');
         return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
       })();
-      const startTimeCell = `<input type="datetime-local" class="inline-starttime-input" data-id="${p.id}" value="${startTimeLocalVal}" style="font-family:inherit;font-size:11px;padding:2px 3px;" />`;
+      // Direct feedback: an empty datetime-local input reads as just another
+      // blank-looking field on a wide table -- easy to scroll past without
+      // registering "this one's actually missing." A visible red border
+      // when unset makes a gap something you can spot without reading the
+      // Missing column, not just something the tool can filter for.
+      const startTimeBorder = p.game_start_time ? '' : 'border:1.5px solid #8a2f3a;';
+      const startTimeCell = `<input type="datetime-local" class="inline-starttime-input" data-id="${p.id}" value="${startTimeLocalVal}" style="font-family:inherit;font-size:11px;padding:2px 3px;${startTimeBorder}" />`;
       // A single glance at exactly which fields are absent on THIS pick --
       // direct request so sorting/filtering by this column groups "missing
       // closing odds" rows together, "missing start time" rows together,
       // etc., instead of scanning every column by eye to notice a gap.
       const missingCell = missingFieldsSummary(p, sportName, betTypeName, isProp);
+      // Home/Away used to be editable only via the "Edit odds/H-A" expander
+      // (a click-to-reveal row, not visible at rest) -- direct feedback
+      // that this made it impossible to even SEE the current value without
+      // an extra click, let alone validate it at a glance while scanning a
+      // batch. Now a real, always-visible column, same red-border-when-
+      // empty treatment as Start time above. Not shown for Player Props,
+      // same as everywhere else this field is handled -- a prop bet doesn't
+      // have a home/away side of its own.
+      const homeAwayBorder = (p.home_away || isProp) ? '' : 'border:1.5px solid #8a2f3a;';
+      const homeAwayCell = isProp ? '—' : `<select class="inline-homeaway-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;${homeAwayBorder}">
+        <option value="" ${!p.home_away ? 'selected' : ''}>—</option>
+        <option value="home" ${p.home_away === 'home' ? 'selected' : ''}>Home</option>
+        <option value="away" ${p.home_away === 'away' ? 'selected' : ''}>Away</option>
+      </select>`;
       const cells = [
         p.event_date,
         dateEnteredCell,
@@ -5534,20 +5554,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
         escapeHtml(p.source_image || '—'),
         eventNameCell,
         startTimeCell,
-        missingCell
+        missingCell,
+        homeAwayCell
       ];
       const cellsHtml = cells.map((c, i) => {
         // Sort/filter value must stay the PLAIN capper name (not the richer
         // HTML with the source_image reference now shown in this column) --
         // same reasoning as odds/result below, which also separate what's
         // sorted/filtered from what's displayed. Pick/Capper's usual/Tier/
-        // Unit size/Event name/Start time (7, 8, 9, 10, 14, 15) have no
-        // filter dropdown at all (see the header below), so their value
-        // here is only ever a plain display fallback, never read -- except
-        // Pick and Start time, whose plain selection text / raw ISO string
-        // sort correctly as plain text too (lexicographic ISO order matches
-        // chronological order for Start time).
-        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : String(c))))))));
+        // Unit size/Event name/Start time/Home-Away (7, 8, 9, 10, 14, 15,
+        // 17) have no filter dropdown at all (see the header below), so
+        // their value here is only ever a plain display fallback, never
+        // read -- except Pick, Start time, and Home/Away, whose plain
+        // text/raw ISO string sort correctly as plain text too
+        // (lexicographic ISO order matches chronological order for Start
+        // time).
+        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : String(c)))))))));
         const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
@@ -5569,7 +5591,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ${cellsHtml}
         <td>
           ${gradeBtns}
-          <button class="mini edit-odds-btn" data-id="${p.id}">Edit odds/H-A</button>
+          <button class="mini edit-odds-btn" data-id="${p.id}">Edit odds</button>
           <button class="mini full-edit-btn" data-id="${p.id}">Full edit</button>
           <button class="mini delete-btn" data-id="${p.id}" style="border-color:#8a2f3a;color:#8a2f3a;">Delete</button>
         </td>
@@ -5587,8 +5609,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // "Status" (Published/Draft) removed -- direct feedback that it wasn't
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing'];
-    const noFilterCols = new Set(['Pick', "Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time']);
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away'];
+    const noFilterCols = new Set(['Pick', "Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time', 'Home/Away']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -6450,8 +6472,13 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       }
       document.querySelectorAll('.inline-editor-row').forEach(r => r.remove());
 
+      // Home/Away used to live in this same expander, but now has its own
+      // always-visible column (direct feedback: hiding it behind a click
+      // made it impossible to even see the current value at rest, let
+      // alone validate it while scanning a batch) -- editing it in two
+      // places would just invite the two from drifting out of sync, so
+      // it's odds-only here now.
       const id = btn.getAttribute('data-id');
-      const homeAway = row.getAttribute('data-home-away');
       const openingOdds = row.getAttribute('data-opening-odds');
       const closingOdds = row.getAttribute('data-closing-odds');
       const colCount = row.children.length;
@@ -6459,12 +6486,6 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       const tr = document.createElement('tr');
       tr.className = 'inline-editor-row';
       tr.innerHTML = '<td colspan="' + colCount + '">' +
-        '<label>Home/Away ' +
-        '<select class="editHomeAway">' +
-          '<option value=""' + (!homeAway ? ' selected' : '') + '>—</option>' +
-          '<option value="home"' + (homeAway === 'home' ? ' selected' : '') + '>Home</option>' +
-          '<option value="away"' + (homeAway === 'away' ? ' selected' : '') + '>Away</option>' +
-        '</select></label>' +
         '<label>Opening odds <input class="editOpeningOdds" type="number" step="1" value="' + openingOdds + '" style="width:80px;"></label>' +
         '<label>Closing odds <input class="editClosingOdds" type="number" step="1" value="' + closingOdds + '" style="width:80px;"></label>' +
         '<button class="mini saveEditBtn">Save</button>' +
@@ -6476,19 +6497,16 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       tr.querySelector('.saveEditBtn').addEventListener('click', async () => {
         const op = opener();
         if (!op) return;
-        const ha = tr.querySelector('.editHomeAway').value;
         const oo = tr.querySelector('.editOpeningOdds').value;
         const co = tr.querySelector('.editClosingOdds').value;
         try {
           await op.rest('picks?id=eq.' + id, {
             method: 'PATCH',
             body: JSON.stringify({
-              home_away: ha || null,
               opening_odds: oo === '' ? null : Number(oo),
               closing_odds: co === '' ? null : Number(co)
             })
           });
-          row.setAttribute('data-home-away', ha);
           row.setAttribute('data-opening-odds', oo);
           row.setAttribute('data-closing-odds', co);
           const oddsParts = [];
@@ -6593,6 +6611,33 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           method: 'PATCH',
           body: JSON.stringify({ pick_tier: Number(sel.value) })
         });
+        flashSaveStatus(sel, true);
+      } catch (e) {
+        flashSaveStatus(sel, false, e.message);
+      } finally {
+        sel.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('select.inline-homeaway-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const op = opener();
+      if (!op) return;
+      const id = sel.getAttribute('data-id');
+      const row = sel.closest('tr');
+      sel.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ home_away: sel.value || null })
+        });
+        if (row) row.setAttribute('data-home-away', sel.value);
+        // Clear the empty-value red border the moment a real value is set,
+        // same idea as the unit-size normalizer reflecting its own cleaned
+        // value back -- the visual cue should track the CURRENT state, not
+        // just how the row first loaded.
+        sel.style.border = sel.value ? '' : '1.5px solid #8a2f3a';
         flashSaveStatus(sel, true);
       } catch (e) {
         flashSaveStatus(sel, false, e.message);
@@ -6787,7 +6832,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
       // masking this gap until Missing Data (v215) made this the only
       // export path for that workflow. Added as the first column, reading
       // the same data-pick-id attribute the row itself already carries.
-      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Source Image'];
+      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -6837,12 +6882,13 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
           if (i === 7) {
             // Pick also holds a live <input> now (the Selection text) --
             // same reasoning as Tier/Unit size below, read .value instead
-            // of textContent. The Home/Away and Line annotations that used
-            // to be baked into this same plain-text cell aren't part of
-            // the input itself anymore, so they're reconstructed here from
-            // the row's own data attributes (already present for the
-            // parlay-leg cascade autofill) rather than dropped from the
-            // export entirely.
+            // of textContent. The Line annotation that used to be baked
+            // into this same plain-text cell isn't part of the input
+            // itself anymore, so it's reconstructed here from the row's
+            // own data attribute (already present for the parlay-leg
+            // cascade autofill) rather than dropped from the export
+            // entirely. Home/Away used to be reconstructed here too, but
+            // now has its own real column (below) instead.
             const inp = cell.querySelector('input');
             let val = inp ? inp.value.trim() : cell.textContent.trim();
             // Plain string concatenation, NOT a template literal -- this
@@ -6851,7 +6897,6 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
             // this region (even inside a comment) breaks that outer
             // literal's own parsing, the exact trap already documented
             // elsewhere in this file.
-            if (row.dataset.homeAway) val += ' (' + row.dataset.homeAway + ')';
             if (row.dataset.cascadeLine) val += ' (' + row.dataset.cascadeLine + ')';
             return csvField(val);
           }
@@ -6878,9 +6923,16 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
         // contiguous 0-12 range since it sits after the two input columns.
         const missingCell = row.children[16];
         const missingVal = csvField(missingCell ? missingCell.textContent.trim() : '');
+        // Home/Away (table col 17) holds a live <select> for a real bet,
+        // but plain "—" text for a Player Prop (a prop doesn't have a
+        // home/away side) -- fall back to textContent when there's no
+        // select to read.
+        const homeAwayCell = row.children[17];
+        const homeAwaySel = homeAwayCell ? homeAwayCell.querySelector('select') : null;
+        const homeAwayVal = csvField(homeAwaySel ? homeAwaySel.value : (homeAwayCell ? homeAwayCell.textContent.trim() : ''));
         const sourceImage = csvField(row.dataset.sourceImage || '');
         const id = csvField(row.dataset.pickId || '');
-        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, sourceImage];
+        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, sourceImage];
       });
       const csvContent = [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -13030,7 +13082,7 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 218; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 219; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
