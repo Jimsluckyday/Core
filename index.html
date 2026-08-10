@@ -5640,6 +5640,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <option value="home" ${p.home_away === 'home' ? 'selected' : ''}>Home</option>
         <option value="away" ${p.home_away === 'away' ? 'selected' : ''}>Away</option>
       </select>`;
+      // Direct request: schedule-sync/schedule-sync-backfill already write
+      // a plain-English reason to schedule_sync_note whenever a pick can't
+      // be auto-matched (wrong date, spelling issue, ambiguous match,
+      // etc.) -- that note was only ever visible by digging through the
+      // Edge Function's own JSON response, so anyone looking at the pick
+      // later (without having watched the sync run) had no way to know
+      // why it was stuck. Read-only -- this is a system-generated
+      // diagnostic, not something typed in by hand, and it clears itself
+      // automatically the next time a sync run successfully matches the
+      // pick (both functions already set it back to null on a real match).
+      const syncNoteCell = escapeHtml(p.schedule_sync_note || '—');
       const cells = [
         p.event_date,
         dateEnteredCell,
@@ -5658,7 +5669,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         eventNameCell,
         startTimeCell,
         missingCell,
-        homeAwayCell
+        homeAwayCell,
+        syncNoteCell
       ];
       const cellsHtml = cells.map((c, i) => {
         // Sort/filter value must stay the PLAIN capper name (not the richer
@@ -5716,7 +5728,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // "Status" (Published/Draft) removed -- direct feedback that it wasn't
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away'];
+    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note'];
     // Pick was excluded here when Selection first became a live input
     // (v218), matching the same pattern as Tier/Unit size -- but direct
     // feedback confirmed this broke a real, regularly-used workflow: the
@@ -6989,7 +7001,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
       // masking this gap until Missing Data (v215) made this the only
       // export path for that workflow. Added as the first column, reading
       // the same data-pick-id attribute the row itself already carries.
-      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Source Image'];
+      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -7087,9 +7099,12 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
         const homeAwayCell = row.children[17];
         const homeAwaySel = homeAwayCell ? homeAwayCell.querySelector('select') : null;
         const homeAwayVal = csvField(homeAwaySel ? homeAwaySel.value : (homeAwayCell ? homeAwayCell.textContent.trim() : ''));
+        // Sync note (table col 18) is plain text, same as Missing above.
+        const syncNoteCell = row.children[18];
+        const syncNoteVal = csvField(syncNoteCell ? syncNoteCell.textContent.trim() : '');
         const sourceImage = csvField(row.dataset.sourceImage || '');
         const id = csvField(row.dataset.pickId || '');
-        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, sourceImage];
+        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, sourceImage];
       });
       const csvContent = [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -10721,7 +10736,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -13263,7 +13278,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 225; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 226; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
