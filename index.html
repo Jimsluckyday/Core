@@ -4735,16 +4735,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (n === 'total') return false;
     return true;
   }
-  // Direct request: Tennis and Golf are individual/tournament sports with
-  // no home stadium or side to assign -- a match or round is just player
-  // vs. player (or a field of players), never "home" vs. "away." Soccer is
-  // deliberately NOT included here even though it also has many
-  // tournaments -- a soccer match (club or international) still has a real
-  // home/away designation most of the time, just not universally, so it's
-  // being left as a real, checkable field rather than assumed away.
+  // Direct request: Tennis, Golf, MMA, and Boxing are individual/combat
+  // sports with no home stadium or side to assign -- a match, round, or
+  // fight is just player vs. player or fighter vs. fighter, never "home"
+  // vs. "away." Soccer is deliberately NOT included here even though it
+  // also has many tournaments -- a soccer match (club or international)
+  // still has a real home/away designation most of the time, just not
+  // universally, so it's being left as a real, checkable field rather than
+  // assumed away. Confirmed this list isn't meant to be exhaustive --
+  // other individual/combat sports (e.g. wrestling, darts) can be added
+  // here the same way as they actually come up, one at a time, rather than
+  // trying to enumerate every possible case now.
   function sportUsesHomeAway(sportName) {
     const n = (sportName || '').toLowerCase();
-    return !n.includes('tennis') && !n.includes('golf');
+    return !n.includes('tennis') && !n.includes('golf') && !n.includes('mma') && !n.includes('boxing');
   }
 
   // Drives the All Picks pop-out's "Missing" column -- a single glance at
@@ -13230,7 +13234,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 222; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 223; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
