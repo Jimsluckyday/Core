@@ -5911,13 +5911,28 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
 
   function allRows() { return Array.from(tbody.querySelectorAll('tr')); }
 
+  // CONFIRMED REAL BUG, direct report: a live <input> inside a cell (the
+  // Pick column's Selection field, restored to filterable in v224) has no
+  // rendered text of its own -- a form control's typed value is never
+  // reflected in .textContent, only its surrounding HTML/attributes are.
+  // Reading textContent for the checkbox LABEL here (as opposed to the
+  // data-value used as the actual filter KEY, which already correctly
+  // reads the plain selection text) meant every Pick row showed "(blank)"
+  // in the dropdown, while a Parlay row's trailing "legs" toggle button --
+  // real rendered text sitting right next to the empty input -- leaked in
+  // as if it were the pick's own value. Reads the input/select's own
+  // .value for the label when the cell holds one, same as the filter key
+  // already does, instead of trusting textContent to describe the cell.
   function distinctValues(colIndex) {
     const map = new Map();
     allRows().forEach(row => {
       const cell = row.children[colIndex];
       if (!cell) return;
       const raw = cell.getAttribute('data-value');
-      if (!map.has(raw)) map.set(raw, cell.textContent);
+      if (!map.has(raw)) {
+        const control = cell.querySelector('input, select');
+        map.set(raw, control ? control.value : cell.textContent);
+      }
     });
     return map;
   }
@@ -13248,7 +13263,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 224; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 225; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
