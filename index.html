@@ -5717,7 +5717,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
     const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away'];
-    const noFilterCols = new Set(['Pick', "Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time', 'Home/Away']);
+    // Pick was excluded here when Selection first became a live input
+    // (v218), matching the same pattern as Tier/Unit size -- but direct
+    // feedback confirmed this broke a real, regularly-used workflow: the
+    // filter dropdown is how a specific problem pick (e.g. a mis-matched
+    // "Carolina/Vegas" selection) actually gets found in a long list, not
+    // just how it gets sorted. Restored -- the dropdown reads each cell's
+    // data-value attribute directly (not the live input), which the
+    // inline-selection-input's own save handler now keeps in sync, so
+    // filtering still reflects a correction the moment it's saved.
+    const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time', 'Home/Away']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -6848,6 +6857,11 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
           body: JSON.stringify({ selection: value })
         });
         lastSaved = value;
+        // Keep the filter dropdown's own data-value in sync with the
+        // correction -- otherwise a just-fixed selection would still show
+        // up under its OLD text in the filter list until a full refresh.
+        const cell = inp.closest('td');
+        if (cell) cell.setAttribute('data-value', value.toLowerCase());
         flashSaveStatus(inp, true);
       } catch (e) {
         flashSaveStatus(inp, false, e.message);
@@ -13234,7 +13248,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 223; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 224; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
