@@ -4775,7 +4775,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (p.closing_odds === null || p.closing_odds === undefined) missing.push('Closing odds');
     }
     if (!p.home_away && !isProp && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) missing.push('Home/Away');
-    if (!p.raw_unit_size) missing.push('Unit size');
+    // Direct request: a capper flagged no_tier_signal never gives a
+    // confidence signal of any kind -- raw_unit_size IS that signal, so a
+    // capper who never sets one is exactly the same fact as "no tier
+    // signal," not a separate gap to keep re-searching for. Only
+    // suppresses the MISSING flag when raw_unit_size is actually blank --
+    // a real value (Caruso's "Play of the Day" picks, or anything typed
+    // in manually) always shows and counts as complete regardless of this
+    // flag.
+    if (!p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) missing.push('Unit size');
     if (!p.game_start_time) missing.push('Start time');
     if (sportUsesEventName(sportName) && !p.event_name) missing.push('Event name');
     if (betTypeUsesLine(betTypeName, isProp) && (p.line === null || p.line === undefined)) missing.push('Line');
@@ -10537,7 +10545,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
         if (checkClosing && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
         if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
         if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
-        if (checkUnitSize && !p.raw_unit_size) return true;
+        if (checkUnitSize && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
         if (checkStartTime && !p.game_start_time) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
         if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
@@ -10576,7 +10584,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
       if (p.closing_odds === null || p.closing_odds === undefined) missingParts.push('closing odds');
     }
     if (!p.home_away && homeAwayApplies) missingParts.push('home/away');
-    if (!p.raw_unit_size) missingParts.push('unit size');
+    if (!p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) missingParts.push('unit size');
     if (!p.game_start_time) missingParts.push('start time');
     if (eventNameScoped && !p.event_name) missingParts.push('event name');
     if (lineScoped && (p.line === null || p.line === undefined)) missingParts.push('line');
@@ -10796,7 +10804,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
         if (checkClosing && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
         if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
         if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
-        if (checkUnitSize && !p.raw_unit_size) return true;
+        if (checkUnitSize && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
         if (checkStartTime && !p.game_start_time) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
         if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
@@ -13310,7 +13318,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 228; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 229; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
