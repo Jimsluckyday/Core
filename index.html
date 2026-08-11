@@ -5497,7 +5497,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('togglePicksBtn').textContent = showing ? 'Show picks' : 'Hide picks';
   });
 
-  function allPicksRowsToHtml(picks, capperUsualMap, hideComplete) {
+  function allPicksRowsToHtml(picks, capperUsualMap, hideComplete, missingChecked) {
     capperUsualMap = capperUsualMap || {};
     if (!picks.length) return `<div class="empty-state">No picks match these filters.</div>`;
     const rows = picks.map(p => {
@@ -5622,7 +5622,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // past -- the list shrinking to nothing is the actual finish line.
       // Only opted into by hideComplete=true (Missing Data); the general
       // All Picks browser always shows every row regardless of status.
-      if (hideComplete && missingCell === 'Complete') return null;
+      //
+      // CONFIRMED REAL BUG (found 2026-08-11): the Refresh button re-fetches
+      // via the raw, unscoped SQL query (see __sourceQuery below) -- that
+      // query alone can't express "and scoped to sports/bet types that
+      // actually need this field," so a Refresh used to bring back every
+      // Tennis/Parlay/prop row with a structurally-blank home_away right
+      // alongside genuine gaps. The plain "hide if fully Complete" check
+      // above didn't catch these, since a row can be inapplicable for HOME
+      // AWAY specifically while still genuinely missing something else
+      // (Start time, Event name) -- so it stayed visible, inflating the
+      // count. missingChecked (the exact field labels the user actually
+      // checked in Missing Data, e.g. ["Closing odds","Home/Away"]) lets
+      // this reuse the SAME scoped missingFieldsSummary text every time --
+      // on first open AND on every Refresh -- and only keep a row if one of
+      // the SPECIFICALLY REQUESTED fields is a real, applicable gap for it.
+      if (hideComplete) {
+        if (missingChecked && missingChecked.length) {
+          const missingList = missingCell === 'Complete' ? [] : missingCell.split(', ');
+          if (!missingList.some(f => missingChecked.includes(f))) return null;
+        } else if (missingCell === 'Complete') {
+          return null;
+        }
+      }
       // Home/Away used to be editable only via the "Edit odds/H-A" expander
       // (a click-to-reveal row, not visible at rest) -- direct feedback
       // that this made it impossible to even SEE the current value without
@@ -5754,7 +5776,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </table>`;
   }
 
-  async function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin, hideComplete) {
+  async function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin, hideComplete, missingChecked) {
     const win = existingWin || window.open('', '_blank');
     if (!win) {
       alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
@@ -5821,7 +5843,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         console.warn('Could not load capper tier/unit-size history for the reference column:', e.message);
       }
     }
-    const tableHtml = allPicksRowsToHtml(picks, capperUsualMap, hideComplete);
+    const tableHtml = allPicksRowsToHtml(picks, capperUsualMap, hideComplete, missingChecked);
     win.document.open();
     win.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>All Picks</title>
@@ -5912,6 +5934,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 var __sourceQuery = ${JSON.stringify(sourceQuery)};
 var __filterSummary = ${JSON.stringify(filterSummary)};
 var __hideComplete = ${hideComplete ? 'true' : 'false'};
+var __missingChecked = ${JSON.stringify(missingChecked || null)};
 (function() {
   const table = document.getElementById('dataTable');
   if (!table) return;
@@ -6968,7 +6991,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
       refreshBtn.textContent = 'Refreshing...';
       try {
         const freshPicks = await op.rest(__sourceQuery);
-        op.openAllPicksTab(freshPicks, __filterSummary, __sourceQuery, window, __hideComplete);
+        op.openAllPicksTab(freshPicks, __filterSummary, __sourceQuery, window, __hideComplete, __missingChecked);
       } catch (e) {
         alert('Could not refresh: ' + e.message);
         refreshBtn.disabled = false;
@@ -10776,7 +10799,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
         return;
       }
       const checkedLabels = MD_CHECKBOX_IDS.filter(id => $(id).checked).map(id => MD_FIELD_LABELS[id]);
-      openAllPicksTab(picks, `Missing data — ${checkedLabels.join(', ')}`, query, undefined, true);
+      openAllPicksTab(picks, `Missing data — ${checkedLabels.join(', ')}`, query, undefined, true, checkedLabels);
     } catch (e) {
       alert('Could not load picks: ' + e.message);
     } finally {
@@ -13278,7 +13301,7 @@ var __hideComplete = ${hideComplete ? 'true' : 'false'};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 226; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 227; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
