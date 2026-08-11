@@ -4728,11 +4728,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // applies there. Player Props are excluded separately at every call site
   // (a prop already has no home/away side of its own, unrelated to bet
   // type), so this helper doesn't duplicate that check.
+  // CONFIRMED REAL GAP (found 2026-08-11): "No Run First Inning" is a
+  // yes/no bet on the GAME itself (does either team score in the 1st),
+  // same category as Over/Under/Total -- no single side to assign, same
+  // as its sibling "Yes Run First Inning" and "Both teams to score"
+  // (soccer). Confirmed against the real bet_types table before adding --
+  // NOT the same as "Team Total" or "Draw No Bet", which DO pick a real
+  // side and correctly stay excluded from this list.
+  const NO_SIDE_BET_TYPES = ['no run first inning', 'yes run first inning', 'both teams to score'];
   function betTypeUsesHomeAway(betTypeName) {
     const n = (betTypeName || '').toLowerCase().trim();
     if (n.includes('parlay')) return false;
     if (n.includes('over/under')) return false;
     if (n === 'total') return false;
+    if (NO_SIDE_BET_TYPES.includes(n)) return false;
     return true;
   }
   // Direct request: Tennis, Golf, MMA, and Boxing are individual/combat
@@ -13301,7 +13310,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 227; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 228; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
