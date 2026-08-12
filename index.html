@@ -4784,7 +4784,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // in manually) always shows and counts as complete regardless of this
     // flag.
     if (!p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) missing.push('Unit size');
-    if (!p.game_start_time) missing.push('Start time');
+    // Direct request: a Parlay wrapper row covers multiple separate games
+    // at once, so there's no single start time to pin down -- not
+    // publishable to the group as-is without a real design change (a
+    // per-leg start time display), which isn't happening right now. Same
+    // "not a real gap" treatment already given to Home/Away for Parlay.
+    if (!p.game_start_time && !(betTypeName || '').toLowerCase().includes('parlay')) missing.push('Start time');
     if (sportUsesEventName(sportName) && !p.event_name) missing.push('Event name');
     if (betTypeUsesLine(betTypeName, isProp) && (p.line === null || p.line === undefined)) missing.push('Line');
     return missing.length ? missing.join(', ') : 'Complete';
@@ -5626,7 +5631,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // registering "this one's actually missing." A visible red border
       // when unset makes a gap something you can spot without reading the
       // Missing column, not just something the tool can filter for.
-      const startTimeBorder = p.game_start_time ? '' : 'border:1.5px solid #8a2f3a;';
+      // Direct request: a Parlay wrapper row has no single start time to
+      // pin down (multiple separate games) -- no red-flag border for it,
+      // same reasoning as the Missing column's own Parlay exclusion above.
+      const startTimeBorder = (p.game_start_time || betTypeName.toLowerCase().includes('parlay')) ? '' : 'border:1.5px solid #8a2f3a;';
       const startTimeCell = `<input type="datetime-local" class="inline-starttime-input" data-id="${p.id}" value="${startTimeLocalVal}" style="font-family:inherit;font-size:11px;padding:2px 3px;${startTimeBorder}" />`;
       // A single glance at exactly which fields are absent on THIS pick --
       // direct request so sorting/filtering by this column groups "missing
@@ -10546,7 +10554,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
         if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
         if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
         if (checkUnitSize && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
-        if (checkStartTime && !p.game_start_time) return true;
+        if (checkStartTime && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
         if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
         return false;
@@ -10585,7 +10593,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
     }
     if (!p.home_away && homeAwayApplies) missingParts.push('home/away');
     if (!p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) missingParts.push('unit size');
-    if (!p.game_start_time) missingParts.push('start time');
+    if (!p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) missingParts.push('start time');
     if (eventNameScoped && !p.event_name) missingParts.push('event name');
     if (lineScoped && (p.line === null || p.line === undefined)) missingParts.push('line');
 
@@ -10805,7 +10813,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
         if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
         if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
         if (checkUnitSize && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
-        if (checkStartTime && !p.game_start_time) return true;
+        if (checkStartTime && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
         if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
         return false;
@@ -13318,7 +13326,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 229; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 230; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
