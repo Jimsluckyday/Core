@@ -4828,7 +4828,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // name, e.g. "LeBron James (LAL)") is only ever meaningful for Player
     // Prop picks -- flagging it as missing on a straight bet would just be
     // noise, since that bet type has no player/team of its own to show.
-    if (isProp && !p.prop_team) missing.push('Prop team');
+    // CONFIRMED REAL BUG (found 2026-08-13), direct report: "I ran the
+    // prop team [check] and got 7 tennis hits. These shouldn't hit that
+    // filter as there is no prop team for a tennis match." Tennis (and
+    // Golf/MMA/Boxing) are individual/combat sports with no team
+    // affiliation at all -- their "Player Prop" bet type is a real,
+    // different thing (a match-total Over/Under, see splitTennisNames'
+    // own comments in schedule-sync-backfill.ts), not a team-sport
+    // player stat prop, so prop_team can never legitimately apply. Reuses
+    // sportUsesHomeAway's own individual-sport list rather than
+    // duplicating it, since the underlying reasoning -- "this sport has
+    // no team concept" -- is identical to why Home/Away is excluded for
+    // the same sports just above.
+    if (isProp && !p.prop_team && sportUsesHomeAway(sportName)) missing.push('Prop team');
     return missing.length ? missing.join(', ') : 'Complete';
   }
 
@@ -10982,7 +10994,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // that same "what genuinely counts as missing" logic.
       if (has('mdCheckEventName') && !p.event_name && sportUsesEventName(sportName) && !betTypeName.toLowerCase().includes('parlay')) return true;
       if (has('mdCheckLine') && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
-      if (has('mdCheckPropTeam') && !p.prop_team && usesPropFields) return true;
+      // Same individual-sport exclusion as missingFieldsSummary's own Prop
+      // team check (see its comment for the full story) -- kept in sync
+      // deliberately, same as the Event name exclusion just above.
+      if (has('mdCheckPropTeam') && !p.prop_team && usesPropFields && sportUsesHomeAway(sportName)) return true;
       return false;
     });
   }
@@ -13559,7 +13574,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 238; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 239; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
