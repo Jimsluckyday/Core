@@ -2052,13 +2052,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // on the function itself. The service_role key those functions need to
   // actually write to the database stays entirely server-side, inside the
   // function's own secrets -- it's never touched or exposed here.
-  async function invokeEdgeFunction(functionName, queryString, isRetryAfterRefresh = false) {
+  // `body`, if given, is sent as a JSON POST body -- added for the
+  // validate-*-player-txt functions (`{date, checks: [...]}`), which
+  // unlike schedule-sync/grade_picks take their input as a body, not query
+  // params. Appended as a 4th param (after isRetryAfterRefresh, not
+  // before) specifically so every existing call site -- none of which
+  // ever pass a body -- keeps working completely unchanged.
+  async function invokeEdgeFunction(functionName, queryString, isRetryAfterRefresh = false, body = null) {
     const res = await fetch(`${config.url}/functions/v1/${functionName}${queryString || ''}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session ? session.access_token : config.anonKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      ...(body ? { body: JSON.stringify(body) } : {})
     });
     const text = await res.text();
     let data;
@@ -2070,7 +2077,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (res.status === 401 && session && session.refresh_token && !isRetryAfterRefresh) {
         try {
           await refreshSession(session.refresh_token);
-          return invokeEdgeFunction(functionName, queryString, true);
+          return invokeEdgeFunction(functionName, queryString, true, body);
         } catch (e) {
           // Refresh itself failed -- fall through to the normal error below.
         }
@@ -5980,6 +5987,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <button type="button" class="quick-filter-btn" id="popAutoGradeBtn">Grade Results</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeEspnBtn">Grade Results (ESPN backfill)</button>
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Backfill Older Date</button>
+    <button type="button" class="quick-filter-btn" id="popAutoPropTeamBtn">Check Player Teams</button>
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
   </div>
   <div class="picks-table-scroll">${tableHtml}</div>
@@ -6364,6 +6372,89 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
       renderPopAutomationResult('Backfill schedule for ' + date, data);
     } catch (e) {
       alert('Backfill failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // CONFIRMED FIX, direct request: "I have a backfill option in the
+  // missing data pop out but not a button to check the teams a player is
+  // on and the only place I know this exists is the add picks section...
+  // wouldn't make sense to update one at a time... is the button wired to
+  // look up more than one player at a time." The single-player version in
+  // Add Pick calls validate-{sport}-player-txt with exactly one check;
+  // that same function already accepts a whole ARRAY of checks in one
+  // call (confirmed directly against its own real contract -- it was just
+  // never used that way from the UI). This button fetches every Player
+  // Prop pick on the selected date missing prop_team, groups them by
+  // sport (only MLB/NBA/WNBA/NHL have a validator -- any other sport is
+  // reported separately as unsupported rather than silently skipped), and
+  // sends ONE batched request per sport instead of one request per pick --
+  // the real "mass update" the project owner asked for, not a loop
+  // dressed up to look like one.
+  document.getElementById('popAutoPropTeamBtn').addEventListener('click', async () => {
+    const op = opener();
+    if (!op) return;
+    const date = document.getElementById('popAutoDate').value;
+    if (!date) { alert('Pick a date first -- this will not run without one.'); return; }
+    const sportId = document.getElementById('popAutoSport').value;
+    const sportsListForLabel = op.getSports() || [];
+    const sportLabel = sportId ? ((sportsListForLabel.find(s => String(s.id) === sportId) || {}).name || 'that sport') : 'ALL sports';
+    if (!confirm('This will look up and fill in Prop team for every Player Prop pick missing it on ' + date + ' (' + sportLabel + ' -- MLB, NBA, WNBA, and NHL only; other sports are not supported yet).\\n\\nThis writes real changes to your data. Continue?')) return;
+    const btn = document.getElementById('popAutoPropTeamBtn');
+    btn.disabled = true;
+    document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Fetching Player Prop picks missing a team for this date...</div>';
+    try {
+      let query = 'picks?select=id,prop_player,sport_id,sports(name),bet_types(uses_prop_fields)&event_date=eq.' + date + '&prop_team=is.null&prop_player=not.is.null';
+      if (sportId) query += '&sport_id=eq.' + sportId;
+      const candidates = await op.restAllPages(query);
+      // Re-checked here rather than trusted from the query alone -- same
+      // "don't trust the raw filter, re-verify the real condition"
+      // discipline the Missing Data tool's own post-filter already uses.
+      const propPicks = (candidates || []).filter(p => p.bet_types && p.bet_types.uses_prop_fields && p.prop_player);
+      if (!propPicks.length) {
+        renderPopAutomationResult('Check Player Teams for ' + date, { message: 'No Player Prop picks missing prop_team for this date/sport.' });
+        return;
+      }
+      const FUNCTION_BY_SPORT = { mlb: 'validate-mlb-player-txt', nba: 'validate-nba-player-txt', wnba: 'validate-wnba-player-txt', nhl: 'validate-nhl-player-txt' };
+      const bySportNorm = {};
+      const unsupported = [];
+      for (const p of propPicks) {
+        const sportName = p.sports ? p.sports.name : '';
+        const norm = (sportName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (FUNCTION_BY_SPORT[norm]) {
+          (bySportNorm[norm] = bySportNorm[norm] || []).push(p);
+        } else {
+          unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)' });
+        }
+      }
+      document.getElementById('popAutomationResultsWrap').innerHTML =
+        '<div style="font-size:11px;">Checking ' + propPicks.length + ' player(s) across ' + Object.keys(bySportNorm).length + ' sport(s)...</div>';
+      const summary = { date, sports: [], unsupported };
+      for (const norm of Object.keys(bySportNorm)) {
+        const picksForSport = bySportNorm[norm];
+        const sportResult = { sport: norm, checked: picksForSport.length, resolved: 0, unresolved: [] };
+        try {
+          const checks = picksForSport.map(p => ({ id: p.id, playerName: p.prop_player }));
+          const data = await op.invokeEdgeFunction(FUNCTION_BY_SPORT[norm], '', false, { date, checks });
+          const results = data.results || [];
+          for (const r of results) {
+            if (r.valid && r.team) {
+              await op.rest('picks?id=eq.' + r.id, { method: 'PATCH', body: JSON.stringify({ prop_team: r.team }) });
+              sportResult.resolved++;
+            } else {
+              const pick = picksForSport.find(p => p.id === r.id);
+              sportResult.unresolved.push({ id: r.id, player: pick ? pick.prop_player : '(unknown)', reason: r.reason || 'not found' });
+            }
+          }
+        } catch (e) {
+          sportResult.error = e.message;
+        }
+        summary.sports.push(sportResult);
+      }
+      renderPopAutomationResult('Check Player Teams for ' + date + ' -- click Refresh above to see the updated rows', summary);
+    } catch (e) {
+      alert('Check Player Teams failed: ' + e.message);
     } finally {
       btn.disabled = false;
     }
@@ -13385,7 +13476,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 234; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 235; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
