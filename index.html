@@ -611,7 +611,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <input id="propTeam" placeholder="e.g. Red Sox" />
         </div>
         <div style="align-self:flex-end;">
-          <button type="button" class="ghost" id="propTeamAutoFillBtn" title="MLB, NBA, and NHL only for now -- looks up the player's current team automatically">Auto-fill (MLB/NBA/NHL)</button>
+          <button type="button" class="ghost" id="propTeamAutoFillBtn" title="MLB, NBA, WNBA, and NHL only for now -- looks up the player's current team automatically. WNBA specifically can take 30-90+ seconds due to BALLDONTLIE's free-tier rate limit (5 requests/minute).">Auto-fill (MLB/NBA/WNBA/NHL)</button>
         </div>
       </div>
 
@@ -1769,6 +1769,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div class="checkbox-row"><input type="checkbox" id="mdCheckStartTime" /><label for="mdCheckStartTime">Start time</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckStartTime">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckEventName" /><label for="mdCheckEventName">Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckEventName">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckLine" /><label for="mdCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLine">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckPropTeam" /><label for="mdCheckPropTeam">Prop team <span style="color:var(--ink-soft);font-weight:normal;">(Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckPropTeam">Only</button></div>
             <button type="button" class="ghost small" id="mdSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
           </div>
         </div>
@@ -4119,10 +4120,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // missing entirely -- calling a name that matches no deployed function
     // produces exactly the generic "Failed to fetch" browser error seen,
     // rather than a normal HTTP error response.
-    const functionName = sportNorm === 'mlb' ? 'validate-mlb-player-txt' : sportNorm === 'nba' ? 'validate-nba-player-txt' : sportNorm === 'nhl' ? 'validate-nhl-player-txt' : null;
-    if (!functionName) { alert('Auto-fill only works for MLB, NBA, and NHL right now -- other sports need to be typed in manually for now.'); return; }
+    // WNBA added -- direct request: "I don't think we build in WNBA and
+    // should add that," raised alongside the schedule-sync-backfill
+    // BALLDONTLIE rate-limit fix (Fix #19). validate-wnba-player-txt uses
+    // the SAME rate-limit-respecting BALLDONTLIE pattern as that fix
+    // (sequential requests, ~12.5s apart, to stay under their real 5
+    // requests/minute free-tier limit) -- confirmed directly with a real
+    // authenticated request during that fix that a naive parallel-fetch
+    // pattern gets silently rate-limited. That makes a single WNBA lookup
+    // here noticeably slower than MLB/NBA/NHL (which don't hit a rate
+    // limit) -- a known, accepted tradeoff for staying on BALLDONTLIE's
+    // free tier rather than a bug, per direct discussion: "as we get
+    // closer to launch paid API's will have to be accounted for and
+    // budgeted accordingly."
+    const functionName = sportNorm === 'mlb' ? 'validate-mlb-player-txt' : sportNorm === 'nba' ? 'validate-nba-player-txt' : sportNorm === 'wnba' ? 'validate-wnba-player-txt' : sportNorm === 'nhl' ? 'validate-nhl-player-txt' : null;
+    if (!functionName) { alert('Auto-fill only works for MLB, NBA, WNBA, and NHL right now -- other sports need to be typed in manually for now.'); return; }
     btn.disabled = true;
-    btn.textContent = 'Looking up...';
+    btn.textContent = sportNorm === 'wnba' ? 'Looking up... (WNBA can take 30-90+s, rate limited)' : 'Looking up...';
     try {
       const res = await fetch(`${config.url}/functions/v1/${functionName}`, {
         method: 'POST',
@@ -4144,7 +4158,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       alert('Auto-fill failed: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Auto-fill (MLB/NBA/NHL)';
+      btn.textContent = 'Auto-fill (MLB/NBA/WNBA/NHL)';
     }
   });
 
@@ -4792,6 +4806,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!p.game_start_time && !(betTypeName || '').toLowerCase().includes('parlay')) missing.push('Start time');
     if (sportUsesEventName(sportName) && !p.event_name) missing.push('Event name');
     if (betTypeUsesLine(betTypeName, isProp) && (p.line === null || p.line === undefined)) missing.push('Line');
+    // Direct request: prop_team (shown to customers alongside the player's
+    // name, e.g. "LeBron James (LAL)") is only ever meaningful for Player
+    // Prop picks -- flagging it as missing on a straight bet would just be
+    // noise, since that bet type has no player/team of its own to show.
+    if (isProp && !p.prop_team) missing.push('Prop team');
     return missing.length ? missing.join(', ') : 'Complete';
   }
 
@@ -10774,8 +10793,8 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
     $('toggleMissingDataBtn').textContent = showing ? 'Show tool' : 'Hide tool';
   });
 
-  const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine'];
-  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line' };
+  const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine', 'mdCheckPropTeam'];
+  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team' };
   document.querySelectorAll('.md-only-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const onlyId = btn.getAttribute('data-only');
@@ -10799,6 +10818,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
     const checkStartTime = $('mdCheckStartTime').checked;
     const checkEventName = $('mdCheckEventName').checked;
     const checkLine = $('mdCheckLine').checked;
+    const checkPropTeam = $('mdCheckPropTeam').checked;
 
     // Only the CHECKED fields count toward "missing" -- unchecking one
     // means a pick missing only that specific thing won't show up at all.
@@ -10810,6 +10830,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
     if (checkStartTime) conditions.push('game_start_time.is.null');
     if (checkEventName) conditions.push('event_name.is.null');
     if (checkLine) conditions.push('line.is.null');
+    if (checkPropTeam) conditions.push('prop_team.is.null');
 
     if (!conditions.length) {
       alert('Check at least one field to look for.');
@@ -10820,7 +10841,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -10852,6 +10873,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
         if (checkStartTime && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
         if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
+        if (checkPropTeam && !p.prop_team && usesPropFields) return true;
         return false;
       });
 
@@ -13362,7 +13384,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 231; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 232; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
