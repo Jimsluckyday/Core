@@ -611,7 +611,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <input id="propTeam" placeholder="e.g. Red Sox" />
         </div>
         <div style="align-self:flex-end;">
-          <button type="button" class="ghost" id="propTeamAutoFillBtn" title="MLB, NBA, WNBA, and NHL only for now -- looks up the player's current team automatically. WNBA specifically can take 30-90+ seconds due to BALLDONTLIE's free-tier rate limit (5 requests/minute).">Auto-fill (MLB/NBA/WNBA/NHL)</button>
+          <button type="button" class="ghost" id="propTeamAutoFillBtn" title="MLB, NBA, WNBA, and NHL only for now -- looks up the player's current team automatically.">Auto-fill (MLB/NBA/WNBA/NHL)</button>
         </div>
       </div>
 
@@ -4125,21 +4125,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // rather than a normal HTTP error response.
     // WNBA added -- direct request: "I don't think we build in WNBA and
     // should add that," raised alongside the schedule-sync-backfill
-    // BALLDONTLIE rate-limit fix (Fix #19). validate-wnba-player-txt uses
-    // the SAME rate-limit-respecting BALLDONTLIE pattern as that fix
-    // (sequential requests, ~12.5s apart, to stay under their real 5
-    // requests/minute free-tier limit) -- confirmed directly with a real
-    // authenticated request during that fix that a naive parallel-fetch
-    // pattern gets silently rate-limited. That makes a single WNBA lookup
-    // here noticeably slower than MLB/NBA/NHL (which don't hit a rate
-    // limit) -- a known, accepted tradeoff for staying on BALLDONTLIE's
-    // free tier rather than a bug, per direct discussion: "as we get
-    // closer to launch paid API's will have to be accounted for and
-    // budgeted accordingly."
+    // BALLDONTLIE rate-limit fix (Fix #19). validate-wnba-player-txt
+    // originally used that same rate-limit-respecting BALLDONTLIE pattern
+    // (sequential requests, ~12.5s apart), making a WNBA lookup here take
+    // 30-90+ seconds -- REBUILT the same day on ESPN's own roster endpoint
+    // instead (confirmed directly: no rate limit at all), after research
+    // into reducing paid-API dependency turned up that ESPN already
+    // covers this for free with no rate limit. No longer slower than
+    // MLB/NBA/NHL as a result -- the earlier "can take 30-90+s" warning
+    // text has been removed accordingly.
     const functionName = sportNorm === 'mlb' ? 'validate-mlb-player-txt' : sportNorm === 'nba' ? 'validate-nba-player-txt' : sportNorm === 'wnba' ? 'validate-wnba-player-txt' : sportNorm === 'nhl' ? 'validate-nhl-player-txt' : null;
     if (!functionName) { alert('Auto-fill only works for MLB, NBA, WNBA, and NHL right now -- other sports need to be typed in manually for now.'); return; }
     btn.disabled = true;
-    btn.textContent = sportNorm === 'wnba' ? 'Looking up... (WNBA can take 30-90+s, rate limited)' : 'Looking up...';
+    btn.textContent = 'Looking up...';
     try {
       const res = await fetch(`${config.url}/functions/v1/${functionName}`, {
         method: 'POST',
@@ -13387,7 +13385,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 233; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 234; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
