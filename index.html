@@ -5837,7 +5837,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </table>`;
   }
 
-  async function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin, hideComplete, missingChecked) {
+  async function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin, hideComplete, missingChecked, missingCheckedIds) {
     const win = existingWin || window.open('', '_blank');
     if (!win) {
       alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
@@ -5997,6 +5997,7 @@ var __sourceQuery = ${JSON.stringify(sourceQuery)};
 var __filterSummary = ${JSON.stringify(filterSummary)};
 var __hideComplete = ${hideComplete ? 'true' : 'false'};
 var __missingChecked = ${JSON.stringify(missingChecked || null)};
+var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 (function() {
   const table = document.getElementById('dataTable');
   if (!table) return;
@@ -7190,15 +7191,27 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
     refreshBtn.addEventListener('click', async () => {
       const op = opener();
       if (!op) return;
-      if (typeof op.openAllPicksTab !== 'function' || typeof op.rest !== 'function') {
+      if (typeof op.openAllPicksTab !== 'function' || typeof op.restAllPages !== 'function') {
         alert('Could not refresh — the main tab may need to be refreshed to a newer version.');
         return;
       }
       refreshBtn.disabled = true;
       refreshBtn.textContent = 'Refreshing...';
       try {
-        const freshPicks = await op.rest(__sourceQuery);
-        op.openAllPicksTab(freshPicks, __filterSummary, __sourceQuery, window, __hideComplete, __missingChecked);
+        // CONFIRMED FIX (see filterMissingDataRows' own comment in the main
+        // tab for the full story): a Missing Data refresh must re-narrow
+        // the raw query results the exact same way the original search did
+        // -- otherwise the broad OR clause alone (matching every sport/bet
+        // type, not just the ones each checked field actually applies to)
+        // inflates both the picks shown and the "· N picks" count above.
+        // restAllPages (not the old single-page rest()) also matches the
+        // original search's own fetch method, so nothing gets silently
+        // truncated on a large backlog either.
+        let freshPicks = await op.restAllPages(__sourceQuery);
+        if (__missingCheckedIds && __missingCheckedIds.length && typeof op.filterMissingDataRows === 'function') {
+          freshPicks = op.filterMissingDataRows(freshPicks, __missingCheckedIds);
+        }
+        op.openAllPicksTab(freshPicks, __filterSummary, __sourceQuery, window, __hideComplete, __missingChecked, __missingCheckedIds);
       } catch (e) {
         alert('Could not refresh: ' + e.message);
         refreshBtn.disabled = false;
@@ -10922,6 +10935,51 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
 
   const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine', 'mdCheckPropTeam'];
   const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team' };
+  // CONFIRMED REAL BUG (found 2026-08-13), direct report: "if I hit refresh
+  // on the pop out page it flips to a different count... showed me 300
+  // picks but that is not correct." Root cause: the OR clause a Missing
+  // Data search sends to Supabase (see findMissingData below) is
+  // deliberately broad -- e.g. `event_name.is.null` matches every MLB pick
+  // too, not just Tennis/Golf/Soccer, since PostgREST's OR syntax can't
+  // express "AND scoped to this sport" inline. findMissingData has always
+  // re-narrowed that broad candidate set down to genuinely-applicable gaps
+  // client-side before ever showing it -- but the pop-out's own Refresh
+  // button (see refreshTabBtn's handler in the pop-out's own <script>)
+  // re-ran ONLY the raw stored query via a plain rest() call and rendered
+  // whatever came back directly, skipping this narrowing step entirely AND
+  // using the single-page rest() instead of the paginated restAllPages()
+  // the original search uses. That inflated BOTH the visible "· N picks"
+  // header count (which reads the raw array length) and the underlying
+  // data Refresh was showing. Pulled into its own top-level function
+  // (rather than staying inline inside findMissingData) specifically so
+  // Refresh -- running from the pop-out's own window via `opener()` -- can
+  // call this exact same narrowing logic instead of re-implementing or
+  // skipping it.
+  function filterMissingDataRows(picks, checkedIds) {
+    const has = id => checkedIds.includes(id);
+    return picks.filter(p => {
+      const sportName = p.sports ? p.sports.name : '';
+      const betTypeName = p.bet_types ? p.bet_types.name : '';
+      const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
+      if (has('mdCheckClosing') && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+      if (has('mdCheckOpening') && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+      if (has('mdCheckHomeAway') && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
+      if (has('mdCheckUnitSize') && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
+      if (has('mdCheckStartTime') && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
+      if (has('mdCheckEventName') && !p.event_name && sportUsesEventName(sportName)) return true;
+      if (has('mdCheckLine') && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
+      if (has('mdCheckPropTeam') && !p.prop_team && usesPropFields) return true;
+      return false;
+    });
+  }
+  // Everything in this file runs inside one big IIFE (see the enclosing
+  // `(function() { ... })();` this whole script is wrapped in) -- a plain
+  // top-level `function` declaration here does NOT become a real
+  // `window.___` property the way it would in an unwrapped script, so the
+  // pop-out's own `opener()` reference (a different window entirely)
+  // can't see it without this explicit export, same pattern already used
+  // for rest/restAllPages/openAllPicksTab/invokeEdgeFunction just above.
+  window.filterMissingDataRows = filterMissingDataRows;
   document.querySelectorAll('.md-only-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const onlyId = btn.getAttribute('data-only');
@@ -10977,39 +11035,15 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
       query += '&order=event_date.asc';
       let picks = await restAllPages(query);
 
-      // The OR above fetches a broad candidate set -- event_name and line
-      // are only real "missing data" within their specific scope (see
-      // sportUsesEventName/betTypeUsesLine above), since PostgREST's OR
-      // syntax can't cleanly express "AND scoped to this sport" alongside
-      // the other plain null checks in one clause. A null event_name on an
-      // MLB pick isn't a gap; MLB picks never have one. Re-checking every
-      // checked field explicitly here (rather than trusting the raw OR)
-      // also protects against a pick matching only on an UNCHECKED
-      // field's null condition through some other branch. odds_unavailable
-      // and betTypeUsesHomeAway are the same idea applied to odds/Home-Away:
-      // a confirmed-can't-find-it odds flag or a Parlay/Total's lack of a
-      // single side aren't gaps, so they're excluded here too.
-      picks = picks.filter(p => {
-        const sportName = p.sports ? p.sports.name : '';
-        const betTypeName = p.bet_types ? p.bet_types.name : '';
-        const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
-        if (checkClosing && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
-        if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
-        if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
-        if (checkUnitSize && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
-        if (checkStartTime && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
-        if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
-        if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
-        if (checkPropTeam && !p.prop_team && usesPropFields) return true;
-        return false;
-      });
+      const checkedIds = MD_CHECKBOX_IDS.filter(id => $(id).checked);
+      picks = filterMissingDataRows(picks, checkedIds);
 
       if (!picks.length) {
         alert('Nothing matches these filters -- data is complete.');
         return;
       }
-      const checkedLabels = MD_CHECKBOX_IDS.filter(id => $(id).checked).map(id => MD_FIELD_LABELS[id]);
-      openAllPicksTab(picks, `Missing data — ${checkedLabels.join(', ')}`, query, undefined, true, checkedLabels);
+      const checkedLabels = checkedIds.map(id => MD_FIELD_LABELS[id]);
+      openAllPicksTab(picks, `Missing data — ${checkedLabels.join(', ')}`, query, undefined, true, checkedLabels, checkedIds);
     } catch (e) {
       alert('Could not load picks: ' + e.message);
     } finally {
@@ -13511,7 +13545,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 236; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 237; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
