@@ -4812,7 +4812,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // per-leg start time display), which isn't happening right now. Same
     // "not a real gap" treatment already given to Home/Away for Parlay.
     if (!p.game_start_time && !(betTypeName || '').toLowerCase().includes('parlay')) missing.push('Start time');
-    if (sportUsesEventName(sportName) && !p.event_name) missing.push('Event name');
+    // CONFIRMED REAL BUG (found 2026-08-13), direct report: "2 leg parlay's
+    // that are showing up that shouldn't show up here." A Parlay wrapper
+    // row spans multiple separate matches (potentially different
+    // tournaments entirely), so there's no single Event name to pin down
+    // -- same reasoning already applied to Home/Away and Start time just
+    // above, which this check never got. schedule-sync-backfill's own
+    // Tennis/Soccer matching already excludes Parlay wrapper rows
+    // entirely (confirmed directly: their schedule_sync_status stays
+    // null, never even attempted), so this was purely an admin.html
+    // display gap, not a data or Edge Function problem.
+    if (sportUsesEventName(sportName) && !p.event_name && !(betTypeName || '').toLowerCase().includes('parlay')) missing.push('Event name');
     if (betTypeUsesLine(betTypeName, isProp) && (p.line === null || p.line === undefined)) missing.push('Line');
     // Direct request: prop_team (shown to customers alongside the player's
     // name, e.g. "LeBron James (LAL)") is only ever meaningful for Player
@@ -10966,7 +10976,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       if (has('mdCheckHomeAway') && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
       if (has('mdCheckUnitSize') && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
       if (has('mdCheckStartTime') && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
-      if (has('mdCheckEventName') && !p.event_name && sportUsesEventName(sportName)) return true;
+      // Same Parlay-wrapper exclusion as missingFieldsSummary's own Event
+      // name check (see its comment for the full story) -- kept in sync
+      // deliberately since this function exists specifically to mirror
+      // that same "what genuinely counts as missing" logic.
+      if (has('mdCheckEventName') && !p.event_name && sportUsesEventName(sportName) && !betTypeName.toLowerCase().includes('parlay')) return true;
       if (has('mdCheckLine') && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
       if (has('mdCheckPropTeam') && !p.prop_team && usesPropFields) return true;
       return false;
@@ -13545,7 +13559,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 237; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 238; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
