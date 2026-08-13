@@ -5987,7 +5987,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <button type="button" class="quick-filter-btn" id="popAutoGradeBtn">Grade Results</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeEspnBtn">Grade Results (ESPN backfill)</button>
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Backfill Older Date</button>
-    <button type="button" class="quick-filter-btn" id="popAutoPropTeamBtn">Check Player Teams</button>
+    <button type="button" class="quick-filter-btn" id="popAutoPropTeamBtn">Check Teams / Tournaments</button>
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
   </div>
   <div class="picks-table-scroll">${tableHtml}</div>
@@ -6392,6 +6392,26 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   // sends ONE batched request per sport instead of one request per pick --
   // the real "mass update" the project owner asked for, not a loop
   // dressed up to look like one.
+  //
+  // EXTENDED same day, direct follow-up: "can we do the same for Tennis/
+  // Golf/Soccer tournaments/Friendlies?... it serves the same function so
+  // I'm thinking it should [be rolled into the same button]." Tennis and
+  // Soccer's own tournament-matching logic (surname/reversed-name
+  // disambiguation, widened date search across the real tournaments
+  // table, etc.) already lives entirely inside schedule-sync-backfill
+  // itself (CONFIRMED FIXES #12/13/15/17/18 in that file) -- there's no
+  // separate, standalone validator to call the way MLB/NBA/WNBA/NHL have.
+  // Rather than duplicating that real, already-proven logic into a new
+  // function, this invokes schedule-sync-backfill directly, scoped to
+  // Tennis/Soccer -- it already only ever writes event_name when it's
+  // currently blank (never overwrites a real value) and is safe to run
+  // repeatedly (its own query already skips anything already matched),
+  // so calling it here is no more destructive than the existing "Backfill
+  // Older Date" button, just scoped to these two sports instead of every
+  // sport at once. Golf is deliberately NOT included -- confirmed
+  // directly, there's no ESPN mapping for Golf in schedule-sync-backfill
+  // at all yet (a real, separate, larger build -- flagged directly in
+  // chat, not silently skipped or guessed at).
   document.getElementById('popAutoPropTeamBtn').addEventListener('click', async () => {
     const op = opener();
     if (!op) return;
@@ -6400,11 +6420,13 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
     const sportId = document.getElementById('popAutoSport').value;
     const sportsListForLabel = op.getSports() || [];
     const sportLabel = sportId ? ((sportsListForLabel.find(s => String(s.id) === sportId) || {}).name || 'that sport') : 'ALL sports';
-    if (!confirm('This will look up and fill in Prop team for every Player Prop pick missing it on ' + date + ' (' + sportLabel + ' -- MLB, NBA, WNBA, and NHL only; other sports are not supported yet).\\n\\nThis writes real changes to your data. Continue?')) return;
+    if (!confirm('This will look up and fill in Prop team (MLB/NBA/WNBA/NHL) and Event name/tournament (Tennis/Soccer) for picks missing them on ' + date + ' (' + sportLabel + '). Golf is not covered yet -- no schedule source exists for it.\\n\\nThis writes real changes to your data. Continue?')) return;
     const btn = document.getElementById('popAutoPropTeamBtn');
     btn.disabled = true;
-    document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Fetching Player Prop picks missing a team for this date...</div>';
+    const summary = { date, sports: [], unsupported: [], tournaments: [] };
     try {
+      // ---- Part 1: Player Prop team lookups (MLB/NBA/WNBA/NHL) ----
+      document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Fetching Player Prop picks missing a team for this date...</div>';
       let query = 'picks?select=id,prop_player,sport_id,sports(name),bet_types(uses_prop_fields)&event_date=eq.' + date + '&prop_team=is.null&prop_player=not.is.null';
       if (sportId) query += '&sport_id=eq.' + sportId;
       const candidates = await op.restAllPages(query);
@@ -6412,27 +6434,23 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
       // "don't trust the raw filter, re-verify the real condition"
       // discipline the Missing Data tool's own post-filter already uses.
       const propPicks = (candidates || []).filter(p => p.bet_types && p.bet_types.uses_prop_fields && p.prop_player);
-      if (!propPicks.length) {
-        renderPopAutomationResult('Check Player Teams for ' + date, { message: 'No Player Prop picks missing prop_team for this date/sport.' });
-        return;
-      }
       const FUNCTION_BY_SPORT = { mlb: 'validate-mlb-player-txt', nba: 'validate-nba-player-txt', wnba: 'validate-wnba-player-txt', nhl: 'validate-nhl-player-txt' };
       const bySportNorm = {};
-      const unsupported = [];
       for (const p of propPicks) {
         const sportName = p.sports ? p.sports.name : '';
         const norm = (sportName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         if (FUNCTION_BY_SPORT[norm]) {
           (bySportNorm[norm] = bySportNorm[norm] || []).push(p);
-        } else {
-          unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)' });
+        } else if (norm !== 'tennis' && norm !== 'soccer') {
+          // Tennis/Soccer are handled separately below via schedule-sync-
+          // backfill (they don't use prop_team at all -- individual/no-
+          // team sports), so they're not real "unsupported" gaps here.
+          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)' });
         }
       }
-      document.getElementById('popAutomationResultsWrap').innerHTML =
-        '<div style="font-size:11px;">Checking ' + propPicks.length + ' player(s) across ' + Object.keys(bySportNorm).length + ' sport(s)...</div>';
-      const summary = { date, sports: [], unsupported };
       for (const norm of Object.keys(bySportNorm)) {
         const picksForSport = bySportNorm[norm];
+        document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Checking ' + picksForSport.length + ' ' + norm.toUpperCase() + ' player(s)...</div>';
         const sportResult = { sport: norm, checked: picksForSport.length, resolved: 0, unresolved: [] };
         try {
           const checks = picksForSport.map(p => ({ id: p.id, playerName: p.prop_player }));
@@ -6452,9 +6470,26 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
         }
         summary.sports.push(sportResult);
       }
-      renderPopAutomationResult('Check Player Teams for ' + date + ' -- click Refresh above to see the updated rows', summary);
+
+      // ---- Part 2: Tennis/Soccer tournament (event_name) resolution ----
+      const tournamentSports = ['Tennis', 'Soccer'].filter(name => {
+        if (!sportId) return true;
+        const matchedSport = sportsListForLabel.find(s => String(s.id) === sportId);
+        return matchedSport && matchedSport.name === name;
+      });
+      for (const sportName of tournamentSports) {
+        document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Checking ' + sportName + ' tournaments...</div>';
+        try {
+          const data = await op.invokeEdgeFunctionWithRetry('schedule-sync-backfill', '?date=' + date + '&sport=' + encodeURIComponent(sportName));
+          summary.tournaments.push({ sport: sportName, result: data });
+        } catch (e) {
+          summary.tournaments.push({ sport: sportName, error: e.message });
+        }
+      }
+
+      renderPopAutomationResult('Check Teams / Tournaments for ' + date + ' -- click Refresh above to see the updated rows', summary);
     } catch (e) {
-      alert('Check Player Teams failed: ' + e.message);
+      alert('Check Teams / Tournaments failed: ' + e.message);
     } finally {
       btn.disabled = false;
     }
@@ -13476,7 +13511,7 @@ var __missingChecked = ${JSON.stringify(missingChecked || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 235; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 236; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
