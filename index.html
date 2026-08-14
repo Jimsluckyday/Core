@@ -5756,8 +5756,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const propPlayerCell = isProp
         ? `<input type="text" class="inline-propplayer-input" data-id="${p.id}" value="${escapeHtml(p.prop_player || '')}" style="width:130px;font-family:inherit;font-size:11px;padding:3px 4px;" />`
         : '—';
+      // CONFIRMED direct request 2026-08-14: correcting a pick's date to
+      // match a real match found by hand (e.g. Flashscore) used to require
+      // Full edit, a separate screen -- direct feedback that doing this for
+      // a whole batch of manually-researched Tennis Challenger picks in one
+      // sitting was "painful enough... trying to get this done on the same
+      // screen without jumping around is the most efficient." Same live-
+      // input pattern as every other inline column here. Uses 'change' (not
+      // 'blur'), same reasoning as Start time just below -- a native date
+      // picker's blur can fire mid-edit before a full value exists.
+      const eventDateCell = `<input type="date" class="inline-eventdate-input" data-id="${p.id}" value="${p.event_date || ''}" style="font-family:inherit;font-size:11px;padding:3px 4px;" />`;
       const cells = [
-        p.event_date,
+        eventDateCell,
         dateEnteredCell,
         capperCellHtml(p),
         sportName,
@@ -5788,8 +5798,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // read -- except Pick, Start time, and Home/Away, whose plain
         // text/raw ISO string sort correctly as plain text too
         // (lexicographic ISO order matches chronological order for Start
-        // time).
-        const sortVal = i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : String(c))))))))));
+        // time). Event date (0) became a live input the same way Event
+        // name/Start time did -- same reasoning, its own raw ISO date
+        // string (not the input's HTML) is what actually needs to sort.
+        const sortVal = i === 0 ? (p.event_date || '') : (i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : String(c)))))))))));
         const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
@@ -7179,6 +7191,46 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     });
   });
 
+  // Same 'change'-not-'blur' reasoning as Start time just below -- a native
+  // date picker's blur can fire mid-edit before a full value is set.
+  // CONFIRMED direct request 2026-08-14: correcting event_date to match a
+  // real match found by hand (see schedule_sync_note's own "Consider
+  // correcting event_date to match" wording, which this directly answers)
+  // used to mean leaving this table for Full edit -- painful for a whole
+  // batch in one sitting. date_entered (the separate "posted on" field,
+  // untouched here) already preserves what the capper's post itself said,
+  // so correcting event_date here loses nothing.
+  document.querySelectorAll('input.inline-eventdate-input').forEach(inp => {
+    let lastSaved = inp.value;
+    inp.addEventListener('change', async () => {
+      if (!inp.value || inp.value === lastSaved) { inp.value = lastSaved; return; }
+      const op = opener();
+      if (!op) return;
+      const id = inp.getAttribute('data-id');
+      inp.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ event_date: inp.value })
+        });
+        lastSaved = inp.value;
+        const cell = inp.closest('td');
+        if (cell) cell.setAttribute('data-value', inp.value);
+        // Keeps the cascade-grading feature (grading one pending pick
+        // offers to grade every other pending pick sharing the same
+        // date/sport/bet_type/selection/line) working off the corrected
+        // date immediately, not a stale one until the next Refresh.
+        const row = inp.closest('tr');
+        if (row) row.setAttribute('data-cascade-event-date', inp.value);
+        flashSaveStatus(inp, true);
+      } catch (e) {
+        flashSaveStatus(inp, false, e.message);
+      } finally {
+        inp.disabled = false;
+      }
+    });
+  });
+
   // datetime-local has no separate "typing done" moment the way a text
   // input's blur does -- the browser's own picker UI commits a value via
   // the 'change' event, which only fires once a full valid date/time is
@@ -7305,6 +7357,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const cellValues = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => {
           const cell = row.children[i];
           if (!cell) return csvField('');
+          if (i === 0) {
+            // Event date also became a live <input> (2026-08-14) -- same
+            // reasoning as Pick/Tier/Unit size below, read .value instead
+            // of textContent, which returns nothing for an <input>.
+            const inp = cell.querySelector('input');
+            return csvField(inp ? inp.value : '');
+          }
           if (i === 8) {
             const lines = cell.innerHTML.split(/<br[^>]*>/i).map(h => {
               const tmp = document.createElement('div');
@@ -13574,7 +13633,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 239; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 240; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
