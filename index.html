@@ -5766,9 +5766,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // 'blur'), same reasoning as Start time just below -- a native date
       // picker's blur can fire mid-edit before a full value exists.
       const eventDateCell = `<input type="date" class="inline-eventdate-input" data-id="${p.id}" value="${p.event_date || ''}" style="font-family:inherit;font-size:11px;padding:3px 4px;" />`;
+      // CONFIRMED direct request 2026-08-14: Date entered now comes BEFORE
+      // Event date, not after -- direct feedback that reading two dates in
+      // a row was confusing without knowing which was which at a glance,
+      // and that "when was this posted, then when does it happen" is the
+      // more natural reading order. Only these two swapped position; every
+      // other column keeps its same index, so every index-based reference
+      // elsewhere in this function (sortVal below, the CSV export's own
+      // column handling) only ever needed updating for indexes 0 and 1.
       const cells = [
-        eventDateCell,
         dateEnteredCell,
+        eventDateCell,
         capperCellHtml(p),
         sportName,
         betTypeName,
@@ -5798,10 +5806,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // read -- except Pick, Start time, and Home/Away, whose plain
         // text/raw ISO string sort correctly as plain text too
         // (lexicographic ISO order matches chronological order for Start
-        // time). Event date (0) became a live input the same way Event
+        // time). Event date became a live input the same way Event
         // name/Start time did -- same reasoning, its own raw ISO date
         // string (not the input's HTML) is what actually needs to sort.
-        const sortVal = i === 0 ? (p.event_date || '') : (i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : String(c)))))))))));
+        // Sits at index 1 now (not 0) since Date entered/Event date swapped
+        // display order -- see the cells array above for the full story.
+        const sortVal = i === 1 ? (p.event_date || '') : (i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : String(c)))))))))));
         const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
@@ -5845,7 +5855,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // "Status" (Published/Draft) removed -- direct feedback that it wasn't
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
-    const cols = ['Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note'];
+    const cols = ['Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note'];
     // Pick was excluded here when Selection first became a live input
     // (v218), matching the same pattern as Tier/Unit size -- but direct
     // feedback confirmed this broke a real, regularly-used workflow: the
@@ -7332,7 +7342,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // masking this gap until Missing Data (v215) made this the only
       // export path for that workflow. Added as the first column, reading
       // the same data-pick-id attribute the row itself already carries.
-      const cols = ['ID', 'Event date', 'Date entered', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Source Image'];
+      const cols = ['ID', 'Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -7371,10 +7381,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const cellValues = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => {
           const cell = row.children[i];
           if (!cell) return csvField('');
-          if (i === 0) {
+          if (i === 1) {
             // Event date also became a live <input> (2026-08-14) -- same
             // reasoning as Pick/Tier/Unit size below, read .value instead
-            // of textContent, which returns nothing for an <input>.
+            // of textContent, which returns nothing for an <input>. Sits at
+            // index 1 now (not 0), since Date entered/Event date swapped
+            // display order the same day -- Date entered (still plain
+            // text, index 0) needs no special case, the generic
+            // cell.textContent fallback at the end of this chain already
+            // handles it correctly.
             const inp = cell.querySelector('input');
             return csvField(inp ? inp.value : '');
           }
@@ -13647,7 +13662,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 241; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 242; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
