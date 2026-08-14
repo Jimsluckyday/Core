@@ -1776,7 +1776,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </p>
       <div id="totalsFillPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Spread and Over/Under odds move far less than Moneyline odds -- the standard price is almost always close to -110 regardless of matchup, and Player Props are usually close enough for testing purposes even though they vary a bit more. Rather than researching each one individually, this fills in a standard price for any pick of the selected bet type(s) that's still missing odds, in bulk. Anything that already has a real value on file (from sync or research) is left completely untouched -- this only ever fills a blank, never replaces an existing number. <strong>"All bet types" never includes Moneyline (or Moneyline First5/1st Inning)</strong> -- that market has no sensible universal default, so it's only ever touched by explicitly selecting it from the dropdown above, which shows its own separate warning.
+          Spread and Over/Under odds move far less than the straight Moneyline -- the standard price is almost always close to -110 regardless of matchup, and Player Props are usually close enough for testing purposes even though they vary a bit more. Period-qualified variants (Moneyline First5, Moneyline 1st Inning, etc.) behave the same low-variance way and are treated like any other bet type here -- only the full-game Moneyline swings wildly enough (a heavy favorite vs. an underdog can be hundreds of points apart) to need real research instead of a default. Rather than researching each low-variance pick individually, this fills in a standard price for any pick of the selected bet type(s) that's still missing odds, in bulk. Anything that already has a real value on file (from sync or research) is left completely untouched -- this only ever fills a blank, never replaces an existing number. <strong>"All bet types" never includes the straight Moneyline</strong> -- that market has no sensible universal default, so it's only ever touched by explicitly selecting it from the dropdown above, which shows its own separate warning.
         </div>
         <div class="row">
           <div class="field">
@@ -10778,14 +10778,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       if (betTypeFilter) {
         query += `&bet_type_id=eq.${betTypeFilter}`;
       } else {
-        // "All bet types" must never silently sweep Moneyline-style markets --
-        // these are the one category with no sensible universal default
-        // (a heavy favorite and an underdog can be hundreds of points
-        // apart), so a blanket run should only ever touch genuinely
+        // "All bet types" must never silently sweep the straight Moneyline
+        // market -- a heavy favorite and an underdog can be hundreds of
+        // points apart, so a blanket run should only ever touch genuinely
         // low-variance markets (Spread, Totals, Props, NRFI) unless the
         // person explicitly, deliberately selects Moneyline itself from
         // the dropdown -- which already shows its own clear warning.
-        const moneylineTypeIds = betTypes.filter(b => normalizeForMatch(b.name).includes('moneyline')).map(b => b.id);
+        // CONFIRMED FIX, direct request 2026-08-14: this used to match
+        // Moneyline via .includes('moneyline'), which also caught period-
+        // qualified variants like "Moneyline First5"/"Moneyline 1st
+        // Inning" -- those move far less than the full-game line (same
+        // reasoning as Spread/Totals) and should get the standard price
+        // like everything else, not be excluded alongside straight
+        // Moneyline. Switched to an EXACT match on the normalized name,
+        // matching the same exact-match check the dropdown warning above
+        // already uses (line ~2889) -- only the literal "Moneyline" bet
+        // type is excluded now.
+        const moneylineTypeIds = betTypes.filter(b => normalizeForMatch(b.name) === 'moneyline').map(b => b.id);
         if (moneylineTypeIds.length) {
           query += `&bet_type_id=not.in.(${moneylineTypeIds.join(',')})`;
         }
@@ -13816,7 +13825,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 247; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 248; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
