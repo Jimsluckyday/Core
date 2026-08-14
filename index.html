@@ -562,6 +562,30 @@
         <div id="oldSyncResultsWrap" style="margin-top:10px;"></div>
       </div>
 
+      <!-- GRADE RESULTS (legacy, TheRundown-based) -- moved here 2026-08-14, real confirmed rate limits (429s) plus the same 7-day window as Sync -->
+      <div class="stub" style="margin-bottom:14px;">
+        <p class="stub-title">
+          Grade Results (legacy) <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— TheRundown-based, real rate limits + only reaches roughly the last 7 days</span>
+        </p>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Moved out of the main Automation tools box -- confirmed real 429 rate limiting from TheRundown's free plan (this button retries up to twice and honors Retry-After), on top of the same 7-day history limit Sync has. "Grade Results (ESPN backfill)" has no plan tier or rate limit and covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL -- but NOT Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, or Euro Basketball (no ESPN scoreboard mapping). Kept here, self-contained, for whatever grading coverage this one genuinely provides for those remaining sports.
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Date</label>
+            <input id="oldGradeDate" type="date" />
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="oldGradeSport"><option value="">All sports</option></select>
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="oldGradeBtn">Grade Results</button>
+          </div>
+        </div>
+        <div id="oldGradeResultsWrap" style="margin-top:10px;"></div>
+      </div>
+
       <!-- DATA REVIEW QUEUE (one pick at a time, with skippable data-type filters) -- moved here 2026-08-14, redundant with Missing Data -->
       <div class="stub" style="margin-bottom:14px;">
         <p class="stub-title">
@@ -927,7 +951,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         </p>
         <div id="automationPanel" style="display:none;">
           <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
-            &#9888; Always double-check the date (and sport, for Sync) before clicking any button below — these write real, permanent changes to your data. Each one will ask you to confirm first, but the date field itself is never auto-filled for you.
+            &#9888; Always double-check the date (and sport, for Grade Results) before clicking any button below — these write real, permanent changes to your data. Each one will ask you to confirm first, but the date field itself is never auto-filled for you.
           </div>
           <div class="row">
             <div class="field">
@@ -935,14 +959,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <input id="autoDate" type="date" />
             </div>
             <div class="field">
-              <label>Sport (used by "Sync" and "Grade" — Backfill always covers every sport)</label>
+              <label>Sport (used by "Grade Results (ESPN backfill)" — Backfill always covers every sport)</label>
               <select id="autoSport"><option value="">All sports</option></select>
             </div>
             <div style="align-self:flex-end;">
-              <button id="autoGradeBtn">Grade Results</button>
-            </div>
-            <div style="align-self:flex-end;">
-              <button class="ghost" id="autoGradeEspnBtn">Grade Results (ESPN backfill)</button>
+              <button id="autoGradeEspnBtn">Grade Results (ESPN backfill)</button>
             </div>
             <div style="align-self:flex-end;">
               <button class="ghost" id="autoBackfillBtn">Backfill Older Date</button>
@@ -957,8 +978,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  Player Prop start time/prop_team resolution for MLB/NBA
                  that used to be described here still exists -- it's part
                  of Grade Results and Backfill Older Date now covering that
-                 ground via ESPN/MLB Stats API matching, not lost. -->
-            <strong>Grade Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. <strong>Grade Results (ESPN backfill)</strong> does the exact same grading job, but pulls final scores from ESPN instead of TheRundown — use this one for dates older than about a week, since TheRundown's free plan only keeps a rolling window of recent history and 403s on anything older; TheRundown-based Grade Results stays the normal choice for anything recent. <strong>Backfill Older Date</strong> does the same schedule/home-away sync (no odds) for a date further in the past, all sports at once — meant for catching up historical test data, one day at a time.
+                 ground via ESPN/MLB Stats API matching, not lost.
+
+                 CONFIRMED direct request 2026-08-14 (same session, follow-up):
+                 the plain TheRundown-based Grade Results button also moved
+                 to Old Tools (id="oldGradeBtn") -- it's real, confirmed rate
+                 limited (429s) on top of the same 7-day window, and this
+                 box is meant to be "find win/loss/push for events," which
+                 ESPN backfill already does with no plan tier or rate limit
+                 for the sports it covers. -->
+            <strong>Grade Results (ESPN backfill)</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>Backfill Older Date</strong> does the same schedule/home-away sync (no odds) for a date further in the past, all sports at once — meant for catching up historical test data, one day at a time.
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -2761,6 +2790,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     oldSyncSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     oldSyncSportSel.value = keepOldSyncSport;
+
+    const oldGradeSportSel = $('oldGradeSport');
+    const keepOldGradeSport = oldGradeSportSel.value;
+    oldGradeSportSel.innerHTML = '<option value="">All sports</option>' +
+      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    oldGradeSportSel.value = keepOldGradeSport;
 
     const prSportSel = $('prSport');
     const keepPrSport = prSportSel.value;
@@ -7725,16 +7760,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   });
 
-  $('autoGradeBtn').addEventListener('click', async () => {
-    const date = $('autoDate').value;
+  function renderOldGradeResult(label, data) {
+    $('oldGradeResultsWrap').innerHTML = `
+      <div class="msg ok" style="margin-bottom:6px;"><strong>${escapeHtml(label)}</strong></div>
+      <pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid var(--field);padding:10px;border-radius:2px;max-height:400px;overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+  }
+
+  $('oldGradeBtn').addEventListener('click', async () => {
+    const date = $('oldGradeDate').value;
     if (!date) { alert('Pick a date first — this will not run without one.'); return; }
-    const sportId = $('autoSport').value;
+    const sportId = $('oldGradeSport').value;
     const sportLabel = sportId ? (sports.find(s => String(s.id) === sportId)?.name || 'that sport') : 'ALL sports';
     if (!confirm(`This will grade Moneyline/Spread/Total picks for ${sportLabel} on ${date}, based on final scores.\n\nThis writes real win/loss results and cannot be automatically undone (a manual Undo Grading tool is available separately, but it's a real fix, not a click-to-undo). Continue?`)) return;
-    const btn = $('autoGradeBtn');
+    const btn = $('oldGradeBtn');
     btn.disabled = true;
     btn.textContent = 'Grading...';
-    $('automationResultsWrap').innerHTML = '<div class="empty-state">Checking final scores and grading -- one sport at a time, so a single sport hitting a rate limit does not hold up or time out the others.</div>';
+    $('oldGradeResultsWrap').innerHTML = '<div class="empty-state">Checking final scores and grading -- one sport at a time, so a single sport hitting a rate limit does not hold up or time out the others.</div>';
     try {
       // Loops one sport per call, same reasoning as Sync Schedule & Odds --
       // asking a single call to grade all ~18 sports risked exceeding
@@ -7753,7 +7794,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           allResults.push({ sport: sp.name, error: e.message });
         }
       }
-      renderAutomationResult(`Grading results for ${date}`, allResults);
+      renderOldGradeResult(`Grading results for ${date}`, allResults);
       await refreshPicksList();
     } catch (e) {
       alert('Grading failed: ' + e.message);
@@ -13720,7 +13761,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 243; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 244; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
