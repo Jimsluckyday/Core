@@ -4926,7 +4926,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // a real value (Caruso's "Play of the Day" picks, or anything typed
     // in manually) always shows and counts as complete regardless of this
     // flag.
-    if (!p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) missing.push('Unit size');
+    // CONFIRMED REAL BUG (found 2026-08-14), direct report: a parlay's
+    // individual legs were showing up needing Unit size fixed one at a
+    // time instead of through the parlay's own single Tier/Unit size
+    // field. Root cause: a leg's real, authoritative raw_unit_size lives
+    // on the parlay_legs JOIN row (per-parlay membership -- the same real
+    // leg can be a genuinely different confidence claim at a genuinely
+    // different unit size depending on which parlay wraps it, see the
+    // parlay-legs-toggle code's own comment), NOT on the leg's own shared
+    // picks row -- checking raw_unit_size there was checking the wrong
+    // place entirely, so every leg of every parlay was permanently (and
+    // wrongly) flagged. Start Time/Home-Away/Event name are correctly
+    // leg-intrinsic facts (a leg's real-world game doesn't change based on
+    // which parlay wraps it) and don't need this exclusion; Unit size is
+    // the one field that's genuinely parlay-membership-specific.
+    if (!p.is_parlay_leg && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) missing.push('Unit size');
     // Direct request: a Parlay wrapper row covers multiple separate games
     // at once, so there's no single start time to pin down -- not
     // publishable to the group as-is without a real design change (a
@@ -11237,7 +11251,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       if (has('mdCheckClosing') && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
       if (has('mdCheckOpening') && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
       if (has('mdCheckHomeAway') && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
-      if (has('mdCheckUnitSize') && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
+      // CONFIRMED REAL BUG (found 2026-08-14), direct report: parlay legs
+      // were showing up as individually-editable rows needing Unit size,
+      // instead of being fixed once through the parlay's own Tier/Unit
+      // size field. Same root cause and fix as missingFieldsSummary's own
+      // Unit size check just above -- see its comment for the full story:
+      // a leg's real raw_unit_size lives on the parlay_legs JOIN row (per-
+      // parlay membership), not the leg's own shared picks row.
+      if (has('mdCheckUnitSize') && !p.is_parlay_leg && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
       if (has('mdCheckStartTime') && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
       // Same Parlay-wrapper exclusion as missingFieldsSummary's own Event
       // name check (see its comment for the full story) -- kept in sync
@@ -11306,7 +11327,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -13825,7 +13846,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 248; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 249; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
