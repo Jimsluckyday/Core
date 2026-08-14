@@ -946,12 +946,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
       <div class="stub" style="margin-bottom:14px;">
         <p class="stub-title">
-          Automation tools <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— sync schedule/odds &amp; grade results without SQL</span>
+          Automation tools <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— fill in pick info &amp; find results without SQL</span>
           <button class="ghost small" id="toggleAutomationBtn">Show tools</button>
         </p>
         <div id="automationPanel" style="display:none;">
           <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
-            &#9888; Always double-check the date (and sport, for Grade Results) before clicking any button below — these write real, permanent changes to your data. Each one will ask you to confirm first, but the date field itself is never auto-filled for you.
+            &#9888; Always double-check the date (and sport, where used) before clicking any button below — these write real, permanent changes to your data. Each one will ask you to confirm first, but the date field itself is never auto-filled for you.
+          </div>
+          <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
+            &#9888; Run these left to right, and check Missing Data first to confirm everything else is filled in before running <strong>Find &amp; Update Results</strong> last — grading writes real win/loss/push results that can't be automatically undone.
           </div>
           <div class="row">
             <div class="field">
@@ -959,14 +962,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <input id="autoDate" type="date" />
             </div>
             <div class="field">
-              <label>Sport (used by "Grade Results (ESPN backfill)" — Backfill always covers every sport)</label>
+              <label>Sport (used by "Find &amp; Update Teams / Tournaments" and "Find &amp; Update Results" — Pick Info always covers every sport)</label>
               <select id="autoSport"><option value="">All sports</option></select>
             </div>
             <div style="align-self:flex-end;">
-              <button id="autoGradeEspnBtn">Grade Results (ESPN backfill)</button>
+              <button id="autoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
             </div>
             <div style="align-self:flex-end;">
-              <button class="ghost" id="autoBackfillBtn">Backfill Older Date</button>
+              <button class="ghost" id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away, Prop Team, Tournament)</button>
+            </div>
+            <div style="align-self:flex-end;">
+              <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
             </div>
           </div>
           <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
@@ -975,10 +981,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  id="oldSyncBtn") -- it's TheRundown-based and only reaches
                  roughly the last 7 days, and it was cluttering this box
                  alongside tools that ARE part of the regular workflow.
-                 Player Prop start time/prop_team resolution for MLB/NBA
-                 that used to be described here still exists -- it's part
-                 of Grade Results and Backfill Older Date now covering that
-                 ground via ESPN/MLB Stats API matching, not lost.
 
                  CONFIRMED direct request 2026-08-14 (same session, follow-up):
                  the plain TheRundown-based Grade Results button also moved
@@ -986,8 +988,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  limited (429s) on top of the same 7-day window, and this
                  box is meant to be "find win/loss/push for events," which
                  ESPN backfill already does with no plan tier or rate limit
-                 for the sports it covers. -->
-            <strong>Grade Results (ESPN backfill)</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>Backfill Older Date</strong> does the same schedule/home-away sync (no odds) for a date further in the past, all sports at once — meant for catching up historical test data, one day at a time.
+                 for the sports it covers.
+
+                 CONFIRMED direct request 2026-08-14 (same session, follow-up
+                 #2): renamed all three buttons to a consistent "Find &
+                 Update ___" pattern (the old "Grade"/"Backfill" nomenclature
+                 wasn't clear enough), reordered left-to-right to match the
+                 user's real workflow (Teams/Tournaments -> Pick Info ->
+                 Results), and ADDED "Find & Update Teams / Tournaments"
+                 here -- previously only existed in the All Picks/Missing
+                 Data pop-out's own duplicate panel (id="popAutoPropTeamBtn"),
+                 ported over as id="autoPropTeamBtn" with identical logic.
+                 Backfill's button name deliberately lists ALL the fields it
+                 touches (Start Time, Home/Away, Prop Team, Tournament), NOT
+                 Unit Size -- that's transcriber/upload-only, never something
+                 any of these automated tools can fill in; catching a bad or
+                 missing Unit Size is a Data Tools job, not this box's. -->
+            <strong>Find &amp; Update Teams / Tournaments</strong> looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date. Golf is not covered yet — no schedule source exists for it. <strong>Find &amp; Update Pick Info</strong> fills Start Time and Home/Away for every sport on that date, all at once (no odds) — and, as a side effect of the same lookup, also fills Prop team for MLB/NBA only (not WNBA/NHL — those still need Teams/Tournaments above) and tournament/Event name for Tennis/Soccer/Cricket. Meant for catching up an older date in one pass, not just recent ones. <strong>Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all.
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -7834,27 +7851,108 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       alert('Grading failed: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Grade Results (ESPN backfill)';
+      btn.textContent = 'Find & Update Results';
     }
   });
 
   $('autoBackfillBtn').addEventListener('click', async () => {
     const date = $('autoDate').value;
     if (!date) { alert('Pick a date first — this will not run without one.'); return; }
-    if (!confirm(`This will backfill schedule/home-away data (no odds) for EVERY sport on ${date}.\n\nThis writes real changes to your data. Continue?`)) return;
+    if (!confirm(`This will fill in Start Time, Home/Away, Prop team (MLB/NBA), and Tournament (Tennis/Soccer/Cricket) for EVERY sport on ${date} (no odds).\n\nThis writes real changes to your data. Continue?`)) return;
     const btn = $('autoBackfillBtn');
     btn.disabled = true;
-    btn.textContent = 'Backfilling...';
-    $('automationResultsWrap').innerHTML = '<div class="empty-state">Running backfill for every sport on this date...</div>';
+    btn.textContent = 'Updating...';
+    $('automationResultsWrap').innerHTML = '<div class="empty-state">Running pick-info backfill for every sport on this date...</div>';
     try {
       const data = await invokeEdgeFunctionWithRetry('schedule-sync-backfill', `?date=${date}`);
-      renderAutomationResult(`Backfill schedule for ${date}`, data);
+      renderAutomationResult(`Pick info update for ${date}`, data);
       await refreshPicksList();
     } catch (e) {
-      alert('Backfill failed: ' + e.message);
+      alert('Update failed: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Backfill Older Date';
+      btn.textContent = 'Find & Update Pick Info (Start Time, Home/Away, Prop Team, Tournament)';
+    }
+  });
+
+  // ---- Find & Update Teams / Tournaments (ported from the All Picks/
+  // Missing Data pop-out's own popAutoPropTeamBtn, identical logic --
+  // uses this tab's own rest/restAllPages/invokeEdgeFunction/sports
+  // directly instead of via window.opener, since this isn't a popup. ----
+  $('autoPropTeamBtn').addEventListener('click', async () => {
+    const date = $('autoDate').value;
+    if (!date) { alert('Pick a date first — this will not run without one.'); return; }
+    const sportId = $('autoSport').value;
+    const sportLabel = sportId ? (sports.find(s => String(s.id) === sportId)?.name || 'that sport') : 'ALL sports';
+    if (!confirm(`This will look up and fill in Prop team (MLB/NBA/WNBA/NHL) and Event name/tournament (Tennis/Soccer) for picks missing them on ${date} (${sportLabel}). Golf is not covered yet -- no schedule source exists for it.\n\nThis writes real changes to your data. Continue?`)) return;
+    const btn = $('autoPropTeamBtn');
+    btn.disabled = true;
+    const summary = { date, sports: [], unsupported: [], tournaments: [] };
+    try {
+      // ---- Part 1: Player Prop team lookups (MLB/NBA/WNBA/NHL) ----
+      $('automationResultsWrap').innerHTML = '<div class="empty-state">Fetching Player Prop picks missing a team for this date...</div>';
+      let query = 'picks?select=id,prop_player,sport_id,sports(name),bet_types(uses_prop_fields)&event_date=eq.' + date + '&prop_team=is.null&prop_player=not.is.null';
+      if (sportId) query += '&sport_id=eq.' + sportId;
+      const candidates = await restAllPages(query);
+      const propPicks = (candidates || []).filter(p => p.bet_types && p.bet_types.uses_prop_fields && p.prop_player);
+      const FUNCTION_BY_SPORT = { mlb: 'validate-mlb-player-txt', nba: 'validate-nba-player-txt', wnba: 'validate-wnba-player-txt', nhl: 'validate-nhl-player-txt' };
+      const bySportNorm = {};
+      for (const p of propPicks) {
+        const sportName = p.sports ? p.sports.name : '';
+        const norm = (sportName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (FUNCTION_BY_SPORT[norm]) {
+          (bySportNorm[norm] = bySportNorm[norm] || []).push(p);
+        } else if (norm !== 'tennis' && norm !== 'soccer') {
+          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)' });
+        }
+      }
+      for (const norm of Object.keys(bySportNorm)) {
+        const picksForSport = bySportNorm[norm];
+        $('automationResultsWrap').innerHTML = '<div class="empty-state">Checking ' + picksForSport.length + ' ' + norm.toUpperCase() + ' player(s)...</div>';
+        const sportResult = { sport: norm, checked: picksForSport.length, resolved: 0, unresolved: [] };
+        try {
+          const checks = picksForSport.map(p => ({ id: p.id, playerName: p.prop_player }));
+          const data = await invokeEdgeFunction(FUNCTION_BY_SPORT[norm], '', false, { date, checks });
+          const results = data.results || [];
+          for (const r of results) {
+            if (r.valid && r.team) {
+              await rest('picks?id=eq.' + r.id, { method: 'PATCH', body: JSON.stringify({ prop_team: r.team }) });
+              sportResult.resolved++;
+            } else {
+              const pick = picksForSport.find(p => p.id === r.id);
+              const reason = r.reason || 'not found';
+              await rest('picks?id=eq.' + r.id, { method: 'PATCH', body: JSON.stringify({ schedule_sync_note: reason }) });
+              sportResult.unresolved.push({ id: r.id, player: pick ? pick.prop_player : '(unknown)', reason });
+            }
+          }
+        } catch (e) {
+          sportResult.error = e.message;
+        }
+        summary.sports.push(sportResult);
+      }
+
+      // ---- Part 2: Tennis/Soccer tournament (event_name) resolution ----
+      const tournamentSports = ['Tennis', 'Soccer'].filter(name => {
+        if (!sportId) return true;
+        const matchedSport = sports.find(s => String(s.id) === sportId);
+        return matchedSport && matchedSport.name === name;
+      });
+      for (const sportName of tournamentSports) {
+        $('automationResultsWrap').innerHTML = '<div class="empty-state">Checking ' + sportName + ' tournaments...</div>';
+        try {
+          const data = await invokeEdgeFunctionWithRetry('schedule-sync-backfill', '?date=' + date + '&sport=' + encodeURIComponent(sportName));
+          summary.tournaments.push({ sport: sportName, result: data });
+        } catch (e) {
+          summary.tournaments.push({ sport: sportName, error: e.message });
+        }
+      }
+
+      renderAutomationResult(`Teams / Tournaments check for ${date}`, summary);
+      await refreshPicksList();
+    } catch (e) {
+      alert('Find & Update Teams / Tournaments failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
     }
   });
 
@@ -13761,7 +13859,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 244; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 245; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
