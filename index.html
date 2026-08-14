@@ -6497,7 +6497,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
               sportResult.resolved++;
             } else {
               const pick = picksForSport.find(p => p.id === r.id);
-              sportResult.unresolved.push({ id: r.id, player: pick ? pick.prop_player : '(unknown)', reason: r.reason || 'not found' });
+              const reason = r.reason || 'not found';
+              // CONFIRMED REAL BUG (found 2026-08-14), direct report: "it
+              // got 6 hits but didn't resolve any of them. It also didn't
+              // add a sync note." Confirmed directly in the code: the
+              // resolved branch above always PATCHes the pick with the real
+              // team, but this branch only ever pushed the reason into the
+              // in-memory result shown once in this run's JSON response --
+              // nothing was ever written back to the pick itself, so the
+              // reason was lost the moment this response scrolled away,
+              // with no trace left on the pick to explain why it's still
+              // missing a team. Tennis/Soccer (Part 2 below, via schedule-
+              // sync-backfill) always writes a note either way; this button
+              // is the one place that didn't match that.
+              await op.rest('picks?id=eq.' + r.id, { method: 'PATCH', body: JSON.stringify({ schedule_sync_note: reason }) });
+              sportResult.unresolved.push({ id: r.id, player: pick ? pick.prop_player : '(unknown)', reason });
             }
           }
         } catch (e) {
@@ -13633,7 +13647,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 240; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 241; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
