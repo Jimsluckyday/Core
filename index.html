@@ -4008,6 +4008,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const parlayBetType = findByNameCI(betTypes, 'Parlay');
     if (!parlayBetType) throw new Error('No "Parlay" bet type is registered -- add it in Setup first.');
 
+    // CONFIRMED REAL BUG (found 2026-08-14), direct report: "Duck
+    // investments regularly makes 2-3 picks then combines them in multiple
+    // parlays." Confirmed directly in the code: this function creates/
+    // updates the parlay_legs JOIN row, but never touched the leg's own
+    // is_parlay_leg flag on its picks row -- for a leg entered standalone
+    // FIRST and linked into a parlay LATER (both the Add Pick "existing
+    // leg found" path and the Bulk Import dedup path call this function
+    // with an already-existing legId), is_parlay_leg stayed false forever,
+    // even though the pick genuinely is a parlay leg now. This wasn't just
+    // a Missing Data display bug -- is_parlay_leg also drives the actual
+    // scoring weight (confluenceWeightFor: parlayLegWeight, default 0.5,
+    // vs full weight 1 for a standalone bet), so a leg entered this way
+    // was very likely being scored as a full-weight standalone pick
+    // instead of a properly-weighted parlay leg. Always (idempotently)
+    // patched true here now, regardless of the leg's prior state --
+    // reaching this function at all means it genuinely IS a parlay leg.
+    // A one-time backfill SQL query fixes any pick already affected by
+    // this (see PROJECT-STATE.md / the changelog for the real query).
+    await rest(`picks?id=eq.${legId}`, { method: 'PATCH', body: JSON.stringify({ is_parlay_leg: true }) });
+
     let summaryId, parlayTier;
     const existingSummary = await rest(
       `picks?select=id,pick_tier&capper_id=eq.${capperId}&event_date=eq.${eventDate}` +
@@ -13846,7 +13866,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 249; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 250; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
