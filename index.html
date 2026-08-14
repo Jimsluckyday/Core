@@ -969,7 +969,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button id="autoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
             </div>
             <div style="align-self:flex-end;">
-              <button class="ghost" id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away, Prop Team, Tournament)</button>
+              <button id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away, Prop Team, Tournament)</button>
             </div>
             <div style="align-self:flex-end;">
               <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
@@ -13859,7 +13859,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 245; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 246; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
