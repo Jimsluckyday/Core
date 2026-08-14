@@ -361,6 +361,7 @@
       <button type="button" class="tab-btn" data-tab="reports">Reports</button>
       <button type="button" class="tab-btn" data-tab="tools">Data Tools</button>
       <button type="button" class="tab-btn" data-tab="setup">Setup</button>
+      <button type="button" class="tab-btn" data-tab="oldtools">Old Tools</button>
     </div>
 
     <!-- ADD CAPPER / SPORT / BET TYPE -->
@@ -521,6 +522,98 @@
 
       <p class="stub-title" style="margin-top:20px;">Currently registered</p>
       <div id="tournamentListWrap" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- OLD TOOLS -->
+    <!-- CONFIRMED direct request 2026-08-14: "having the section there will
+         at least be a visual reminder to start cleaning up some of the mess
+         that comes from doing this piece by piece without a proper road map
+         or understanding of what I needed." A home for tools that are kept
+         for reference but aren't part of the regular workflow anymore --
+         moved here one at a time as they're identified during real use,
+         not a one-time audit. Keeps the other tabs (and any demo to a
+         business partner) showing only what's actually used. -->
+    <div class="stub" data-tab="oldtools">
+      <p class="stub-title">Old Tools</p>
+      <div style="font-size:11px;color:var(--ink-soft);margin-bottom:16px;">
+        Tools kept here for reference, not part of the regular day-to-day workflow. Moved here one at a time as they're identified -- this section exists as a standing reminder to keep cleaning up, not a finished list.
+      </div>
+
+      <div class="stub" style="margin-bottom:14px;">
+        <p class="stub-title">
+          Sync Schedule &amp; Odds (legacy) <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— TheRundown-based, only reaches roughly the last 7 days</span>
+        </p>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Moved out of the main Automation tools box -- for anything older than about a week, TheRundown's free plan can't reach it at all (a 403, not a real "not found"), so this button silently does nothing useful on old dates. Kept here, self-contained, in case it's ever needed for a genuinely recent date.
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Date</label>
+            <input id="oldSyncDate" type="date" />
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="oldSyncSport"><option value="">All sports</option></select>
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="oldSyncBtn">Sync Schedule &amp; Odds</button>
+          </div>
+        </div>
+        <div id="oldSyncResultsWrap" style="margin-top:10px;"></div>
+      </div>
+
+      <!-- DATA REVIEW QUEUE (one pick at a time, with skippable data-type filters) -- moved here 2026-08-14, redundant with Missing Data -->
+      <div class="stub" style="margin-bottom:14px;">
+        <p class="stub-title">
+          Data review queue <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— fix incomplete picks one at a time</span>
+          <button class="ghost small" id="toggleReviewQueueBtn">Show tool</button>
+        </p>
+        <div id="reviewQueuePanel" style="display:none;">
+          <div class="row">
+            <div class="field">
+              <label>Capper</label>
+              <select id="rqCapper"><option value="">All cappers</option></select>
+            </div>
+            <div class="field">
+              <label>Sport</label>
+              <select id="rqSport"><option value="">All sports</option></select>
+            </div>
+            <div class="field">
+              <label>Status</label>
+              <select id="rqStatus">
+                <option value="pending">Pending only</option>
+                <option value="">All statuses</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>From date</label>
+              <input id="rqFrom" type="date" />
+            </div>
+            <div class="field">
+              <label>To date</label>
+              <input id="rqTo" type="date" />
+            </div>
+          </div>
+          <div class="field" style="margin-bottom:10px;">
+            <label>Flag a pick as incomplete if it's missing:</label>
+            <div style="display:flex;gap:20px;margin-top:6px;flex-wrap:wrap;align-items:center;">
+              <div class="checkbox-row"><input type="checkbox" id="rqCheckClosing" checked /><label for="rqCheckClosing">Closing odds</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckClosing">Only</button></div>
+              <div class="checkbox-row"><input type="checkbox" id="rqCheckOpening" /><label for="rqCheckOpening">Opening odds</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckOpening">Only</button></div>
+              <div class="checkbox-row"><input type="checkbox" id="rqCheckHomeAway" checked /><label for="rqCheckHomeAway">Home / Away</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckHomeAway">Only</button></div>
+              <div class="checkbox-row"><input type="checkbox" id="rqCheckUnitSize" /><label for="rqCheckUnitSize">No unit size recorded</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckUnitSize">Only</button></div>
+              <div class="checkbox-row"><input type="checkbox" id="rqCheckStartTime" /><label for="rqCheckStartTime">Start time</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckStartTime">Only</button></div>
+              <div class="checkbox-row"><input type="checkbox" id="rqCheckEventName" /><label for="rqCheckEventName">Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA)</span></label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckEventName">Only</button></div>
+              <div class="checkbox-row"><input type="checkbox" id="rqCheckLine" /><label for="rqCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckLine">Only</button></div>
+              <button type="button" class="ghost small" id="rqSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+            Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Click "Only" next to any field to isolate to just that one in a single click (unchecks the others), or "Select all" to go back to checking everything at once — handy for switching between "just clear out closing odds today" and "show me everything incomplete" without manually clicking each box. Once started, each pick is shown one at a time — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left. Tier and Unit size are always editable on every card regardless of which boxes are checked above, since there's no reason to make a separate trip back here just to fix the tier while a pick is already open for something else.
+          </div>
+          <button id="startReviewQueueBtn">Start review</button>
+          <div id="reviewQueueWrap" style="margin-top:14px;"></div>
+        </div>
+      </div>
     </div>
 
     <!-- NEW PICK -->
@@ -846,9 +939,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <select id="autoSport"><option value="">All sports</option></select>
             </div>
             <div style="align-self:flex-end;">
-              <button id="autoSyncBtn">Sync Schedule &amp; Odds</button>
-            </div>
-            <div style="align-self:flex-end;">
               <button id="autoGradeBtn">Grade Results</button>
             </div>
             <div style="align-self:flex-end;">
@@ -859,7 +949,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
             </div>
           </div>
           <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-            <strong>Sync Schedule &amp; Odds</strong> fills in start time, home/away, and closing odds for one date — pick a sport, or leave "All sports" to run every sport one at a time automatically. For MLB and NBA specifically, this now also fills in start time (and prop_team, if blank) for Player Props, by matching the player's name against each sport's real roster data (MLB Stats API, and BALLDONTLIE for NBA if a BALLDONTLIE_API_KEY secret is set) — every other sport's props still require manual research via Start Time Exceptions, same as before. <strong>Grade Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. <strong>Grade Results (ESPN backfill)</strong> does the exact same grading job, but pulls final scores from ESPN instead of TheRundown — use this one for dates older than about a week, since TheRundown's free plan only keeps a rolling window of recent history and 403s on anything older; TheRundown-based Grade Results stays the normal choice for anything recent. <strong>Backfill Older Date</strong> does the same schedule/home-away sync (no odds) for a date further in the past, all sports at once — meant for catching up historical test data, one day at a time.
+            <!-- CONFIRMED direct request 2026-08-14: Sync Schedule & Odds
+                 moved to the Old Tools tab (its own self-contained copy,
+                 id="oldSyncBtn") -- it's TheRundown-based and only reaches
+                 roughly the last 7 days, and it was cluttering this box
+                 alongside tools that ARE part of the regular workflow.
+                 Player Prop start time/prop_team resolution for MLB/NBA
+                 that used to be described here still exists -- it's part
+                 of Grade Results and Backfill Older Date now covering that
+                 ground via ESPN/MLB Stats API matching, not lost. -->
+            <strong>Grade Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. <strong>Grade Results (ESPN backfill)</strong> does the exact same grading job, but pulls final scores from ESPN instead of TheRundown — use this one for dates older than about a week, since TheRundown's free plan only keeps a rolling window of recent history and 403s on anything older; TheRundown-based Grade Results stays the normal choice for anything recent. <strong>Backfill Older Date</strong> does the same schedule/home-away sync (no odds) for a date further in the past, all sports at once — meant for catching up historical test data, one day at a time.
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -1668,59 +1767,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
         </div>
         <button id="findFlaggedLinesBtn">Find flagged picks</button>
         <div id="flaggedLinesWrap" style="margin-top:12px;"></div>
-      </div>
-    </div>
-
-    <!-- DATA REVIEW QUEUE (one pick at a time, with skippable data-type filters) -->
-    <div class="stub" data-tab="tools">
-      <p class="stub-title">
-        Data review queue <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— fix incomplete picks one at a time</span>
-        <button class="ghost small" id="toggleReviewQueueBtn">Show tool</button>
-      </p>
-      <div id="reviewQueuePanel" style="display:none;">
-        <div class="row">
-          <div class="field">
-            <label>Capper</label>
-            <select id="rqCapper"><option value="">All cappers</option></select>
-          </div>
-          <div class="field">
-            <label>Sport</label>
-            <select id="rqSport"><option value="">All sports</option></select>
-          </div>
-          <div class="field">
-            <label>Status</label>
-            <select id="rqStatus">
-              <option value="pending">Pending only</option>
-              <option value="">All statuses</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>From date</label>
-            <input id="rqFrom" type="date" />
-          </div>
-          <div class="field">
-            <label>To date</label>
-            <input id="rqTo" type="date" />
-          </div>
-        </div>
-        <div class="field" style="margin-bottom:10px;">
-          <label>Flag a pick as incomplete if it's missing:</label>
-          <div style="display:flex;gap:20px;margin-top:6px;flex-wrap:wrap;align-items:center;">
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckClosing" checked /><label for="rqCheckClosing">Closing odds</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckClosing">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckOpening" /><label for="rqCheckOpening">Opening odds</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckOpening">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckHomeAway" checked /><label for="rqCheckHomeAway">Home / Away</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckHomeAway">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckUnitSize" /><label for="rqCheckUnitSize">No unit size recorded</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckUnitSize">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckStartTime" /><label for="rqCheckStartTime">Start time</label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckStartTime">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckEventName" /><label for="rqCheckEventName">Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA)</span></label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckEventName">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="rqCheckLine" /><label for="rqCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small rq-only-btn" data-only="rqCheckLine">Only</button></div>
-            <button type="button" class="ghost small" id="rqSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
-          </div>
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Uncheck anything you've decided isn't worth chasing right now — for example, leave "Opening odds" unchecked during testing if you've already decided historical opening odds aren't realistically recoverable, and a pick only missing that won't show up in the queue at all. Click "Only" next to any field to isolate to just that one in a single click (unchecks the others), or "Select all" to go back to checking everything at once — handy for switching between "just clear out closing odds today" and "show me everything incomplete" without manually clicking each box. Once started, each pick is shown one at a time — Save &amp; Next commits your changes and moves on, Skip leaves it untouched and moves on, and the counter always shows how many are left. Tier and Unit size are always editable on every card regardless of which boxes are checked above, since there's no reason to make a separate trip back here just to fix the tier while a pick is already open for something else.
-        </div>
-        <button id="startReviewQueueBtn">Start review</button>
-        <div id="reviewQueueWrap" style="margin-top:14px;"></div>
       </div>
     </div>
 
@@ -2709,6 +2755,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     autoSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     autoSportSel.value = keepAutoSport;
+
+    const oldSyncSportSel = $('oldSyncSport');
+    const keepOldSyncSport = oldSyncSportSel.value;
+    oldSyncSportSel.innerHTML = '<option value="">All sports</option>' +
+      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    oldSyncSportSel.value = keepOldSyncSport;
 
     const prSportSel = $('prSport');
     const keepPrSport = prSportSel.value;
@@ -7629,16 +7681,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       <pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid var(--field);padding:10px;border-radius:2px;max-height:400px;overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
   }
 
-  $('autoSyncBtn').addEventListener('click', async () => {
-    const date = $('autoDate').value;
+  function renderOldSyncResult(label, data) {
+    $('oldSyncResultsWrap').innerHTML = `
+      <div class="msg ok" style="margin-bottom:6px;"><strong>${escapeHtml(label)}</strong></div>
+      <pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid var(--field);padding:10px;border-radius:2px;max-height:400px;overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+  }
+
+  $('oldSyncBtn').addEventListener('click', async () => {
+    const date = $('oldSyncDate').value;
     if (!date) { alert('Pick a date first — this will not run without one.'); return; }
-    const sportId = $('autoSport').value;
+    const sportId = $('oldSyncSport').value;
     const sportLabel = sportId ? (sports.find(s => String(s.id) === sportId)?.name || 'that sport') : 'ALL sports';
     if (!confirm(`This will sync schedule, home/away, and closing odds for ${sportLabel} on ${date}.\n\nThis writes real changes to your data. Continue?`)) return;
-    const btn = $('autoSyncBtn');
+    const btn = $('oldSyncBtn');
     btn.disabled = true;
     btn.textContent = 'Syncing...';
-    $('automationResultsWrap').innerHTML = '<div class="empty-state">Running -- this can take a little while, especially for "All sports."</div>';
+    $('oldSyncResultsWrap').innerHTML = '<div class="empty-state">Running -- this can take a little while, especially for "All sports."</div>';
     try {
       // The function is displayed as "schedule-sync" in the Supabase
       // dashboard, but its ACTUAL invokable URL is still mlb-schedule-sync
@@ -7657,7 +7715,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           allResults.push({ sport: sp.name, error: e.message });
         }
       }
-      renderAutomationResult(`Schedule & odds sync for ${date}`, allResults);
+      renderOldSyncResult(`Schedule & odds sync for ${date}`, allResults);
       await refreshPicksList();
     } catch (e) {
       alert('Sync failed: ' + e.message);
@@ -13662,7 +13720,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 242; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 243; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
