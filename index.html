@@ -4089,11 +4089,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
       parlayTier = Number(existingSummary[0].pick_tier) || 0;
     } else {
       parlayTier = (legTier !== undefined && legTier !== null) ? Number(legTier) : 0;
+      // CONFIRMED REAL BUG, direct report: a freshly-created parlay summary
+      // row silently vanished from any "Date entered" filter/search, even
+      // though a CSV export and other display spots showed it looking
+      // completely normal. Root cause: this insert never set date_entered
+      // at all, leaving it NULL forever -- NULL never matches an exact-
+      // equals filter, so the row was invisible to date_entered=eq.X
+      // searches specifically, while everywhere else in this file that
+      // DISPLAYS date_entered already falls back to event_date when it's
+      // missing (e.g. the CSV export, the All Picks table), which is
+      // exactly what made this look fine on the surface. Setting it to
+      // eventDate here matches that same established fallback -- not
+      // always perfectly precise (the real posted date could differ from
+      // the event date), but infinitely better than NULL, and consistent
+      // with how every other display path already treats a missing
+      // date_entered.
       const inserted = await rest('picks', {
         method: 'POST', headers: { Prefer: 'return=representation' },
         body: JSON.stringify([{
           capper_id: capperId, sport_id: sportId || null, bet_type_id: parlayBetType.id,
-          selection: '1-Leg Parlay', event_date: eventDate, is_parlay_leg: false,
+          selection: '1-Leg Parlay', event_date: eventDate, date_entered: eventDate, is_parlay_leg: false,
           parlay_local_number: parlayNumber, pick_tier: parlayTier, result: 'pending', is_published: false
         }])
       });
@@ -13991,7 +14006,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 254; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 255; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
