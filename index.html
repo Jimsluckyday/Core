@@ -974,6 +974,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div style="align-self:flex-end;">
               <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
             </div>
+            <div style="align-self:flex-end;">
+              <button id="autoGradeGolfBtn">Find &amp; Update Golf Results</button>
+            </div>
           </div>
           <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
             <!-- CONFIRMED direct request 2026-08-14: Sync Schedule & Odds
@@ -1021,7 +1024,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  transcriber/upload-only, never something any of these
                  automated tools can fill in; catching a bad or missing Unit
                  Size is a Data Tools job, not this box's. -->
-            <strong>Find &amp; Update Teams / Tournaments</strong> looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it. Run this FIRST. <strong>Find &amp; Update Pick Info</strong> fills Start Time and Home/Away for every sport on that date, all at once (no odds) — never touches Prop Team or Tournament, that's exclusively the tool above. Meant for catching up an older date in one pass, not just recent ones. <strong>Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all.
+            <strong>Find &amp; Update Teams / Tournaments</strong> looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it. Run this FIRST. <strong>Find &amp; Update Pick Info</strong> fills Start Time and Home/Away for every sport on that date, all at once (no odds) — never touches Prop Team or Tournament, that's exclusively the tool above. Meant for catching up an older date in one pass, not just recent ones. <strong>Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>Find &amp; Update Golf Results</strong> is separate from the button above — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -6186,6 +6189,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <button type="button" class="quick-filter-btn" id="popAutoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeEspnBtn">Find &amp; Update Results</button>
+    <button type="button" class="quick-filter-btn" id="popAutoGradeGolfBtn">Find &amp; Update Golf Results</button>
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
   </div>
   <div class="picks-table-scroll">${tableHtml}</div>
@@ -6484,6 +6488,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       renderPopAutomationResult('Grading results (ESPN backfill) for ' + date, allResults);
     } catch (e) {
       alert('Grading failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // No sport dropdown needed -- always Golf only, same as the main tab's
+  // version of this button.
+  document.getElementById('popAutoGradeGolfBtn').addEventListener('click', async () => {
+    const op = opener();
+    if (!op) return;
+    const date = document.getElementById('popAutoDate').value;
+    if (!date) { alert('Pick a date first -- this will not run without one.'); return; }
+    if (!confirm('This will grade Golf Round Matchup / Tournament Matchup / Tournament Winner picks on ' + date + ', using ESPN\\'s PGA Tour leaderboard (PGA Tour only -- LPGA/Champions/Korn Ferry/European Tour picks will come back unmatched).\\n\\nThis writes real win/loss/push results and cannot be automatically undone (a manual Undo Grading tool exists separately, but it is a real fix, not a click-to-undo). Continue?')) return;
+    const btn = document.getElementById('popAutoGradeGolfBtn');
+    btn.disabled = true;
+    document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Checking the PGA Tour leaderboard and grading...</div>';
+    try {
+      const data = await op.invokeEdgeFunction('grade-golf-picks', '?date=' + date);
+      renderPopAutomationResult('Golf grading results for ' + date, data);
+    } catch (e) {
+      alert('Golf grading failed: ' + e.message);
     } finally {
       btn.disabled = false;
     }
@@ -7836,6 +7861,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     } finally {
       btn.disabled = false;
       btn.textContent = 'Find & Update Results';
+    }
+  });
+
+  // No sport dropdown needed here -- grade-golf-picks only ever touches
+  // Golf Player Prop picks (Round Matchup / Tournament Matchup /
+  // Tournament Winner) regardless of what "Sport" is set to above, since
+  // it's a completely separate concern from the Moneyline/Spread/Total
+  // grader next to it.
+  $('autoGradeGolfBtn').addEventListener('click', async () => {
+    const date = $('autoDate').value;
+    if (!date) { alert('Pick a date first — this will not run without one.'); return; }
+    if (!confirm(`This will grade Golf Round Matchup / Tournament Matchup / Tournament Winner picks on ${date}, using ESPN's PGA Tour leaderboard (PGA Tour only -- LPGA/Champions/Korn Ferry/European Tour picks will come back unmatched).\n\nThis writes real win/loss/push results and cannot be automatically undone (a manual Undo Grading tool is available separately, but it's a real fix, not a click-to-undo). Continue?`)) return;
+    const btn = $('autoGradeGolfBtn');
+    btn.disabled = true;
+    btn.textContent = 'Grading...';
+    $('automationResultsWrap').innerHTML = '<div class="empty-state">Checking the PGA Tour leaderboard and grading...</div>';
+    try {
+      const data = await invokeEdgeFunction('grade-golf-picks', `?date=${date}`);
+      renderAutomationResult(`Golf grading results for ${date}`, data);
+      await refreshPicksList();
+    } catch (e) {
+      alert('Golf grading failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Find & Update Golf Results';
     }
   });
 
@@ -13866,7 +13916,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 250; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 251; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
