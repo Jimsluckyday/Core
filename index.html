@@ -3605,6 +3605,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
   }
 
   $('propStat').addEventListener('change', () => {
+    updateGolfPropSelectionField();
     if ($('propStat').value === '__add_new__') {
       try {
         $('propStatQuickAdd').style.display = 'block';
@@ -3638,6 +3639,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // an error message first.
       populatePropStatDropdown();
       $('propStat').value = name;
+      updateGolfPropSelectionField();
       $('propStatQuickAdd').style.display = 'none';
       return;
     }
@@ -3645,6 +3647,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       await rest('prop_stats', { method: 'POST', body: JSON.stringify([{ name, sport_id }]) });
       await refreshPropStats();
       $('propStat').value = name;
+      updateGolfPropSelectionField();
       $('propStatQuickAdd').style.display = 'none';
     } catch (e) {
       alert('Could not add stat: ' + e.message);
@@ -3682,6 +3685,51 @@ These are almost always the same day, so "Date entered" only fills in a starting
     }
 
     updateSelectionDatalist();
+    updateGolfPropSelectionField();
+  }
+
+  // CONFIRMED REAL BUG, direct report: "it asks me for a line and I don't
+  // see an option to make the selection Rory McIlroy." Golf Round Matchup/
+  // Tournament Matchup/Tournament Winner all use the "Player Prop" bet
+  // type (same reuse-per-player-analytics convention as every other
+  // individual-sport golf/tennis outright), but the generic Player Prop
+  // path above (see updatePickTypeFields' own comment) HIDES the
+  // Selection field entirely and forces Line to be a required number
+  // whose sign becomes a hardcoded "Over"/"Under" -- correct for a real
+  // stat-line prop, completely wrong for golf's 3 stats, which need
+  // neither a line nor an Over/Under call, and DO need a free-text
+  // opponent name (Round/Tournament Matchup) that this generic path has
+  // nowhere to put. Overrides the generic prop display for exactly these
+  // 3 stat values, immediately after it runs -- never touches any other
+  // Player Prop (MLB Strikeouts, NBA Points, etc.), which keep the
+  // original Over/Under behavior untouched.
+  function isGolfMatchupStat(statValue) {
+    const n = normalizeForMatch(statValue);
+    return n === 'roundmatchup' || n === 'tournamentmatchup';
+  }
+  function isGolfOutrightStat(statValue) {
+    return normalizeForMatch(statValue) === 'tournamentwinner';
+  }
+  function updateGolfPropSelectionField() {
+    const bt = currentBetType();
+    const usesProp = bt ? bt.uses_prop_fields : false;
+    if (!usesProp) return; // non-prop bets already show Selection normally
+
+    const statValue = $('propStat').value;
+    if (isGolfMatchupStat(statValue)) {
+      $('selectionField').style.display = 'block';
+      $('selectionLabel').textContent = "Opponent (who they're picked to beat)";
+      $('pickSelection').placeholder = 'e.g. Justin Thomas';
+      $('lineField').style.display = 'none';
+      $('pickLine').value = '';
+    } else if (isGolfOutrightStat(statValue)) {
+      $('selectionField').style.display = 'none';
+      $('lineField').style.display = 'none';
+      $('pickLine').value = '';
+    } else {
+      $('selectionField').style.display = 'none';
+      $('lineField').style.display = (bt ? bt.uses_line : true) ? 'block' : 'none';
+    }
   }
   $('pickType').addEventListener('change', updatePickTypeFields);
   $('pickSport').addEventListener('change', updateSelectionDatalist);
@@ -4093,7 +4141,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const parlayNumberVal = $('pickParlayNumber').value; // '' = standalone, else '1'-'10'
 
     let selection, line;
-    if (isProp) {
+    if (isProp && isGolfMatchupStat($('propStat').value)) {
+      // Round/Tournament Matchup: opponent typed into the (un-hidden)
+      // Selection field by updateGolfPropSelectionField() -- no line, no
+      // Over/Under semantics at all.
+      selection = $('pickSelection').value.trim();
+      if (!selection) { showMsg($('pickMsg'), "Enter who they're picked to beat (the opponent).", 'error'); return; }
+      line = null;
+    } else if (isProp && isGolfOutrightStat($('propStat').value)) {
+      // Tournament Winner: no opponent, no line -- fixed label, nothing
+      // for the user to type.
+      selection = 'To Win';
+      line = null;
+    } else if (isProp) {
       // The sign of the line IS the over/under call — no separate field.
       if (lineVal === '' || isNaN(Number(lineVal))) {
         showMsg($('pickMsg'), 'Enter the line — negative for Over, positive for Under (e.g. -3.5).', 'error');
@@ -4435,6 +4495,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // dropdown blank.
     populatePropStatDropdown(p.prop_stat || '');
     $('propStat').value = p.prop_stat || '';
+    updateGolfPropSelectionField();
     $('propTeam').value = p.prop_team || '';
     // Show which parlay (if any) this leg is currently linked to, so
     // editing doesn't silently lose or misrepresent that link.
@@ -13916,7 +13977,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 251; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 252; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
