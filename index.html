@@ -6185,12 +6185,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // and a low-volume combo (like one Tier 0 pick that DID have a
         // unit size) could get silently squeezed out of the top-3 cutoff
         // entirely. Grouped by TIER first instead, same as the Add Pick
-        // tier-history tool this is meant to echo -- one line per tier,
-        // total pick count plus up to the two most common unit sizes
-        // WITHIN that tier, so "5 of 9 use size 2" is directly readable.
-        // Deliberately NOT the full multi-line breakdown with an images
-        // list (that's what the Add Pick tool is for) -- just enough
-        // detail to edit without leaving this table.
+        // tier-history tool this is meant to echo -- one line per tier.
+        // CONFIRMED direct follow-up, 2026-08-15: the multi-unit-size
+        // breakdown (e.g. "1 ×5, .5 ×1") was still more than needed here --
+        // "just the tier, the total picks in it, and the size they
+        // usually use" -- trimmed to ONLY the single most common unit
+        // size per tier, no sub-count of its own, and the label spelled
+        // out ("Tier 3" not "T3") to read as plain English at a glance.
+        // Still deliberately NOT the full multi-line breakdown with an
+        // images list (that's what the Add Pick tool is for) -- just
+        // enough to edit without leaving this table.
         const byCapperTier = {};
         historyRows.forEach(r => {
           const tier = (r.pick_tier === null || r.pick_tier === undefined) ? '—' : r.pick_tier;
@@ -6210,12 +6214,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
           });
           const lines = tierKeys.map(tier => {
             const { total, unitCounts } = tierData[tier];
-            const label = tier === '—' ? 'No tier' : `T${tier}`;
-            const topUnits = [...unitCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
-            const unitsText = topUnits.length
-              ? topUnits.map(([u, c]) => `${u} ×${c}`).join(', ')
-              : 'no unit recorded';
-            return escapeHtml(`${label} (${total}): ${unitsText}`);
+            const label = tier === '—' ? 'No tier' : `Tier ${tier}`;
+            const topUnit = [...unitCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+            const unitsText = topUnit ? `at ${topUnit[0]}U` : 'no unit recorded';
+            return escapeHtml(`${label} : (${total}) ${unitsText}`);
           });
           // Joined with a real <br>, not escaped -- each line's own text was
           // already escaped individually above, so this stays safe while
@@ -14064,7 +14066,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 257; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 258; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
