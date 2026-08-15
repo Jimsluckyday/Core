@@ -716,8 +716,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </select>
           <div id="propStatQuickAdd" style="display:none;margin-top:6px;padding:8px;border:1px dashed var(--field);border-radius:3px;">
             <div id="propStatQuickAddSportNote" style="font-size:10px;color:var(--ink-soft);margin-bottom:6px;"></div>
-            <div style="display:flex;gap:4px;align-items:center;">
-              <input id="propStatQuickAddInput" type="text" placeholder="Stat name (e.g. Strikeouts)" style="flex:1;" />
+            <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+              <input id="propStatQuickAddInput" type="text" placeholder="Stat name (e.g. Strikeouts)" style="flex:1;min-width:130px;" />
               <button type="button" id="propStatQuickAddSaveBtn" class="small">Add &amp; select</button>
               <button type="button" id="propStatQuickAddCancelBtn" class="ghost small">Cancel</button>
             </div>
@@ -762,9 +762,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <div id="pickEventNameQuickAdd" style="display:none;margin-top:6px;padding:8px;border:1px dashed var(--field);border-radius:3px;">
             <div id="pickEventNameQuickAddSportNote" style="font-size:10px;color:var(--ink-soft);margin-bottom:6px;"></div>
             <input id="pickEventNameQuickAddInput" type="text" placeholder="Tournament/event name" style="width:100%;margin-bottom:4px;" />
-            <div style="display:flex;gap:4px;align-items:center;">
-              <input id="pickEventNameQuickAddStart" type="date" style="flex:1;" title="Start date" />
-              <input id="pickEventNameQuickAddEnd" type="date" style="flex:1;" title="End date" />
+            <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+              <input id="pickEventNameQuickAddStart" type="date" style="flex:1;min-width:130px;" title="Start date" />
+              <input id="pickEventNameQuickAddEnd" type="date" style="flex:1;min-width:130px;" title="End date" />
               <button type="button" id="pickEventNameQuickAddSaveBtn" class="small">Add &amp; select</button>
               <button type="button" id="pickEventNameQuickAddCancelBtn" class="ghost small">Cancel</button>
             </div>
@@ -13977,7 +13977,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 252; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 253; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
