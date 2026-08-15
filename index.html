@@ -3866,30 +3866,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
         if (b === NO_TIER) return -1;
         return Number(b) - Number(a);
       });
+      // CONFIRMED direct follow-up, 2026-08-15, same request applied here
+      // too: "just brief and to the point... I do not need the words unit
+      // sizes seen as it takes up too much space when the box is very
+      // small." Same trim as the "Capper's usual" table column got --
+      // one line per tier, total picks, and only the single most common
+      // unit size, no per-value breakdown and no label text. Review notes
+      // and the image list are left as-is -- genuine review flags and
+      // source references, not what was called out as excess.
       const html = tierKeys.map(t => {
         const group = byTier[t];
         const label = t === NO_TIER ? 'No tier assigned' : `Tier ${t}`;
-        // Counted per distinct value, not just deduped -- a tier with 0.5U
-        // shown twice and 0.3U shown once needs to read as "0.5 (2), 0.3
-        // (1)", not one flat "0.5, 0.3" that hides how lopsided it actually
-        // is toward one value.
         const unitSizeCounts = new Map();
         group.forEach(r => {
           const v = normalizeUnitSize(r.raw_unit_size);
           if (!v) return;
           unitSizeCounts.set(v, (unitSizeCounts.get(v) || 0) + 1);
         });
-        const unitSizesText = unitSizeCounts.size
-          ? [...unitSizeCounts.entries()]
-              .sort((a, b) => b[1] - a[1])
-              .map(([v, count]) => `${escapeHtml(v)} (${count})`)
-              .join(', ')
-          : 'none recorded';
+        const topUnit = [...unitSizeCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+        const unitsText = topUnit ? `at ${escapeHtml(topUnit[0])}U` : 'no unit recorded';
         const reviewNotes = [...new Set(group.map(r => (r.tier_review_note || '').trim()).filter(Boolean))];
         const images = [...new Set(group.map(r => r.source_image).filter(Boolean))];
         return `<div style="margin-bottom:10px;">
-          <strong>${label}</strong> — ${group.length} pick${group.length === 1 ? '' : 's'}<br>
-          <span style="color:var(--ink-soft);">Unit sizes seen:</span> ${unitSizesText}
+          <strong>${label}</strong> : (${group.length}) ${unitsText}
           ${reviewNotes.length ? `<div style="color:var(--stamp-amber);">${reviewNotes.map(n => escapeHtml(n)).join('<br>')}</div>` : ''}
           ${images.length ? `<div style="color:var(--ink-soft);font-size:10px;word-break:break-all;">Images: ${images.map(img => escapeHtml(img)).join(', ')}</div>` : ''}
         </div>`;
@@ -14066,7 +14065,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 258; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 259; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
