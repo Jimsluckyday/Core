@@ -4441,6 +4441,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('editingPickId').value = p.id;
     $('pickCapper').value = p.capper_id;
     syncCapperSearchDisplay();
+    // CONFIRMED REAL BUG, direct report: "a couple of them revert to
+    // saying the capper doesn't provide a tier when I can see that they
+    // do... the capper is not checked off as someone who doesn't provide
+    // a tier." Same root cause already fixed twice elsewhere in this exact
+    // function (populatePropStatDropdown, populatePickTournamentDropdown):
+    // setting pickCapper.value programmatically here does NOT fire a
+    // native 'change' event, the only thing that normally triggers
+    // updatePickTierZeroLabel() to run -- so the Tier 0 option's label was
+    // simply left showing whatever it last said from the Add Pick form's
+    // PREVIOUS state (e.g. still reading "None given" from an earlier
+    // no-tier-signal capper) instead of updating for the capper actually
+    // being edited. Only the option's TEXT was ever wrong -- the real
+    // saved pick_tier value on the pick itself was never affected.
+    updatePickTierZeroLabel();
     $('pickSport').value = p.sport_id || '';
     $('pickType').value = p.bet_type_id;
     updatePickTypeFields();
@@ -13977,7 +13991,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 253; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 254; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
