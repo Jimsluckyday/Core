@@ -1885,6 +1885,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div class="checkbox-row"><input type="checkbox" id="mdCheckEventName" /><label for="mdCheckEventName" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckEventName">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckLine" /><label for="mdCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLine">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckPropTeam" /><label for="mdCheckPropTeam" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Prop team <span style="color:var(--ink-soft);font-weight:normal;">(Player Prop -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckPropTeam">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckNotScored" /><label for="mdCheckNotScored">Not yet scored <span style="color:var(--ink-soft);font-weight:normal;">(still Pending -- run as a final end-of-day check, not alongside the field checks above)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckNotScored">Only</button></div>
             <button type="button" class="ghost small" id="mdSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
           </div>
         </div>
@@ -5870,7 +5871,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // the event date effectively made it invisible for the overwhelming
       // majority of rows, which read as "there's no column for this at
       // all." A little more clutter here is an explicit, accepted tradeoff.
-      const dateEnteredCell = p.date_entered || p.event_date;
+      // CONFIRMED REAL GAP, direct report: reviewing a specific day's
+      // picks by Event date, a pick posted on a genuinely different day
+      // (e.g. a Tennis pick called the night before) reads as silently
+      // missing rather than as "here, just posted earlier" -- there was no
+      // visual difference between this plain value and a same-day one.
+      // Different fix than the one already rejected above: instead of an
+      // extra note (invisible most of the time), the value ITSELF gets
+      // bold/colored ONLY on the genuinely different rows -- every
+      // same-day row (the overwhelming majority) still reads as a single
+      // plain value exactly as before.
+      const dateEnteredCell = (p.date_entered && p.event_date && p.date_entered !== p.event_date)
+        ? `<span style="color:var(--stamp-amber);font-weight:bold;" title="Posted on ${p.date_entered}, for an event on ${p.event_date} -- a different day, common for Tennis/Golf/KBO picks called late at night for the next day's event.">&#9888; ${p.date_entered}</span>`
+        : (p.date_entered || p.event_date);
       // Tier and Unit size are live, always-editable controls right in the
       // table -- CONFIRMED as the actual workflow needed: sorting/filtering
       // this table already lines picks up however makes sense against the
@@ -11380,8 +11393,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('toggleMissingDataBtn').textContent = showing ? 'Show tool' : 'Hide tool';
   });
 
-  const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine', 'mdCheckPropTeam'];
-  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team' };
+  const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine', 'mdCheckPropTeam', 'mdCheckNotScored'];
+  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team', mdCheckNotScored: 'Not yet scored' };
   // CONFIRMED REAL BUG (found 2026-08-13), direct report: "if I hit refresh
   // on the pop out page it flips to a different count... showed me 300
   // picks but that is not correct." Root cause: the OR clause a Missing
@@ -11430,6 +11443,25 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // team check (see its comment for the full story) -- kept in sync
       // deliberately, same as the Event name exclusion just above.
       if (has('mdCheckPropTeam') && !p.prop_team && usesPropFields && sportUsesHomeAway(sportName)) return true;
+      // CONFIRMED REAL GAP, direct report: "a pick is showing complete but
+      // has no grading so I must have missed scoring the pick and don't
+      // think I have a way to check that in the missing data tab which is
+      // of utmost importance as scoring a pick is the only way to publish
+      // to the website... this can fall through the cracks pretty easily
+      // with these events falling on different days from when they were
+      // entered." missingFieldsSummary's "Complete" was never about
+      // grading at all -- purely field completeness (odds/home-away/tier/
+      // etc), completely blind to result -- so a pick with every field
+      // filled in but still result='pending' correctly showed "Complete"
+      // and had no way to be surfaced here. Deliberately a separate,
+      // opt-in check rather than folding into "Complete" itself: most
+      // pending picks are pending because the event genuinely hasn't
+      // finished yet, which is normal, not a gap -- this check is meant
+      // to be run as a specific end-of-day pass (scoped to whatever
+      // date/capper/sport is already searched, same as every other check
+      // here), not left on by default alongside the field-completeness
+      // ones.
+      if (has('mdCheckNotScored') && p.result === 'pending') return true;
       return false;
     });
   }
@@ -11465,6 +11497,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const checkEventName = $('mdCheckEventName').checked;
     const checkLine = $('mdCheckLine').checked;
     const checkPropTeam = $('mdCheckPropTeam').checked;
+    const checkNotScored = $('mdCheckNotScored').checked;
 
     // Only the CHECKED fields count toward "missing" -- unchecking one
     // means a pick missing only that specific thing won't show up at all.
@@ -11477,6 +11510,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     if (checkEventName) conditions.push('event_name.is.null');
     if (checkLine) conditions.push('line.is.null');
     if (checkPropTeam) conditions.push('prop_team.is.null');
+    // Unlike every other check above, this one isn't a null-field check --
+    // a pick can have every field filled in and still just be Pending. The
+    // server-side OR clause exists to pull in CANDIDATE rows before the
+    // real narrowing happens client-side in filterMissingDataRows(); a row
+    // whose only gap is being unscored would never be fetched at all
+    // without its own condition here, since none of the null-field
+    // conditions above would ever be true for it.
+    if (checkNotScored) conditions.push('result.eq.pending');
 
     if (!conditions.length) {
       alert('Check at least one field to look for.');
@@ -14006,7 +14047,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 255; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 256; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
