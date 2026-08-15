@@ -5972,7 +5972,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // this reuse the SAME scoped missingFieldsSummary text every time --
       // on first open AND on every Refresh -- and only keep a row if one of
       // the SPECIFICALLY REQUESTED fields is a real, applicable gap for it.
-      if (hideComplete) {
+      // CONFIRMED REAL BUG (found 2026-08-15), direct report: a "Not yet
+      // scored" Missing Data search correctly found 1 real match (the
+      // header count read "1 picks"), but the table underneath rendered
+      // as empty ("All caught up"). Root cause: missingCell (from
+      // missingFieldsSummary, deliberately still pure field-completeness,
+      // blind to result -- see that function's own comment for why) says
+      // "Complete" for a pick whose ONLY gap is being unscored, since
+      // being unscored was never one of the things it checks. The
+      // hide-logic below only ever kept a row visible by matching against
+      // missingChecked's field-name strings inside missingCell's text --
+      // "Not yet scored" never appears there, so it always looked like a
+      // solved row and got hidden, even on the exact search built to find
+      // it. Special-cased here instead of teaching missingFieldsSummary
+      // about grading status globally (which would make ordinary,
+      // legitimately-still-in-progress pending picks read as "incomplete"
+      // everywhere, not just in this specific search).
+      const isFlaggedNotScored = !!(missingChecked && missingChecked.includes('Not yet scored') && p.result === 'pending');
+      if (hideComplete && !isFlaggedNotScored) {
         if (missingChecked && missingChecked.length) {
           const missingList = missingCell === 'Complete' ? [] : missingCell.split(', ');
           if (!missingList.some(f => missingChecked.includes(f))) return null;
@@ -14047,7 +14064,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 256; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 257; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
