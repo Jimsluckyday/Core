@@ -12325,11 +12325,40 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const withBaseAllById = {};
       withBaseAll.forEach(e => { withBaseAllById[e.pick.id] = e; });
 
+      // CONFIRMED REAL BUG, direct report: a 4-leg parlay only ever showed
+      // 2 of its 4 legs. Root cause -- withBaseAllById above is built ONLY
+      // from allPendingRaw (result=eq.pending), so any leg whose OWN game
+      // has already been individually decided (a real, normal state --
+      // the overall parlay can still be pending while one of its games has
+      // already finished) was silently dropped by the old `if (!legEntry)
+      // return null` below, with no indication a leg was even missing.
+      // Fetched here directly by id, completely independent of result, so
+      // every real leg is always identifiable -- a graded leg just skips
+      // the live score/confluence (that machinery only makes sense
+      // pre-outcome) and shows its actual result instead.
+      let legDetailsById = {};
+      const allLegIds = Object.values(parlayLegIdsByParlayId).flat();
+      if (allLegIds.length) {
+        const legRows = await restAllPages(`picks?select=id,selection,line,result&id=in.(${allLegIds.join(',')})`);
+        legRows.forEach(r => { legDetailsById[r.id] = r; });
+      }
+
       function scoreParlayConfluence(entry) {
         const legIds = parlayLegIdsByParlayId[entry.pick.id] || [];
         const legBreakdown = legIds.map(legId => {
+          const details = legDetailsById[legId];
+          if (!details) return null; // leg row itself no longer exists (deleted) -- genuinely nothing to show
           const legEntry = withBaseAllById[legId];
-          if (!legEntry) return null;
+          if (!legEntry) {
+            // Already graded (or otherwise not in the live pending pool) --
+            // still show which game this leg actually is, just without a
+            // live pre-game score, since scoring a decided outcome isn't
+            // meaningful.
+            return {
+              selection: details.selection, line: details.line, confPts: 0, agreeingCappers: [],
+              standaloneScore: null, overallAdjPct: null, alreadyGraded: details.result
+            };
+          }
           const { confPts, agreeingCappers } = scoreConfluenceFor(legEntry);
           // Same score a leg would get if it were ever rendered as its own
           // standalone candidate (it never is -- see the note above on why
@@ -12346,9 +12375,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           return {
             selection: legEntry.pick.selection, line: legEntry.pick.line, confPts, agreeingCappers,
             standaloneScore: Math.round(legTotal * 10) / 10,
-            overallAdjPct: legEntry.overallAdjPct
+            overallAdjPct: legEntry.overallAdjPct, alreadyGraded: null
           };
         }).filter(Boolean);
+        // Combined win-probability below only makes sense across legs that
+        // are still genuinely live -- an already-graded leg's "win chance"
+        // isn't a probability anymore, it's a known fact, so it's excluded
+        // from that specific multiplication (still shown on the card with
+        // its real result instead).
         const confPts = legBreakdown.length
           ? legBreakdown.reduce((sum, l) => sum + l.confPts, 0) / legBreakdown.length
           : 0;
@@ -12381,22 +12415,30 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const scoredParlays = parlayBaseEntries.map(entry => {
         const { confPts, legBreakdown } = scoreParlayConfluence(entry);
         const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
-        // Rough "how likely is EVERY leg to hit" estimate -- each leg's own
-        // adjusted win% (this capper's blended historical rate, same number
-        // used to score it) multiplied together. Not a true sportsbook-
-        // implied probability (that would need real per-leg odds, usually
-        // unavailable pre-game) -- an explicit approximation, not exact,
-        // but makes the compounding risk of a multi-leg parlay a visible
-        // number instead of something only inferable from separate leg
-        // scores.
-        const combinedWinProbPct = legBreakdown.length
-          ? Math.round(legBreakdown.reduce((prod, l) => prod * (l.overallAdjPct / 100), 1) * 1000) / 10
+        // Rough "how likely is EVERY still-pending leg to hit" estimate --
+        // each live leg's own adjusted win% (this capper's blended
+        // historical rate, same number used to score it) multiplied
+        // together. Not a true sportsbook-implied probability (that would
+        // need real per-leg odds, usually unavailable pre-game) -- an
+        // explicit approximation, not exact, but makes the compounding
+        // risk of a multi-leg parlay a visible number instead of something
+        // only inferable from separate leg scores. Already-graded legs are
+        // excluded from the multiplication itself (their outcome is a known
+        // fact, not a probability) but still counted/shown separately so
+        // the card is honest about how many of the parlay's legs are
+        // actually still live vs. already decided.
+        const liveLegs = legBreakdown.filter(l => l.overallAdjPct !== null);
+        const gradedLegs = legBreakdown.filter(l => l.overallAdjPct === null);
+        const combinedWinProbPct = liveLegs.length
+          ? Math.round(liveLegs.reduce((prod, l) => prod * (l.overallAdjPct / 100), 1) * 1000) / 10
           : null;
         return {
           ...entry,
           agreeingCappers: [],
           legConfluenceBreakdown: legBreakdown,
           combinedWinProbPct,
+          combinedWinProbLiveLegCount: liveLegs.length,
+          combinedWinProbGradedLegCount: gradedLegs.length,
           score: {
             total: Math.round(total * 10) / 10,
             overallPts: Math.round(entry.base.overallPts * 10) / 10,
@@ -12562,21 +12604,34 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         // pop-out's separate "LEGS" expand.
         const allLegs = s.legConfluenceBreakdown || [];
         if (allLegs.length) {
+          const gradedCount = s.combinedWinProbGradedLegCount || 0;
+          const liveCount = s.combinedWinProbLiveLegCount || 0;
           const probColor = s.combinedWinProbPct === null ? 'var(--ink-soft)'
             : (s.combinedWinProbPct >= 50 ? 'var(--stamp-green)' : (s.combinedWinProbPct >= 25 ? 'var(--stamp-amber)' : 'var(--stamp-red)'));
+          // Label is explicit about how many of the parlay's legs the
+          // estimate actually covers whenever it's not all of them --
+          // CONFIRMED real confusion otherwise: a 4-leg parlay showing "all
+          // 2 legs hitting" (silently meaning only 2 of 4 were still live)
+          // read as if the parlay only had 2 legs at all, not that 2 more
+          // were already decided.
+          const probLabel = gradedCount
+            ? `Combined win estimate (${liveCount} of ${allLegs.length} legs still live)`
+            : `Combined win estimate (all ${allLegs.length} legs hitting)`;
           const probHtml = s.combinedWinProbPct !== null ? `
             <div class="pr-agreeing-row" style="border-bottom:1px solid var(--field);padding-bottom:8px;margin-bottom:8px;">
-              <span class="pr-agreeing-name" style="font-weight:bold;">Combined win estimate (all ${allLegs.length} legs hitting)</span>
+              <span class="pr-agreeing-name" style="font-weight:bold;">${probLabel}</span>
               <span style="color:${probColor};font-weight:bold;">${s.combinedWinProbPct}%</span>
             </div>` : '';
           confluenceHtml = `
             <div class="pr-confluence">
-              <div class="pr-confluence-header">Legs — each scored as if standalone, confluence averaged across all (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
+              <div class="pr-confluence-header">Legs (${allLegs.length}) — each scored as if standalone, confluence averaged across all (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
               ${probHtml}
               ${allLegs.map(l => `
                 <div class="pr-agreeing-row" style="border-bottom:1px dashed var(--field);padding-bottom:6px;margin-bottom:6px;">
                   <span class="pr-agreeing-name">${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''}</span>
-                  <span>Standalone score: <strong>${l.standaloneScore}</strong> · ${l.agreeingCappers.length ? `${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)` : '<span style="color:var(--ink-soft);">no outside agreement</span>'}</span>
+                  ${l.alreadyGraded
+                    ? `<span style="color:var(--ink-soft);">Already graded: <strong>${escapeHtml(l.alreadyGraded)}</strong> — no live score (outcome already known)</span>`
+                    : `<span>Standalone score: <strong>${l.standaloneScore}</strong> · ${l.agreeingCappers.length ? `${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)` : '<span style="color:var(--ink-soft);">no outside agreement</span>'}</span>`}
                   ${l.agreeingCappers.map(c => `<div style="padding-left:14px;">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)} — Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</div>`).join('')}
                 </div>`).join('')}
             </div>`;
@@ -14194,7 +14249,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 261; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 262; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
