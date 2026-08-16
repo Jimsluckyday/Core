@@ -13007,14 +13007,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // per card on every applyFilterAndRender() call -- catches the toggle
     // click no matter how many times prCardsWrap's innerHTML gets replaced
     // by a search/filter change.
-    wrap.addEventListener('click', (e) => {
-      const btn = e.target.closest('.pr-toggle-btn');
-      if (!btn) return;
-      const details = btn.closest('.pr-card').querySelector('.pr-details');
-      const showing = details.style.display !== 'none';
-      details.style.display = showing ? 'none' : 'block';
-      btn.innerHTML = showing ? 'Details &#9662;' : 'Details &#9652;';
-    });
+    // CONFIRMED REAL BUG, direct report: "found a bug when I include
+    // parlay's the details button drop down stops working" -- reproduced
+    // as: works with no parlays, breaks with parlays, works again after
+    // re-ranking without parlays. NOT actually parlay-specific -- this
+    // listener was being attached fresh every time renderPublishRank() ran
+    // (i.e. every "Rank pending picks" click), on the SAME persistent wrap
+    // element, with nothing ever removing the previous one. Each click of
+    // Details fired every stacked listener at once: an EVEN accumulated
+    // count toggles the display back and forth within the same click
+    // (looks completely broken), an ODD count nets out to a single real
+    // toggle (looks fine) -- purely a coincidence of how many times "Rank
+    // pending picks" had been clicked before, nothing to do with parlays
+    // themselves. Guarded so this only ever attaches once per page load,
+    // no matter how many times renderPublishRank() re-runs.
+    if (!wrap.dataset.toggleWired) {
+      wrap.dataset.toggleWired = '1';
+      wrap.addEventListener('click', (e) => {
+        const btn = e.target.closest('.pr-toggle-btn');
+        if (!btn) return;
+        const details = btn.closest('.pr-card').querySelector('.pr-details');
+        const showing = details.style.display !== 'none';
+        details.style.display = showing ? 'none' : 'block';
+        btn.innerHTML = showing ? 'Details &#9662;' : 'Details &#9652;';
+      });
+    }
     applyFilterAndRender();
 
     function renderActionCell(pickId, isPublished) {
@@ -14512,7 +14529,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 270; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 271; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
