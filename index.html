@@ -12391,15 +12391,34 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       let legDetailsById = {};
       const allLegIds = Object.values(parlayLegIdsByParlayId).flat();
       if (allLegIds.length) {
-        const legRows = await restAllPages(`picks?select=id,selection,line,result&id=in.(${allLegIds.join(',')})`);
+        const legRows = await restAllPages(`picks?select=id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,result&id=in.(${allLegIds.join(',')})`);
         legRows.forEach(r => { legDetailsById[r.id] = r; });
       }
+
+      // CONFIRMED real need, direct report: "if I've already published 2
+      // of the 4 legs from the independent score of those legs outside of
+      // the parlay I wouldn't know... I want to avoid a scenario where I
+      // publish all 4 legs as picks and then a 4 leg parlay which contains
+      // those 4 I've already published... I want it to be purposeful and
+      // intentional." Every currently-published STRAIGHT pick's own
+      // confluenceKey (same real-game/bet-type/selection/line key already
+      // used everywhere else for "is this the same bet") -- checked
+      // against each leg below so a parlay's Legs breakdown can flag when
+      // one of its own legs is already independently live on the site,
+      // regardless of which capper published it or which parlay it's
+      // being viewed from.
+      const publishedStraightRows = await restAllPages(
+        'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat' +
+        '&is_published=eq.true&is_parlay_leg=eq.false'
+      );
+      const publishedStraightKeySet = new Set(publishedStraightRows.map(confluenceKey));
 
       function scoreParlayConfluence(entry) {
         const legIds = parlayLegIdsByParlayId[entry.pick.id] || [];
         const legBreakdown = legIds.map(legId => {
           const details = legDetailsById[legId];
           if (!details) return null; // leg row itself no longer exists (deleted) -- genuinely nothing to show
+          const alreadyPublishedElsewhere = publishedStraightKeySet.has(confluenceKey(details));
           const legEntry = withBaseAllById[legId];
           if (!legEntry) {
             // Already graded (or otherwise not in the live pending pool) --
@@ -12408,7 +12427,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             // meaningful.
             return {
               selection: details.selection, line: details.line, confPts: 0, agreeingCappers: [],
-              standaloneScore: null, overallAdjPct: null, alreadyGraded: details.result
+              standaloneScore: null, overallAdjPct: null, alreadyGraded: details.result, alreadyPublishedElsewhere
             };
           }
           const { confPts, agreeingCappers } = scoreConfluenceFor(legEntry);
@@ -12427,7 +12446,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           return {
             selection: legEntry.pick.selection, line: legEntry.pick.line, confPts, agreeingCappers,
             standaloneScore: Math.round(legTotal * 10) / 10,
-            overallAdjPct: legEntry.overallAdjPct, alreadyGraded: null
+            overallAdjPct: legEntry.overallAdjPct, alreadyGraded: null, alreadyPublishedElsewhere
           };
         }).filter(Boolean);
         // Combined win-probability below only makes sense across legs that
@@ -12736,8 +12755,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
               <div class="pr-confluence-header">Legs (${allLegs.length}) — each scored as if standalone, confluence averaged across all (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
               ${probHtml}
               ${allLegs.map((l, legIdx) => `
-                <div class="pr-agreeing-row" style="border-bottom:1px dashed var(--field);padding-bottom:6px;margin-bottom:6px;">
+                <div class="pr-agreeing-row" style="border-bottom:1px dashed var(--field);padding-bottom:6px;margin-bottom:6px;${l.alreadyPublishedElsewhere ? 'background:rgba(45,106,79,0.1);border-left:3px solid var(--stamp-green);padding-left:8px;' : ''}">
                   <span class="pr-agreeing-name"><span style="font-weight:normal;color:var(--ink-soft);">Leg ${legIdx + 1}</span> — ${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''}</span>
+                  ${l.alreadyPublishedElsewhere ? `<span style="color:var(--stamp-green);font-weight:bold;">&#10003; Already published independently</span>` : ''}
                   ${l.alreadyGraded
                     ? `<span style="color:var(--ink-soft);">Already graded: <strong>${escapeHtml(l.alreadyGraded)}</strong> — no live score (outcome already known)</span>`
                     : `<span>Standalone score: <strong>${l.standaloneScore}</strong> · ${l.agreeingCappers.length ? `${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)` : '<span style="color:var(--ink-soft);">no outside agreement</span>'}</span>`}
@@ -14405,7 +14425,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 268; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 269; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
