@@ -265,6 +265,11 @@
   .pr-score { font-size: 22px; font-weight: bold; min-width: 60px; }
   .pr-meta { font-size: 11px; color: var(--ink-soft); }
   .pr-selection { font-size: 13px; font-weight: bold; flex: 1; min-width: 200px; }
+  .pr-bettype-tag {
+    display: inline-block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 7px; border-radius: 3px; background: var(--field); color: var(--ink-soft); margin-right: 8px;
+    vertical-align: middle;
+  }
   .pr-body { display: flex; flex-wrap: wrap; gap: 0; }
   .pr-stat {
     flex: 1; min-width: 180px; padding: 10px 12px; border-right: 1px dashed var(--field);
@@ -12592,6 +12597,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const streakColor = s.streak.type === 'win' ? '#2d6a4f' : (s.streak.type === 'loss' ? '#8a2f3a' : 'var(--ink-soft)');
       const betTypeName = p.bet_types ? p.bet_types.name : 'this bet type';
 
+      // Assembles the actual call into one readable phrase, e.g. "Carolina
+      // Hurricanes -1.5" or "Over 220.5" -- direct report: "I can see this
+      // is Philadelphia Phillies but it's not very clear this is Moneyline
+      // First5... I can also see there is a spread bet but not what the
+      // spread they are calling is." Two real phrasing cases:
+      // Selection literally "Over"/"Under" (player props, and older
+      // free-text Total entries) already encodes direction, so the line
+      // just appends directly ("Over 220.5"). Everything else with a line
+      // (Spread, and the newer Team 1/Team 2 matchup-field entries) shows
+      // an explicit sign so a positive number never reads as ambiguous
+      // ("Carolina Hurricanes -1.5", not "Carolina Hurricanes 1.5"). NOTE:
+      // for the matchup-field Over/Under bet types specifically, the line
+      // has no stored direction at all (no Over/Under toggle exists on
+      // that entry form the way Player Prop's sign convention does) --
+      // this shows the signed number as-is, it can't invent a direction
+      // that was never captured.
+      const hasLine = p.line !== null && p.line !== undefined;
+      const callText = (p.selection === 'Over' || p.selection === 'Under')
+        ? `${escapeHtml(p.selection)}${hasLine ? ' ' + p.line : ''}`
+        : `${escapeHtml(p.selection)}${hasLine ? ' ' + (p.line > 0 ? '+' + p.line : p.line) : ''}`;
+
       // Head-to-head conflict -- a DIFFERENT candidate pick landed the
       // opposite side of this exact same real game (same rundown_event_id,
       // same bet type, different selection). Shown ABOVE confluence and in
@@ -12709,8 +12735,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <div class="pr-card-head">
           <span class="pr-rank">#${rank}</span>
           <span class="pr-score">${s.score.total}</span>
-          <span class="pr-selection">${tierBadge}${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${propBit}</span>
-          <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')} · ${escapeHtml(betTypeName)} · ${escapeHtml(p.cappers ? p.cappers.name : '—')}</span>
+          <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${tierBadge}${callText}${propBit}</span>
+          <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')} · ${escapeHtml(p.cappers ? p.cappers.name : '—')}</span>
           <span class="pr-action">${p.is_published
             ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span> <button type="button" class="ghost small unpublish-btn" data-id="' + p.id + '">Unpublish</button>'
             : '<button type="button" class="publish-btn" data-id="' + p.id + '">Publish</button>'}</span>
@@ -14273,7 +14299,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 264; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 265; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
