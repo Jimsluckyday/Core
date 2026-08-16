@@ -12331,7 +12331,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           const legEntry = withBaseAllById[legId];
           if (!legEntry) return null;
           const { confPts, agreeingCappers } = scoreConfluenceFor(legEntry);
-          return { selection: legEntry.pick.selection, line: legEntry.pick.line, confPts, agreeingCappers };
+          // Same score a leg would get if it were ever rendered as its own
+          // standalone candidate (it never is -- see the note above on why
+          // legs don't get their own card) -- surfaced here so a parlay's
+          // OWN card can show whether each leg actually holds up on its own
+          // merit, or whether the parlay's total is mostly just riding the
+          // capper's overall streak/record. CONFIRMED real need, direct
+          // report: a 4-leg parlay scored highly almost entirely off the
+          // capper's own 10-game win streak, with no visibility into
+          // whether any individual leg was actually strong -- exactly the
+          // "lotto parlay" case a flat aggregate score can hide.
+          const legTotal = legEntry.base.overallPts + legEntry.base.betTypePts + legEntry.base.streakPts
+            + legEntry.base.tierPts + legEntry.base.tierCalibrationPts + confPts;
+          return {
+            selection: legEntry.pick.selection, line: legEntry.pick.line, confPts, agreeingCappers,
+            standaloneScore: Math.round(legTotal * 10) / 10,
+            overallAdjPct: legEntry.overallAdjPct
+          };
         }).filter(Boolean);
         const confPts = legBreakdown.length
           ? legBreakdown.reduce((sum, l) => sum + l.confPts, 0) / legBreakdown.length
@@ -12365,10 +12381,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const scoredParlays = parlayBaseEntries.map(entry => {
         const { confPts, legBreakdown } = scoreParlayConfluence(entry);
         const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
+        // Rough "how likely is EVERY leg to hit" estimate -- each leg's own
+        // adjusted win% (this capper's blended historical rate, same number
+        // used to score it) multiplied together. Not a true sportsbook-
+        // implied probability (that would need real per-leg odds, usually
+        // unavailable pre-game) -- an explicit approximation, not exact,
+        // but makes the compounding risk of a multi-leg parlay a visible
+        // number instead of something only inferable from separate leg
+        // scores.
+        const combinedWinProbPct = legBreakdown.length
+          ? Math.round(legBreakdown.reduce((prod, l) => prod * (l.overallAdjPct / 100), 1) * 1000) / 10
+          : null;
         return {
           ...entry,
           agreeingCappers: [],
           legConfluenceBreakdown: legBreakdown,
+          combinedWinProbPct,
           score: {
             total: Math.round(total * 10) / 10,
             overallPts: Math.round(entry.base.overallPts * 10) / 10,
@@ -12525,14 +12553,30 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // agreeing cappers).
       let confluenceHtml = '';
       if (s.isParlayCandidate) {
-        const legsWithAgreement = (s.legConfluenceBreakdown || []).filter(l => l.agreeingCappers.length);
-        if (legsWithAgreement.length) {
+        // Every leg, always -- previously filtered to only legs WITH
+        // outside agreement, which silently hid any leg nobody else had
+        // picked (the exact legs most worth a second look before
+        // publishing). CONFIRMED real gap, direct report: a 4-leg parlay's
+        // card only showed 2 of its 4 legs for this reason, with no way to
+        // see the other 2 without leaving this tool for the All Picks
+        // pop-out's separate "LEGS" expand.
+        const allLegs = s.legConfluenceBreakdown || [];
+        if (allLegs.length) {
+          const probColor = s.combinedWinProbPct === null ? 'var(--ink-soft)'
+            : (s.combinedWinProbPct >= 50 ? 'var(--stamp-green)' : (s.combinedWinProbPct >= 25 ? 'var(--stamp-amber)' : 'var(--stamp-red)'));
+          const probHtml = s.combinedWinProbPct !== null ? `
+            <div class="pr-agreeing-row" style="border-bottom:1px solid var(--field);padding-bottom:8px;margin-bottom:8px;">
+              <span class="pr-agreeing-name" style="font-weight:bold;">Combined win estimate (all ${allLegs.length} legs hitting)</span>
+              <span style="color:${probColor};font-weight:bold;">${s.combinedWinProbPct}%</span>
+            </div>` : '';
           confluenceHtml = `
             <div class="pr-confluence">
-              <div class="pr-confluence-header">Confluence — averaged across this parlay's own legs (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
-              ${legsWithAgreement.map(l => `
+              <div class="pr-confluence-header">Legs — each scored as if standalone, confluence averaged across all (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
+              ${probHtml}
+              ${allLegs.map(l => `
                 <div class="pr-agreeing-row" style="border-bottom:1px dashed var(--field);padding-bottom:6px;margin-bottom:6px;">
-                  <span class="pr-agreeing-name">${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''} — ${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)</span>
+                  <span class="pr-agreeing-name">${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''}</span>
+                  <span>Standalone score: <strong>${l.standaloneScore}</strong> · ${l.agreeingCappers.length ? `${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)` : '<span style="color:var(--ink-soft);">no outside agreement</span>'}</span>
                   ${l.agreeingCappers.map(c => `<div style="padding-left:14px;">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)} — Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</div>`).join('')}
                 </div>`).join('')}
             </div>`;
@@ -14150,7 +14194,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 260; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 261; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
