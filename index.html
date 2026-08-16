@@ -3735,6 +3735,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('matchupTeam2').value = keep2;
   }
 
+  // Only the true Over/Under-style bet types have a real over/under
+  // direction to capture -- No Run First Inning, Yes Run First Inning,
+  // Both Teams to Score, and Draw No Bet are all yes/no calls with no
+  // over/under concept at all, even though they share uses_matchup_fields.
+  // Name-matched (same pattern already used everywhere else in this file
+  // for "is this bet type X" checks) rather than a new DB column, since
+  // the 6 real names are fixed and known: Over/Under + its 1st Half/1st
+  // Period/First 5/First 7 variants, plus Total.
+  function isOverUnderStyleBetType(bt) {
+    if (!bt) return false;
+    const name = (bt.name || '').trim();
+    return /over\/under/i.test(name) || name.toLowerCase() === 'total';
+  }
+
   function updateMatchupFields() {
     const bt = currentBetType();
     const usesMatchup = bt ? bt.uses_matchup_fields : false;
@@ -3748,6 +3762,28 @@ These are almost always the same day, so "Date entered" only fills in a starting
     } else {
       $('matchupTeam1').value = '';
       $('matchupTeam2').value = '';
+    }
+    // CONFIRMED REAL GAP, direct report: "there will be plenty of times the
+    // best bet of the night is Yankees/Blue Jays over 7.5 -- if I can't
+    // tell what that score is or publish it... that is a dealbreaker."
+    // Team 1/Team 2 replaced free-text Selection for these bet types, but
+    // nothing ever replaced the over/under DIRECTION that free text used to
+    // carry (e.g. "Over 7.5") -- the Line field alone can't distinguish
+    // Over from Under. Reuses the EXACT same convention Player Props
+    // already use (sign of the line IS the call) rather than inventing a
+    // new toggle control -- same help text, same validation message,
+    // same mental model, just applied to this bet-type group too.
+    const needsOverUnderSign = usesMatchup && isOverUnderStyleBetType(bt);
+    if (needsOverUnderSign) {
+      $('lineLabel').textContent = 'Line (e.g. -7.5 for Over 7.5)';
+      $('pickLine').placeholder = 'e.g. -7.5';
+      $('lineHelpText').style.display = 'block';
+    } else if (usesMatchup) {
+      // Non-Over/Under matchup type (NRFI/YRFI/BTTS/DNB) -- restore
+      // whatever updatePickTypeFields() already set for the generic case.
+      $('lineLabel').textContent = 'Line';
+      $('pickLine').placeholder = 'e.g. -6';
+      $('lineHelpText').style.display = 'none';
     }
   }
   $('pickSport').addEventListener('change', populateMatchupTeamDropdowns);
@@ -4229,7 +4265,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const team2 = $('matchupTeam2').value;
       if (!team1) { showMsg($('pickMsg'), 'Select Team 1.', 'error'); return; }
       selection = team2 ? `${team1}/${team2}` : team1;
-      line = lineVal ? Number(lineVal) : null;
+      if (isOverUnderStyleBetType(bt)) {
+        // Same convention as Player Props -- the sign of the line IS the
+        // over/under call, required here (not optional) since there's no
+        // other way to know which side was actually called.
+        if (lineVal === '' || isNaN(Number(lineVal))) {
+          showMsg($('pickMsg'), 'Enter the line — negative for Over, positive for Under (e.g. -7.5).', 'error');
+          return;
+        }
+        line = Number(lineVal);
+      } else {
+        line = lineVal ? Number(lineVal) : null;
+      }
     } else if (isProp && isGolfMatchupStat($('propStat').value)) {
       // Round/Tournament Matchup: opponent typed into the (un-hidden)
       // Selection field by updateGolfPropSelectionField() -- no line, no
@@ -12614,9 +12661,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // this shows the signed number as-is, it can't invent a direction
       // that was never captured.
       const hasLine = p.line !== null && p.line !== undefined;
-      const callText = (p.selection === 'Over' || p.selection === 'Under')
-        ? `${escapeHtml(p.selection)}${hasLine ? ' ' + p.line : ''}`
-        : `${escapeHtml(p.selection)}${hasLine ? ' ' + (p.line > 0 ? '+' + p.line : p.line) : ''}`;
+      // Team-based Over/Under (Team 1/Team 2 matchup-field entries) now
+      // carries a real direction via the same sign convention Player Props
+      // use (negative = Over, positive = Under) -- phrased out explicitly
+      // here ("Yankees/Blue Jays Over 7.5") rather than left as a bare
+      // signed number, since nobody's backing a team on one of these, the
+      // team names just identify the game.
+      const isTeamOverUnder = hasLine && isOverUnderStyleBetType(p.bet_types) && p.selection !== 'Over' && p.selection !== 'Under';
+      let callText;
+      if (p.selection === 'Over' || p.selection === 'Under') {
+        callText = `${escapeHtml(p.selection)}${hasLine ? ' ' + p.line : ''}`;
+      } else if (isTeamOverUnder) {
+        callText = `${escapeHtml(p.selection)} ${p.line < 0 ? 'Over' : 'Under'} ${Math.abs(p.line)}`;
+      } else {
+        callText = `${escapeHtml(p.selection)}${hasLine ? ' ' + (p.line > 0 ? '+' + p.line : p.line) : ''}`;
+      }
 
       // Head-to-head conflict -- a DIFFERENT candidate pick landed the
       // opposite side of this exact same real game (same rundown_event_id,
@@ -14299,7 +14358,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 265; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 266; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
