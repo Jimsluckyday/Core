@@ -405,6 +405,10 @@
           <label>&nbsp;</label>
           <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesProp" /><label for="newBetTypeUsesProp">Player prop style</label></div>
         </div>
+        <div class="field" style="flex:0 0 auto;">
+          <label>&nbsp;</label>
+          <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesMatchup" /><label for="newBetTypeUsesMatchup">Two-team matchup <span style="color:var(--ink-soft);font-weight:normal;">(Over/Under-style -- no single side picked)</span></label></div>
+        </div>
         <div style="align-self:flex-end;">
           <button id="addBetTypeBtn">Add bet type</button>
         </div>
@@ -729,6 +733,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
         </div>
         <div style="align-self:flex-end;">
           <button type="button" class="ghost" id="propTeamAutoFillBtn" title="MLB, NBA, WNBA, and NHL only for now -- looks up the player's current team automatically.">Auto-fill (MLB/NBA/WNBA/NHL)</button>
+        </div>
+      </div>
+
+      <div class="row" id="matchupRow" style="display:none;">
+        <div class="field">
+          <label>Team 1 <span style="color:var(--stamp-red);font-weight:bold;">*required</span></label>
+          <select id="matchupTeam1"><option value="">— Select a team —</option></select>
+        </div>
+        <div class="field">
+          <label>Team 2 <span style="color:var(--ink-soft);font-weight:normal;">(optional -- only if the capper actually named both)</span></label>
+          <select id="matchupTeam2"><option value="">— None / not stated —</option></select>
         </div>
       </div>
 
@@ -2873,7 +2888,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
   // ---------- Main app: bet types ----------
   async function refreshBetTypes(selectId) {
-    betTypes = await rest('bet_types?select=id,name,uses_line,uses_prop_fields&order=name.asc');
+    betTypes = await rest('bet_types?select=id,name,uses_line,uses_prop_fields,uses_matchup_fields&order=name.asc');
     const sel = $('pickType');
     const keep = selectId || sel.value;
     sel.innerHTML = betTypes.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')
@@ -2899,15 +2914,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!name) { showMsg($('capperMsg'), 'Enter a bet type name first.', 'error'); return; }
     const uses_line = $('newBetTypeUsesLine').checked;
     const uses_prop_fields = $('newBetTypeUsesProp').checked;
+    const uses_matchup_fields = $('newBetTypeUsesMatchup').checked;
     try {
       const [created] = await rest('bet_types', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify([{ name, uses_line, uses_prop_fields }])
+        body: JSON.stringify([{ name, uses_line, uses_prop_fields, uses_matchup_fields }])
       });
       $('newBetTypeName').value = '';
       $('newBetTypeUsesLine').checked = true;
       $('newBetTypeUsesProp').checked = false;
+      $('newBetTypeUsesMatchup').checked = false;
       showMsg($('capperMsg'), `Added "${escapeHtml(name)}".`, 'ok');
       await refreshBetTypes(created && created.id);
     } catch (e) {
@@ -3687,7 +3704,48 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
     updateSelectionDatalist();
     updateGolfPropSelectionField();
+    updateMatchupFields();
   }
+
+  // CONFIRMED direct request 2026-08-15: "Team 1 then Team 2 as different
+  // boxes" for combined-game bets (Over/Under, No Run First Inning, Both
+  // Teams to Score, Draw No Bet, etc. -- see bet_types.uses_matchup_fields,
+  // set per bet type in Setup) instead of one free-typed "Carolina/Vegas"
+  // field, which is exactly how "Carolina/Vegas" and "Vegas/Carolina" (or
+  // a misspelled team) ended up counted as different things elsewhere in
+  // this system. Team 1 is required, Team 2 is deliberately optional --
+  // confirmed directly: Over/Under's own transcription rules already
+  // allow a pick naming only ONE team (e.g. "Guardians o8"), so forcing a
+  // second team here would contradict an already-correct, existing
+  // convention rather than fix anything.
+  function populateMatchupTeamDropdowns() {
+    const sportId = $('pickSport').value;
+    const sportTeams = sportId ? teams.filter(t => String(t.sport_id) === String(sportId)) : [];
+    const options = sportTeams.map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('');
+    const keep1 = $('matchupTeam1').value;
+    const keep2 = $('matchupTeam2').value;
+    $('matchupTeam1').innerHTML = '<option value="">— Select a team —</option>' + options;
+    $('matchupTeam2').innerHTML = '<option value="">— None / not stated —</option>' + options;
+    $('matchupTeam1').value = keep1;
+    $('matchupTeam2').value = keep2;
+  }
+
+  function updateMatchupFields() {
+    const bt = currentBetType();
+    const usesMatchup = bt ? bt.uses_matchup_fields : false;
+    $('matchupRow').style.display = usesMatchup ? 'flex' : 'none';
+    if (usesMatchup) {
+      // Takes priority over the generic Selection field the same way the
+      // Player Prop path already does above -- these bet types never use
+      // free-text Selection at all now, Team 1/Team 2 fully replace it.
+      $('selectionField').style.display = 'none';
+      populateMatchupTeamDropdowns();
+    } else {
+      $('matchupTeam1').value = '';
+      $('matchupTeam2').value = '';
+    }
+  }
+  $('pickSport').addEventListener('change', populateMatchupTeamDropdowns);
 
   // CONFIRMED REAL BUG, direct report: "it asks me for a line and I don't
   // see an option to make the selection Rory McIlroy." Golf Round Matchup/
@@ -4156,7 +4214,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const parlayNumberVal = $('pickParlayNumber').value; // '' = standalone, else '1'-'10'
 
     let selection, line;
-    if (isProp && isGolfMatchupStat($('propStat').value)) {
+    if (bt && bt.uses_matchup_fields) {
+      // Team 1 required, Team 2 optional -- see updateMatchupFields' own
+      // comment for why (Over/Under's own rules already allow naming just
+      // one team). Line still comes from the normal Line field below,
+      // untouched -- this only replaces how the matchup/team side of the
+      // pick is captured, not the number.
+      const team1 = $('matchupTeam1').value;
+      const team2 = $('matchupTeam2').value;
+      if (!team1) { showMsg($('pickMsg'), 'Select Team 1.', 'error'); return; }
+      selection = team2 ? `${team1}/${team2}` : team1;
+      line = lineVal ? Number(lineVal) : null;
+    } else if (isProp && isGolfMatchupStat($('propStat').value)) {
       // Round/Tournament Matchup: opponent typed into the (un-hidden)
       // Selection field by updateGolfPropSelectionField() -- no line, no
       // Over/Under semantics at all.
@@ -4277,6 +4346,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('propPlayer').value = '';
         $('propStat').value = '';
         $('propTeam').value = '';
+        $('matchupTeam1').value = '';
+        $('matchupTeam2').value = '';
         $('pickTier').value = '0';
         $('pickRawUnitSize').value = '';
         $('pickGameStartTime').value = '';
@@ -4312,6 +4383,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('propPlayer').value = '';
         $('propStat').value = '';
         $('propTeam').value = '';
+        $('matchupTeam1').value = '';
+        $('matchupTeam2').value = '';
         $('pickTier').value = '0';
         $('pickRawUnitSize').value = '';
         $('pickGameStartTime').value = '';
@@ -4407,6 +4480,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('propPlayer').value = '';
     $('propStat').value = '';
     $('propTeam').value = '';
+    $('matchupTeam1').value = '';
+    $('matchupTeam2').value = '';
     $('pickTier').value = '0';
     $('pickRawUnitSize').value = '';
     $('pickPublishedStatus').textContent = 'Not published.';
@@ -4483,6 +4558,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickSelection').value = p.selection || '';
     const editBt = betTypes.find(b => String(b.id) === String(p.bet_type_id));
     const editIsProp = editBt ? editBt.uses_prop_fields : false;
+    // Dropdown OPTIONS were already populated for the right sport by
+    // updatePickTypeFields() above (pickSport is set before it runs) --
+    // this just selects the values matching this pick's own selection.
+    // A "/"-combined selection splits into Team 1/Team 2; a bare single
+    // team (the allowed Team-2-optional case) goes entirely into Team 1.
+    if (editBt && editBt.uses_matchup_fields) {
+      const editParts = (p.selection || '').split('/');
+      $('matchupTeam1').value = (editParts[0] || '').trim();
+      $('matchupTeam2').value = (editParts[1] || '').trim();
+    }
     if (editIsProp && p.line !== null && p.line !== undefined) {
       $('pickLine').value = p.selection === 'Over' ? -Math.abs(p.line) : Math.abs(p.line);
     } else {
@@ -14065,7 +14150,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 259; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 260; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
