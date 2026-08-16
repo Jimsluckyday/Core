@@ -12799,13 +12799,30 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // confluence/legs) now starts collapsed behind a "Details" toggle,
       // shown only on demand, so a long ranked list reads as one line per
       // pick by default with the deep-dive still one click away.
+      // Tier badge dropped from the header -- direct report: "The Tier
+      // ranking for each pick is irrelevant as that's a capper marker...
+      // it's not a tier 4 overall pick for everyone so that's misleading"
+      // when shown as a bare banner badge. Still shown properly framed
+      // ("his own record specifically at this tier") in the Details stat
+      // boxes below -- only the misleading bare badge is removed.
+      //
+      // Hot Pick flag added instead -- direct report: "I noticed when I
+      // published A11's picks it was a hot pick but I wouldn't know that
+      // before publishing and that's something I should absolutely get
+      // flagged on... Score/Confluence/Streaks are what should drive our
+      // decision." Computed identically to the real publish-time flag
+      // (wireActionCell below sets published_was_hot the same way), just
+      // surfaced here BEFORE publishing instead of only after.
+      const isHotPick = s.streak.type === 'win' && s.streak.len >= scoringConfig.hotPickStreakThreshold;
+      const hotPickBadge = isHotPick ? `<span class="stamp" style="border-color:var(--stamp-amber);color:var(--stamp-amber);transform:none;margin-right:8px;">&#128293; Hot Pick</span>` : '';
       return `
       <div class="pr-card" data-pick-id="${p.id}">
         <div class="pr-card-head">
           <span class="pr-rank">#${rank}</span>
           <span class="pr-score">${s.score.total}</span>
-          <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${tierBadge}${callText}${propBit}</span>
-          <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')} · ${escapeHtml(p.cappers ? p.cappers.name : '—')}</span>
+          ${hotPickBadge}
+          <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${callText}${propBit}</span>
+          <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')}</span>
           <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
           <span class="pr-action">${p.is_published
             ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span> <button type="button" class="ghost small unpublish-btn" data-id="' + p.id + '">Unpublish</button>'
@@ -12813,6 +12830,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         </div>
         <div class="pr-details" style="display:none;">
           <div class="pr-body">
+            <div class="pr-stat" style="min-width:100%;">
+              <div class="pr-stat-label">Capper</div>
+              <div class="pr-stat-value">${escapeHtml(p.cappers ? p.cappers.name : '—')}${tierBadge ? ' — ' + tierBadge : ''}</div>
+              <div class="pr-stat-sub">for reference only -- the score above, not who submitted it, is what should drive the publish decision</div>
+            </div>
             <div class="pr-stat">
               <div class="pr-stat-label">This sport + bet type</div>
               <div class="pr-stat-value">${s.betTypeRecord} <span style="font-weight:normal;color:var(--ink-soft);">(${s.betTypeAdjPct}% blended)</span></div>
@@ -14383,7 +14405,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 267; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 268; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
