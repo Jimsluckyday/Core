@@ -5260,7 +5260,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const completeness = $('filterCompleteness').value;
     const tierFilter = $('filterTier').value;
 
-    let query = `picks?select=id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
+    let query = `picks?select=id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,grading_status,grading_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
     // Supabase silently caps any single response at its own server-side max
     // (confirmed: 1000 rows, regardless of what limit= asks for) -- a limit
     // here only makes sense for a single, non-paginated rest() call safely
@@ -6164,7 +6164,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // diagnostic, not something typed in by hand, and it clears itself
       // automatically the next time a sync run successfully matches the
       // pick (both functions already set it back to null on a real match).
-      const syncNoteCell = escapeHtml(p.schedule_sync_note || '—');
+      //
+      // CONFIRMED same real need, direct follow-up: "I could use a note on
+      // why they failed instead of guessing" -- grading_note (written by
+      // grade_picks/grade_picks_espn_backfill/grade-golf-picks whenever a
+      // pick can't be confidently graded) had the exact same problem --
+      // only ever visible in that Edge Function's own JSON response, never
+      // surfaced anywhere in the app itself. Falls back to it here when
+      // there's no schedule-sync issue, since a pick is essentially never
+      // stuck on BOTH at once -- prefixed so it's clear which system
+      // flagged it, rather than reading as an unexplained schedule note.
+      const syncNoteCell = p.schedule_sync_note
+        ? escapeHtml(p.schedule_sync_note)
+        : (p.grading_note ? `Grading: ${escapeHtml(p.grading_note)}` : '—');
       // Player name is a live input for Prop picks, same reasoning and same
       // pattern as the Selection input above -- direct request: a misspelled
       // name (e.g. "Bo Bichettte") is one of the most common corrections
@@ -14529,7 +14541,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 271; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 272; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
