@@ -4073,10 +4073,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // CSV pipeline: a leg is identified by capper+date+sport+bet_type+selection
   // +line+prop_player+prop_stat, regardless of how many parlays reference it
   // or how many times it gets re-entered under a different parlay number.
-  // There is never more than one is_parlay_leg row for the same natural key
-  // -- this is what keeps cross-capper consensus counts correct without any
-  // separate dedup logic anywhere else, backed by a DB-level unique index
+  // There is never more than one row for the same natural key, period --
+  // standalone or leg -- backed by a DB-level unique index
   // (uniq_parlay_leg_per_capper_day) as a hard guarantee, not just app trust.
+  // CONFIRMED REAL BUG (found 2026-08-17), direct report: real duplicate
+  // rows found in production -- a capper's straight pick (e.g. "Baltimore
+  // Orioles" Moneyline, entered standalone, is_parlay_leg=false) got a
+  // SECOND, separate row created minutes later for the exact same real bet
+  // when that same game was added as a parlay leg. Root cause: this
+  // function's own query REQUIRED is_parlay_leg=eq.true, so it could only
+  // ever find an existing pick that was ALREADY flagged as a leg -- it
+  // never even looked for a matching STANDALONE pick, even though the DB's
+  // own unique index (see above) has never cared about is_parlay_leg and
+  // was already silently guarding a stricter invariant than this app-level
+  // check enforced. linkLegToParlay already (idempotently) flips
+  // is_parlay_leg to true on whatever id it's given, specifically so an
+  // originally-standalone pick can correctly become a shared leg the
+  // moment it's reused -- this function just needs to actually FIND that
+  // pick first, which dropping the is_parlay_leg filter now does.
   function eqOrNullFilter(field, value) {
     if (value === null || value === undefined || value === '') return `${field}=is.null`;
     return `${field}=eq.${encodeURIComponent(value)}`;
@@ -4088,7 +4102,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
       `event_date=eq.${payload.event_date}`,
       `bet_type_id=eq.${payload.bet_type_id}`,
       `selection=eq.${encodeURIComponent(payload.selection)}`,
-      'is_parlay_leg=eq.true',
       eqOrNullFilter('sport_id', payload.sport_id),
       eqOrNullFilter('line', payload.line),
       eqOrNullFilter('prop_player', payload.prop_player),
@@ -14618,7 +14631,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 273; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 274; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
