@@ -7650,13 +7650,25 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // the schedule_sync_note case this exists for) whenever the pick being
       // edited is a currently-linked leg and the new date would create (or
       // already differs from) a mismatch with its parlay's own date.
+      // CONFIRMED REAL BUG, this exact addition: this whole block sits
+      // inside win.document.write's giant outer template literal that
+      // builds this pop-out window -- the surrounding code already avoids
+      // backtick-delimited strings and dollar-brace interpolation for that
+      // exact reason (see 'picks?id=eq.' + id just below, plain string
+      // concatenation instead of the more natural syntax), and this block
+      // originally didn't follow that rule, which broke the outer literal
+      // and took down the whole page including login. Fixed to use the
+      // same plain-concatenation style as the rest of this file -- and
+      // this comment itself avoids the character that caused it, since a
+      // literal backtick anywhere in this region (even inside a comment)
+      // is still just string data to the outer parser.
       try {
-        const links = await op.rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${id}`);
+        const links = await op.rest('parlay_legs?select=parlay_pick_id&leg_pick_id=eq.' + id);
         if (links.length) {
-          const parent = await op.rest(`picks?select=event_date&id=eq.${links[0].parlay_pick_id}`);
+          const parent = await op.rest('picks?select=event_date&id=eq.' + links[0].parlay_pick_id);
           const parentDate = parent[0] && parent[0].event_date;
           if (parentDate && parentDate !== inp.value) {
-            const ok = confirm(`This pick is linked to a parlay dated ${parentDate}. Changing its own event date to ${inp.value} will desync it from that parlay -- the parlay won't be able to grade until the two match again. Continue anyway?`);
+            const ok = confirm('This pick is linked to a parlay dated ' + parentDate + '. Changing its own event date to ' + inp.value + " will desync it from that parlay -- the parlay won't be able to grade until the two match again. Continue anyway?");
             if (!ok) { inp.value = lastSaved; return; }
           }
         }
