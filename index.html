@@ -1910,6 +1910,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div class="checkbox-row"><input type="checkbox" id="mdCheckLine" /><label for="mdCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLine">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckPropTeam" /><label for="mdCheckPropTeam" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Prop team <span style="color:var(--ink-soft);font-weight:normal;">(Player Prop -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckPropTeam">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckNotScored" /><label for="mdCheckNotScored">Not yet scored <span style="color:var(--ink-soft);font-weight:normal;">(still Pending -- run as a final end-of-day check, not alongside the field checks above)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckNotScored">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckLegDateMismatch" /><label for="mdCheckLegDateMismatch" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Parlay leg date mismatch <span style="color:var(--ink-soft);font-weight:normal;">(leg's own event date no longer matches its parlay's -- the parlay will never grade until fixed)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLegDateMismatch">Only</button></div>
             <button type="button" class="ghost small" id="mdSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
           </div>
         </div>
@@ -6174,9 +6175,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // there's no schedule-sync issue, since a pick is essentially never
       // stuck on BOTH at once -- prefixed so it's clear which system
       // flagged it, rather than reading as an unexplained schedule note.
+      // _legDateMismatch (set by the Missing Data "Parlay leg date mismatch"
+      // check, findMissingData()) is the lowest-priority fallback here --
+      // a pick is essentially never stuck on this AND a real schedule-sync
+      // or grading issue at once, and when it is, those are the more
+      // specific, more actionable facts to show first.
       const syncNoteCell = p.schedule_sync_note
         ? escapeHtml(p.schedule_sync_note)
-        : (p.grading_note ? `Grading: ${escapeHtml(p.grading_note)}` : '—');
+        : (p.grading_note ? `Grading: ${escapeHtml(p.grading_note)}`
+          : (p._legDateMismatch ? `&#9888; This leg's own event date doesn't match its parlay's date (${escapeHtml(p._legParentEventDate)}) -- the parlay can't grade until they match.` : '—'));
       // Player name is a live input for Prop picks, same reasoning and same
       // pattern as the Selection input above -- direct request: a misspelled
       // name (e.g. "Bo Bichettte") is one of the most common corrections
@@ -7618,6 +7625,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const op = opener();
       if (!op) return;
       const id = inp.getAttribute('data-id');
+      // CONFIRMED REAL BUG, direct report: correcting a pick's own event_date
+      // here (exactly what this input exists for -- see the comment above)
+      // can silently desync it from a parlay it's already linked to, since
+      // this never touches or even looks at parlay_legs. The parlay then
+      // never grades again -- no error, no note anywhere -- because its
+      // leg's own event_date no longer matches the date the parlay itself
+      // still thinks it's for. Confirmed directly: 6 real parlays were stuck
+      // exactly this way, all traced back to this input. Warn (don't
+      // silently block -- this correction is very often exactly right, see
+      // the schedule_sync_note case this exists for) whenever the pick being
+      // edited is a currently-linked leg and the new date would create (or
+      // already differs from) a mismatch with its parlay's own date.
+      try {
+        const links = await op.rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${id}`);
+        if (links.length) {
+          const parent = await op.rest(`picks?select=event_date&id=eq.${links[0].parlay_pick_id}`);
+          const parentDate = parent[0] && parent[0].event_date;
+          if (parentDate && parentDate !== inp.value) {
+            const ok = confirm(`This pick is linked to a parlay dated ${parentDate}. Changing its own event date to ${inp.value} will desync it from that parlay -- the parlay won't be able to grade until the two match again. Continue anyway?`);
+            if (!ok) { inp.value = lastSaved; return; }
+          }
+        }
+      } catch (e) {
+        console.warn('Could not check parlay link before saving event date:', e.message);
+      }
       inp.disabled = true;
       try {
         await op.rest('picks?id=eq.' + id, {
@@ -11564,8 +11596,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('toggleMissingDataBtn').textContent = showing ? 'Show tool' : 'Hide tool';
   });
 
-  const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine', 'mdCheckPropTeam', 'mdCheckNotScored'];
-  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team', mdCheckNotScored: 'Not yet scored' };
+  const MD_CHECKBOX_IDS = ['mdCheckClosing', 'mdCheckOpening', 'mdCheckHomeAway', 'mdCheckUnitSize', 'mdCheckStartTime', 'mdCheckEventName', 'mdCheckLine', 'mdCheckPropTeam', 'mdCheckNotScored', 'mdCheckLegDateMismatch'];
+  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team', mdCheckNotScored: 'Not yet scored', mdCheckLegDateMismatch: 'Parlay leg date mismatch' };
   // CONFIRMED REAL BUG (found 2026-08-13), direct report: "if I hit refresh
   // on the pop out page it flips to a different count... showed me 300
   // picks but that is not correct." Root cause: the OR clause a Missing
@@ -11633,6 +11665,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // here), not left on by default alongside the field-completeness
       // ones.
       if (has('mdCheckNotScored') && p.result === 'pending') return true;
+      // CONFIRMED REAL GAP, direct report: 6 real parlays sat stuck forever
+      // ("one or more legs not final yet") because a leg's own event_date
+      // had been corrected (via the inline event-date fixer, see its own
+      // comment) without anyone realizing that leg was still linked to a
+      // parlay dated differently -- nothing anywhere flagged the two rows
+      // falling out of sync. _legDateMismatch is computed once, up front,
+      // in findMissingData() below (it needs a parlay_legs + parent-picks
+      // lookup that can't happen synchronously in here) and just read back
+      // here, same as every other precomputed field on p.
+      if (has('mdCheckLegDateMismatch') && p._legDateMismatch) return true;
       return false;
     });
   }
@@ -11669,6 +11711,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const checkLine = $('mdCheckLine').checked;
     const checkPropTeam = $('mdCheckPropTeam').checked;
     const checkNotScored = $('mdCheckNotScored').checked;
+    const checkLegDateMismatch = $('mdCheckLegDateMismatch').checked;
 
     // Only the CHECKED fields count toward "missing" -- unchecking one
     // means a pick missing only that specific thing won't show up at all.
@@ -11689,6 +11732,12 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // without its own condition here, since none of the null-field
     // conditions above would ever be true for it.
     if (checkNotScored) conditions.push('result.eq.pending');
+    // Same "candidate rows first, real narrowing happens client-side" idea
+    // as checkNotScored just above -- a mismatch can't be detected until
+    // the parlay_legs + parent-picks lookup below runs, so every parlay leg
+    // has to be pulled as a candidate first, then most of them get filtered
+    // right back out once _legDateMismatch comes back false.
+    if (checkLegDateMismatch) conditions.push('is_parlay_leg.eq.true');
 
     if (!conditions.length) {
       alert('Check at least one field to look for.');
@@ -11707,6 +11756,34 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       if (to) query += `&event_date=lte.${to}`;
       query += '&order=event_date.asc';
       let picks = await restAllPages(query);
+
+      // Computed here (not inside filterMissingDataRows, which has to stay
+      // synchronous -- it's re-run client-side every time a checkbox is
+      // toggled inside the results pop-out) since it needs its own
+      // parlay_legs + parent-picks round trip. Only ever runs against picks
+      // already fetched as candidates above (is_parlay_leg=true when this
+      // check is on), so this is bounded by however many legs matched the
+      // existing capper/sport/date/status filters, not the whole table.
+      if (checkLegDateMismatch) {
+        const legIds = picks.filter(p => p.is_parlay_leg).map(p => p.id);
+        if (legIds.length) {
+          const links = await restAllPages(`parlay_legs?select=leg_pick_id,parlay_pick_id&leg_pick_id=in.(${legIds.join(',')})`);
+          const parentIds = [...new Set(links.map(l => l.parlay_pick_id))];
+          if (parentIds.length) {
+            const parents = await restAllPages(`picks?select=id,event_date&id=in.(${parentIds.join(',')})`);
+            const parentDateById = {};
+            parents.forEach(pr => { parentDateById[pr.id] = pr.event_date; });
+            const parentIdByLeg = {};
+            links.forEach(l => { parentIdByLeg[l.leg_pick_id] = l.parlay_pick_id; });
+            picks.forEach(p => {
+              const parentId = parentIdByLeg[p.id];
+              const parentDate = parentId !== undefined ? parentDateById[parentId] : undefined;
+              p._legDateMismatch = !!(parentDate && parentDate !== p.event_date);
+              if (p._legDateMismatch) p._legParentEventDate = parentDate;
+            });
+          }
+        }
+      }
 
       const checkedIds = MD_CHECKBOX_IDS.filter(id => $(id).checked);
       picks = filterMissingDataRows(picks, checkedIds);
@@ -14541,7 +14618,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 272; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 273; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
