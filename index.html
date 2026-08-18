@@ -1401,6 +1401,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- SCORECARD REVIEW (internal — full per-pick score breakdown for a single date, published or not) -->
+    <div class="stub" data-tab="publish">
+      <p class="stub-title">
+        Scorecard review <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public</span>
+        <button class="ghost small" id="toggleScorecardBtn">Show scorecards</button>
+      </p>
+      <div id="scorecardPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Date</label>
+            <input id="scDate" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="runScorecardBtn">Show scorecards for this date</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Every real pick from this date -- published or not -- re-scored using only the data that existed at the time (same point-in-time math as Formula Backtest above), sorted highest score to lowest. Each card shows the full breakdown (overall record, bet-type record, streak, tier, and consensus) plus exactly which other cappers agreed and their own records at the time, alongside the pick's actual result -- so a highly-rated pick that still lost, or one nobody agreed on that still won, is easy to spot at a glance. Parlay wrapper rows and individual legs aren't scored on their own here, same as everywhere else this formula runs -- a leg was never a standalone candidate to publish, though it still counts as evidence for whichever other cappers agreed with it.
+        </div>
+        <div id="scorecardWrap"></div>
+      </div>
+    </div>
+
     <!-- FORMULA SETTINGS (internal — changes future scoring only, never touches published data) -->
     <div class="stub" data-tab="publish">
       <p class="stub-title">
@@ -13728,6 +13751,187 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('runBacktestBtn').addEventListener('click', runBacktest);
 
+  // ---------- Scorecard review (per-pick breakdown, published or not) ----------
+  // Direct request: "I need a way to see the scorecards... this would have
+  // to include the ones we didn't publish as I would like to see if it's
+  // that no one agreed, what their positives and negatives were." Two real
+  // gaps made this not just a display tweak: (1) a score snapshot only
+  // ever gets saved at the moment something is actually published, so an
+  // unpublished pick has no stored score to look up at all -- it has to be
+  // recomputed. (2) even for a published pick, WHICH other cappers agreed
+  // was never saved, only the resulting confluence point value -- that
+  // list only ever existed transiently while Publish Ranking was running.
+  // Reuses the exact same point-in-time-safe walk-forward scoring Formula
+  // Backtest above already does (so this is provably the same math the
+  // live tool would have produced, not a new approximation), just scoped
+  // to one date and displayed per-pick instead of bucketed.
+  $('toggleScorecardBtn').addEventListener('click', () => {
+    const panel = $('scorecardPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleScorecardBtn').textContent = showing ? 'Show scorecards' : 'Hide scorecards';
+  });
+
+  async function runScorecard() {
+    const targetDate = $('scDate').value;
+    const wrap = $('scorecardWrap');
+    if (!targetDate) { alert('Pick a date first.'); return; }
+    wrap.innerHTML = '<div class="empty-state">Re-scoring every pick from this date using only data that existed at the time...</div>';
+
+    await loadScoringConfig();
+
+    try {
+      // Everything on or before the target date -- picks strictly before it
+      // build the running point-in-time stats; picks ON it are what
+      // actually get displayed. Deliberately NOT filtered by is_published
+      // or result -- an unpublished or still-pending pick needs to go
+      // through this exact same walk to be scored fairly.
+      const query = `picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,prop_team,event_date,created_at,result,pick_tier,is_parlay_leg,is_published,cappers(name),sports(name),bet_types(name)&event_date=lte.${targetDate}&order=event_date.asc,created_at.asc`;
+      const picksRaw = await restAllPages(query);
+      // Same "never a standalone candidate" exclusion as Backtest/Publish
+      // Ranking -- a Parlay wrapper row is never itself scored (legs are
+      // filtered out further down, after they've had their chance to count
+      // as confluence evidence for others, same order as Backtest).
+      const picks = picksRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
+
+      if (!picks.length) {
+        wrap.innerHTML = `<div class="empty-state">No picks found on or before ${targetDate}.</div>`;
+        return;
+      }
+
+      const overallByCapper = {};
+      const broadBetTypeByCapper = {};
+      const sportBetTypeByCapper = {};
+      const tierByCapper = {};
+      const historyByCapper = {};
+
+      const scored = picks.map(p => {
+        const cap = p.capper_id;
+        const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
+        const tier = Number(p.pick_tier) || 0;
+        const o = overallByCapper[cap] || { wins: 0, losses: 0 };
+        const bbt = broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+        const sbt = sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+        const t = tierByCapper[`${cap}::${tier}`] || { wins: 0, losses: 0 };
+        const hist = historyByCapper[cap] || [];
+
+        const overallAdj = adjustedWinPct(o.wins, o.losses);
+        const broadBetTypeAdj = adjustedWinPct(bbt.wins, bbt.losses);
+        const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
+        const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
+        const streak = computeStreak(hist);
+        const base = scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, t.wins, t.losses);
+
+        const entry = { pick: p, overallAdj, betTypeAdj, base, gameKey: backtestGameKey(p) };
+
+        // Only a real graded result ever updates anyone's running record --
+        // a still-pending pick gets scored using the stats as they stand,
+        // but can't feed evidence to itself or anything scored after it
+        // since its own outcome isn't known yet.
+        if (p.result !== 'pending') {
+          overallByCapper[cap] = { wins: o.wins + (p.result === 'win' ? w : 0), losses: o.losses + (p.result === 'loss' ? w : 0) };
+          broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] = { wins: bbt.wins + (p.result === 'win' ? w : 0), losses: bbt.losses + (p.result === 'loss' ? w : 0) };
+          sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] = { wins: sbt.wins + (p.result === 'win' ? w : 0), losses: sbt.losses + (p.result === 'loss' ? w : 0) };
+          if (tier !== 0) tierByCapper[`${cap}::${tier}`] = { wins: t.wins + (p.result === 'win' ? w : 0), losses: t.losses + (p.result === 'loss' ? w : 0) };
+          historyByCapper[cap] = [...hist, { result: p.result, event_date: p.event_date, created_at: p.created_at }];
+        }
+
+        return entry;
+      });
+
+      const byGameKey = {};
+      scored.forEach(e => {
+        if (!byGameKey[e.gameKey]) byGameKey[e.gameKey] = [];
+        byGameKey[e.gameKey].push(e);
+      });
+
+      const finalScored = scored
+        .filter(e => e.pick.event_date === targetDate && !e.pick.is_parlay_leg)
+        .map(e => {
+          const group = byGameKey[e.gameKey];
+          const others = group.filter(o => o.pick.capper_id !== e.pick.capper_id);
+          // The actual identities, kept for display -- this is the part
+          // that was never persisted anywhere before, even for already-
+          // published picks.
+          const agreeing = others.map(o => ({
+            capperName: o.pick.cappers ? o.pick.cappers.name : '—',
+            adj: o.overallAdj,
+            weight: confluenceWeightFor(o.pick),
+            isLeg: !!o.pick.is_parlay_leg
+          }));
+          const confPts = confluencePoints(agreeing.map(a => ({ adj: a.adj, weight: a.weight })));
+          const total = e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + e.base.tierCalibrationPts + confPts;
+          return {
+            pick: e.pick, overallAdj: e.overallAdj, betTypeAdj: e.betTypeAdj, base: e.base,
+            confPts, agreeing, total: Math.round(total * 10) / 10
+          };
+        })
+        .sort((a, b) => b.total - a.total);
+
+      renderScorecard(finalScored, targetDate);
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  }
+
+  function scorecardResultStamp(result) {
+    if (result === 'win') return '<span class="stamp win">Win</span>';
+    if (result === 'loss') return '<span class="stamp loss">Loss</span>';
+    if (result === 'push') return '<span class="stamp pending">Push</span>';
+    return '<span style="color:var(--ink-soft);">Pending</span>';
+  }
+
+  function renderScorecard(entries, targetDate) {
+    const wrap = $('scorecardWrap');
+    if (!entries.length) {
+      wrap.innerHTML = `<div class="empty-state">No standalone-caliber picks found for ${targetDate}.</div>`;
+      return;
+    }
+    const pt = n => Math.round(n * 10) / 10;
+    const pct = n => Math.round(n * 1000) / 10;
+
+    const cardsHtml = entries.map(e => {
+      const p = e.pick;
+      const propBit = (p.prop_player || p.prop_stat)
+        ? ` — ${escapeHtml(p.prop_player || '')}${p.prop_team ? ` (${escapeHtml(p.prop_team)})` : ''} ${escapeHtml(p.prop_stat || '')}`
+        : '';
+      const agreeingHtml = e.agreeing.length
+        ? e.agreeing.map(a => `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 6px;border:1px solid var(--field);border-radius:2px;font-size:11px;">${escapeHtml(a.capperName)}${a.isLeg ? ' (leg)' : ''} — ${pct(a.adj)}%</span>`).join('')
+        : '<span style="color:var(--ink-soft);font-size:11px;">No other capper picked this same game/selection.</span>';
+      return `
+      <div class="msg" style="margin-bottom:12px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;">
+          <div>
+            <strong>${escapeHtml(p.cappers ? p.cappers.name : '—')}</strong>
+            — ${escapeHtml(p.sports ? p.sports.name : '—')} / ${escapeHtml(p.bet_types ? p.bet_types.name : '—')}
+            <div style="font-size:13px;">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${propBit}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:18px;font-weight:bold;">${e.total}</div>
+            ${scorecardResultStamp(p.result)}
+            <div style="font-size:10px;color:${p.is_published ? 'var(--ink-soft)' : 'var(--stamp-amber)'};">${p.is_published ? 'Published' : 'Not published'}</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">
+          Overall record ${e.base.overallPts >= 0 ? '+' : ''}${pt(e.base.overallPts)}
+          · Bet-type record ${e.base.betTypePts >= 0 ? '+' : ''}${pt(e.base.betTypePts)}
+          · Streak ${e.base.streakPts >= 0 ? '+' : ''}${pt(e.base.streakPts)}
+          · Tier ${e.base.tierPts >= 0 ? '+' : ''}${pt(e.base.tierPts)}
+          · Consensus ${e.confPts >= 0 ? '+' : ''}${pt(e.confPts)}
+        </div>
+        <div><strong style="font-size:11px;">Who else agreed:</strong><br>${agreeingHtml}</div>
+      </div>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <div style="font-size:12px;margin-bottom:10px;">
+        <strong>${entries.length}</strong> scored pick${entries.length === 1 ? '' : 's'} for ${targetDate}, highest score first.
+      </div>
+      ${cardsHtml}`;
+  }
+
+  $('runScorecardBtn').addEventListener('click', runScorecard);
+
   // ---------- Formula settings (changes future scoring only) ----------
   const FORMULA_DEFAULTS = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
@@ -14651,7 +14855,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 275; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 276; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
