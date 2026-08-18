@@ -153,6 +153,35 @@
   .stamp.loss { color: var(--loss); }
   .stamp.push { color: var(--push); }
   .stamp.pending { color: var(--gold); }
+  .stamp.small { font-size: 9px; padding: 2px 6px; border-width: 1.5px; transform: none; }
+
+  /* Direct request: viewers need to see each individual leg of a parlay,
+     both to place any single leg as its own standalone bet and to see
+     exactly which leg lost when the parlay as a whole didn't hit (e.g.
+     "3 of 4 won" is meaningless on its own without knowing which one). */
+  .parlay-legs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .parlay-leg {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--board-bg);
+    border: 1px solid var(--board-line);
+    border-radius: 3px;
+  }
+  .parlay-leg-text {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--cream);
+    line-height: 1.4;
+  }
+  .parlay-leg-text .leg-line { color: var(--gold); margin-left: 6px; }
+  .parlay-leg-text .leg-odds, .parlay-leg-text .leg-prop { color: var(--cream-dim); margin-left: 6px; }
 
   .date-nav {
     max-width: 1080px; margin: 24px auto 0; padding: 0 20px;
@@ -468,11 +497,12 @@
     return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   }
 
-  function resultStampHtml(result) {
-    if (result === 'win') return '<span class="stamp win">Win</span>';
-    if (result === 'loss') return '<span class="stamp loss">Loss</span>';
-    if (result === 'push') return '<span class="stamp push">Push</span>';
-    return '<span class="stamp pending">Pending</span>';
+  function resultStampHtml(result, small) {
+    const cls = small ? 'stamp small' : 'stamp';
+    if (result === 'win') return `<span class="${cls} win">Win</span>`;
+    if (result === 'loss') return `<span class="${cls} loss">Loss</span>`;
+    if (result === 'push') return `<span class="${cls} push">Push</span>`;
+    return `<span class="${cls} pending">Pending</span>`;
   }
 
   function renderSetupForm(errorMsg) {
@@ -544,6 +574,32 @@
         return;
       }
 
+      // Direct request: viewers need to see each individual leg of a
+      // parlay -- both so they can place any single leg as its own
+      // standalone bet, and so a parlay that didn't hit is transparent
+      // about exactly which leg lost, instead of just an opaque
+      // "X-Leg Parlay" result with no way to tell which part failed.
+      // Batched (one parlay_legs lookup + one picks lookup covering every
+      // parlay shown today) rather than per-card, same reasoning as the
+      // capper-usual-tier lookup in admin.html's own All Picks table.
+      const parlayPicks = picks.filter(p => (p.bet_types && p.bet_types.name || '').toLowerCase() === 'parlay');
+      const legsByParlay = {};
+      if (parlayPicks.length) {
+        const links = await rest(`parlay_legs?select=parlay_pick_id,leg_pick_id&parlay_pick_id=in.(${parlayPicks.map(p => p.id).join(',')})`);
+        const legIds = [...new Set(links.map(l => l.leg_pick_id))];
+        if (legIds.length) {
+          const legPicks = await rest(`picks?select=id,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result&id=in.(${legIds.join(',')})`);
+          const legById = {};
+          legPicks.forEach(lp => { legById[lp.id] = lp; });
+          links.forEach(l => {
+            const leg = legById[l.leg_pick_id];
+            if (!leg) return;
+            if (!legsByParlay[l.parlay_pick_id]) legsByParlay[l.parlay_pick_id] = [];
+            legsByParlay[l.parlay_pick_id].push(leg);
+          });
+        }
+      }
+
       const cardsHtml = picks.map((p, i) => {
         // Team shown alongside the player name specifically so a casual
         // fan who doesn't follow every roster isn't left guessing who a
@@ -584,6 +640,28 @@
         const winAmountHtml = winAmount !== null
           ? `<div class="win-amount">$100 wins <strong>$${winAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>`
           : '';
+        // Each leg shown with its own selection/line/odds/result, so a
+        // viewer can place any single leg as its own bet, and so a losing
+        // parlay is transparent about exactly which leg lost rather than
+        // just an opaque "X-Leg Parlay" result.
+        const legs = legsByParlay[p.id] || [];
+        const legsHtml = legs.length ? `
+          <div class="parlay-legs">
+            ${legs.map(leg => {
+              const legOddsVal = (leg.opening_odds !== null && leg.opening_odds !== undefined) ? leg.opening_odds
+                : ((leg.closing_odds !== null && leg.closing_odds !== undefined) ? leg.closing_odds : null);
+              const legOddsHtml = legOddsVal !== null ? `<span class="leg-odds">${legOddsVal > 0 ? '+' : ''}${legOddsVal}</span>` : '';
+              const legLineHtml = (leg.line !== null && leg.line !== undefined) ? `<span class="leg-line">${leg.line > 0 ? '+' : ''}${leg.line}</span>` : '';
+              const legPropHtml = (leg.prop_player || leg.prop_stat)
+                ? `<span class="leg-prop">${escapeHtml(leg.prop_player || '')}${leg.prop_team ? ` (${escapeHtml(leg.prop_team)})` : ''} ${escapeHtml(leg.prop_stat || '')}</span>`
+                : '';
+              return `
+              <div class="parlay-leg">
+                <div class="parlay-leg-text">${escapeHtml(leg.selection)}${legLineHtml}${legOddsHtml}${legPropHtml}</div>
+                ${resultStampHtml(leg.result, true)}
+              </div>`;
+            }).join('')}
+          </div>` : '';
         return `
         <div class="ticket" style="animation-delay:${Math.min(i, 10) * 40}ms;">
           ${startTimeHtml ? `<div class="start-time-bar">${startTimeHtml}</div>` : ''}
@@ -599,6 +677,7 @@
             <div class="selection">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? `<span class="line">${p.line > 0 ? '+' : ''}${p.line}</span>` : ''}${oddsHtml}</div>
             ${propBit}
           </div>
+          ${legsHtml}
           ${winAmountHtml}
           <div class="ticket-bottom">
             <div class="event-date">${p.event_date}</div>
