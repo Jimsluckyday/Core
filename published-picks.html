@@ -439,7 +439,20 @@
   let viewingDate = null;
 
   async function rest(path) {
+    // CONFIRMED REAL BUG, direct report: a normal reload (F5) on this page
+    // showed stale picks/results -- only a hard reload (which bypasses the
+    // browser's HTTP cache entirely) picked up freshly-published picks and
+    // updated win/loss results. Root cause: this fetch() never opted out
+    // of the browser's default caching behavior, so a plain reload could
+    // legitimately serve a cached response for this exact same GET request
+    // instead of hitting Supabase again. This is a live, real-time trust
+    // page for paying customers -- it must never show stale results just
+    // because of how someone happened to reload the tab. cache: 'no-store'
+    // forces every call through this shared helper (track record, the pick
+    // list, the breakdown modal -- everything on this page) to always hit
+    // the network fresh, regardless of reload type.
     const res = await fetch(`${config.url}/rest/v1/${path}`, {
+      cache: 'no-store',
       headers: { apikey: config.anonKey, Authorization: `Bearer ${config.anonKey}` }
     });
     if (!res.ok) {
