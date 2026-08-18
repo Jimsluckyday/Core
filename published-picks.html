@@ -611,9 +611,22 @@
         const oddsVal = (p.opening_odds !== null && p.opening_odds !== undefined) ? p.opening_odds
           : ((p.closing_odds !== null && p.closing_odds !== undefined) ? p.closing_odds : null);
         const oddsHtml = oddsVal !== null ? `<span class="odds">${oddsVal > 0 ? '+' : ''}${oddsVal}</span>` : '';
-        const cornerBadge = p.result === 'pending'
-          ? (p.published_was_hot ? `<span class="hot-badge">&#128293; Hot Pick</span>` : '')
-          : resultStampHtml(p.result);
+        // CONFIRMED REAL BUG, direct report -- critical for trust: this
+        // used to show the Hot Pick badge ONLY while a pick was still
+        // pending, then silently REPLACE it with the win/loss stamp the
+        // instant it graded -- even though published_was_hot is a
+        // permanent snapshot of what was true at the moment of publishing
+        // and never changes. To a paying customer, a Hot Pick that quietly
+        // loses its fire badge the moment it loses looks exactly like
+        // retroactively covering up a bad call, not an honest track
+        // record. Both now always show together once resolved -- the flag
+        // is what it was called AT THE TIME, permanently, regardless of
+        // how it turned out.
+        const hotBadgeHtml = p.published_was_hot ? `<span class="hot-badge">&#128293; Hot Pick</span>` : '';
+        const resultBadgeHtml = p.result === 'pending' ? '' : resultStampHtml(p.result);
+        const cornerBadge = (hotBadgeHtml || resultBadgeHtml)
+          ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">${hotBadgeHtml}${resultBadgeHtml}</div>`
+          : '';
         // Same reasoning as the team name above -- a tournament/event tag
         // is a quick, visual "here's exactly what to search for" clue for
         // anyone not deeply familiar with tennis/golf/soccer schedules.
