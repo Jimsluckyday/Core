@@ -752,6 +752,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <select id="matchupTeam2"><option value="">— None / not stated —</option></select>
         </div>
       </div>
+      <div id="matchupTeamMismatchWarning" class="msg error" style="display:none;margin-top:6px;"></div>
 
       <div class="row">
         <div class="field" id="selectionField">
@@ -4656,10 +4657,35 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // this just selects the values matching this pick's own selection.
     // A "/"-combined selection splits into Team 1/Team 2; a bare single
     // team (the allowed Team-2-optional case) goes entirely into Team 1.
+    const matchupWarning = $('matchupTeamMismatchWarning');
+    matchupWarning.style.display = 'none';
     if (editBt && editBt.uses_matchup_fields) {
       const editParts = (p.selection || '').split('/');
-      $('matchupTeam1').value = (editParts[0] || '').trim();
-      $('matchupTeam2').value = (editParts[1] || '').trim();
+      const wantTeam1 = (editParts[0] || '').trim();
+      const wantTeam2 = (editParts[1] || '').trim();
+      $('matchupTeam1').value = wantTeam1;
+      $('matchupTeam2').value = wantTeam2;
+      // CONFIRMED REAL BUG, direct report: "I couldn't edit team 1 or
+      // team 2 the fields were blank" -- this dropdown only ever offers
+      // teams already registered in the teams table for this sport (see
+      // populateMatchupTeamDropdowns), with no free-text fallback. If the
+      // pick's real selection (e.g. "France/Senegal", a soccer national
+      // team never registered as a domestic-league team) has no matching
+      // <option>, a plain <select>.value assignment fails silently -- the
+      // field just looks blank with zero explanation, easy to mistake for
+      // a real bug rather than a missing team-registration data gap.
+      // International soccer especially will keep hitting this (a much
+      // bigger real team pool than any domestic league on file). Checked
+      // right after assignment (does the dropdown's OWN value now match
+      // what was asked for) and surfaced explicitly instead of silently
+      // left blank.
+      const missingTeams = [];
+      if (wantTeam1 && $('matchupTeam1').value !== wantTeam1) missingTeams.push(wantTeam1);
+      if (wantTeam2 && $('matchupTeam2').value !== wantTeam2) missingTeams.push(wantTeam2);
+      if (missingTeams.length) {
+        matchupWarning.textContent = `⚠ ${missingTeams.map(t => `"${t}"`).join(' and ')} ${missingTeams.length === 1 ? "isn't" : "aren't"} registered as a team for this sport yet -- that's why the dropdown looks blank below. Add ${missingTeams.length === 1 ? 'it' : 'them'} in Setup, then reopen this pick to edit it.`;
+        matchupWarning.style.display = 'block';
+      }
     }
     if (editIsProp && p.line !== null && p.line !== undefined) {
       $('pickLine').value = p.selection === 'Over' ? -Math.abs(p.line) : Math.abs(p.line);
@@ -14946,7 +14972,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 279; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 280; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
