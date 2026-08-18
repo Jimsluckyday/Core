@@ -13268,7 +13268,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     wrap.innerHTML = '<div class="empty-state">Loading published picks...</div>';
 
     try {
-      let query = `picks?select=id,event_date,selection,line,opening_odds,closing_odds,result,pick_tier,published_at,published_score,published_was_hot,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&is_published=eq.true`;
+      let query = `picks?select=id,event_date,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result,pick_tier,published_at,published_score,published_was_hot,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&is_published=eq.true`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
@@ -13302,12 +13302,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         : p.result === 'win' ? '<span style="color:var(--stamp-green);font-weight:bold;">Win</span>'
         : p.result === 'loss' ? '<span style="color:var(--stamp-red);font-weight:bold;">Loss</span>'
         : '<span style="color:var(--ink-soft);">Push</span>';
+      // CONFIRMED REAL GAP, direct report: a Player Prop row showed only
+      // "Under (6)" with no way to tell which player or stat it was even
+      // about -- prop_player/prop_stat weren't in the query at all. Same
+      // display convention already used on published-picks.html's own
+      // card view.
+      const propBit = (p.prop_player || p.prop_stat)
+        ? ` <span style="color:var(--ink-soft);">— ${escapeHtml(p.prop_player || '')}${p.prop_team ? ` (${escapeHtml(p.prop_team)})` : ''} ${escapeHtml(p.prop_stat || '')}</span>`
+        : '';
       return `<tr>
         <td>${p.event_date}</td>
         <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
         <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
         <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
-        <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${p.pick_tier > 0 ? ' &#11088;T' + p.pick_tier : (p.pick_tier < 0 ? ' &#9660;T' + p.pick_tier : '')}</td>
+        <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${propBit}${p.pick_tier > 0 ? ' &#11088;T' + p.pick_tier : (p.pick_tier < 0 ? ' &#9660;T' + p.pick_tier : '')}</td>
         <td>${oddsText}</td>
         <td>${resultBadge}${p.published_was_hot ? ' &#128293;' : ''}</td>
         <td>${p.published_score ?? '—'}</td>
@@ -13325,10 +13333,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </table>`;
 
     $('exportAllPublishedBtn').addEventListener('click', () => {
-      const cols = ['Date', 'Capper', 'Sport', 'Bet Type', 'Selection', 'Line', 'Tier', 'Opening Odds', 'Closing Odds', 'Result', 'Was Hot Pick', 'Score at Publish', 'Published At'];
+      const cols = ['Date', 'Capper', 'Sport', 'Bet Type', 'Selection', 'Line', 'Player', 'Prop Team', 'Prop Stat', 'Tier', 'Opening Odds', 'Closing Odds', 'Result', 'Was Hot Pick', 'Score at Publish', 'Published At'];
       const rows = picks.map(p => [
         p.event_date, p.cappers ? p.cappers.name : '', p.sports ? p.sports.name : '', p.bet_types ? p.bet_types.name : '',
-        p.selection, p.line ?? '', p.pick_tier || 0, p.opening_odds ?? '', p.closing_odds ?? '',
+        p.selection, p.line ?? '', p.prop_player || '', p.prop_team || '', p.prop_stat || '', p.pick_tier || 0, p.opening_odds ?? '', p.closing_odds ?? '',
         p.result, p.published_was_hot ? 'Yes' : 'No', p.published_score ?? '', p.published_at || ''
       ]);
       downloadCsv(`all-published-picks-${new Date().toISOString().split('T')[0]}.csv`, cols, rows);
@@ -14643,7 +14651,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 274; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 275; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
