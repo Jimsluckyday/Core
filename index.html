@@ -12767,7 +12767,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // would never publish a leg by itself (it was never his standalone
       // call), so legs never become their own scored/publishable candidate.
       const includeParlaysAsCandidates = !!($('prIncludeParlays') && $('prIncludeParlays').checked);
-      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
+      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,first_scored_score,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
       if (sportFilter) pendingQuery += `&sport_id=eq.${sportFilter}`;
       if (from) pendingQuery += `&event_date=gte.${from}`;
       if (to) pendingQuery += `&event_date=lte.${to}`;
@@ -12951,8 +12951,60 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const pastDueScored = allScored.filter(e => e.pick.event_date < today).sort((a, b) => b.score.total - a.score.total);
 
       renderPublishRank(scored, pastDueScored);
+      // Fire-and-forget, deliberately not awaited -- must never delay
+      // showing the ranked list itself. See snapshotFirstScores' own
+      // comment for why this exists.
+      snapshotFirstScores(allScored).catch(e => console.warn('Could not snapshot first-ranked scores:', e.message));
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  }
+
+  // CONFIRMED REAL GAP, direct report: "if a pick got a score of 45 and I
+  // then resolve today's picks the capper's score changes based on that
+  // win/loss which will change the overall score of that pick that wasn't
+  // published... Should we or can we take a permanent snapshot before a
+  // day's picks are resolved?" Publishing already freezes a score
+  // (published_score), but an UNPUBLISHED pick had nothing frozen at all
+  // -- Scorecard Review recomputes it live every time, and since grading
+  // in this business happens in messy, out-of-order backfill batches (not
+  // strictly chronologically), the point-in-time stats "as of" an earlier
+  // date can genuinely keep changing as MORE of that earlier history gets
+  // graded later. The fix: snapshot EVERY candidate's score the first
+  // time it's ever ranked here, before anyone's decided whether to
+  // publish it -- this always happens same-day, before the games are even
+  // played, so it's a genuine "day-of" freeze for every pick, not just
+  // published ones. Write-once semantics via the `first_scored_score=is
+  // .null` filter in the PATCH itself (atomic, no read-then-write race) --
+  // a pick that's already been ranked once keeps its original first look
+  // forever, never overwritten by a later re-run of this same tool.
+  async function snapshotFirstScores(allScored) {
+    for (const entry of allScored) {
+      if (entry.pick.first_scored_score !== null && entry.pick.first_scored_score !== undefined) continue;
+      try {
+        await rest(`picks?id=eq.${entry.pick.id}&first_scored_score=is.null`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            first_scored_at: new Date().toISOString(),
+            first_scored_score: entry.score.total,
+            first_scored_score_breakdown: {
+              overall_pts: entry.score.overallPts,
+              bet_type_pts: entry.score.betTypePts,
+              streak_pts: entry.score.streakPts,
+              confluence_pts: entry.score.confluencePts,
+              overall_record: entry.overallRecord,
+              overall_adj_pct: entry.overallAdjPct,
+              bet_type_record: entry.betTypeRecord,
+              bet_type_adj_pct: entry.betTypeAdjPct,
+              broad_bet_type_adj_pct: entry.broadBetTypeAdjPct,
+              streak: entry.streak,
+              agreeing_cappers: entry.isParlayCandidate ? [] : (entry.agreeingCappers || [])
+            }
+          })
+        });
+      } catch (e) {
+        console.warn('Could not snapshot first score for pick', entry.pick.id, e.message);
+      }
     }
   }
 
@@ -13730,7 +13782,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // graded or still pending. Parlays are always included as their own
       // candidates here (unlike the live tool's opt-in checkbox) -- a full
       // historical review has no reason to hide half the picture.
-      const dayQuery = `picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,prop_team,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,result,published_score,published_score_breakdown,cappers(name),sports(name),bet_types(name)&event_date=eq.${targetDate}&order=id.asc`;
+      const dayQuery = `picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,prop_team,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,result,published_score,published_score_breakdown,first_scored_score,first_scored_score_breakdown,cappers(name),sports(name),bet_types(name)&event_date=eq.${targetDate}&order=id.asc`;
       const allDayRaw = await restAllPages(dayQuery);
       if (!allDayRaw.length) {
         wrap.innerHTML = `<div class="empty-state">No picks found for ${targetDate}.</div>`;
@@ -13829,55 +13881,51 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   }
 
-  // CONFIRMED REAL BUG, direct report -- undermines the whole point of
+  // CONFIRMED REAL GAP, direct report -- undermines the whole point of
   // this tool: "the scores changed after I published them... if they
   // change then I will never get a good handle on the overall picture of
-  // these picks and how to change the formula." Root cause: this whole
-  // pipeline recomputes every score live, every time, using whatever
-  // capper records exist right now -- for an ALREADY-PUBLISHED pick,
-  // that's wrong. Publishing already freezes a real snapshot
-  // (published_score + published_score_breakdown, written once at the
-  // moment Publish was clicked, see wireActionCell above) specifically so
-  // it never drifts -- Scorecard Review was just never reading it. This
-  // swaps in that frozen snapshot whenever one exists, so a published
-  // pick's score is the exact number you saw and acted on, permanently,
-  // never a live recalculation. Only an UNPUBLISHED pick (no snapshot
-  // exists yet -- nothing was ever frozen) falls back to today's live
-  // recomputation, clearly labeled as such in the UI so it's never
-  // confused with a real historical record.
+  // these picks." Two rounds here: (1) published picks now use the
+  // published_score snapshot instead of a live recompute; (2) direct
+  // follow-up -- "if a pick got a score of 45 and I then resolve today's
+  // picks the capper's score changes... that pick that wasn't published"
+  // -- an UNPUBLISHED pick had nothing frozen at all, and since grading in
+  // this business happens in messy out-of-order backfill batches (not
+  // strict chronological order), even a "point-in-time as of event date"
+  // recompute can keep shifting as more of that earlier history gets
+  // graded later. Fixed by also checking first_scored_score -- written
+  // once, the very first time Publish Ranking ever scored this pick
+  // (always same-day, before anyone decided whether to publish it, see
+  // snapshotFirstScores above). Priority: published snapshot (the actual
+  // decision moment) > first-ranked snapshot (earliest honest look,
+  // whether or not it got published) > live recompute (only for picks
+  // that somehow were never ranked through this tool at all).
   //
-  // Tier/tier-calibration weren't split out in the stored snapshot
-  // (published_score_breakdown predates that split) -- the leftover
-  // difference between the frozen total and the four components that
-  // WERE stored gets attributed to Tier as a combined figure, so the
-  // GRAND TOTAL is always exactly the frozen number either way, even
-  // though the Tier/Tier-calibration boxes below it can't be split with
-  // full precision for older snapshots.
+  // Tier/tier-calibration weren't split out in either stored snapshot
+  // format -- the leftover difference between the frozen total and the
+  // four components that WERE stored gets attributed to Tier as a
+  // combined figure, so the GRAND TOTAL is always exactly the frozen
+  // number either way, even though the Tier/Tier-calibration boxes below
+  // it can't be split with full precision for snapshotted picks.
   //
   // Parlay leg-level detail (who agreed on each leg, combined win
-  // estimate) was never frozen at all, even for published parlays -- only
-  // straight picks got a full agreeing-cappers snapshot. A published
-  // parlay's TOTAL score is still exact; its leg breakdown is left empty
-  // with an explanatory note rather than silently shown as if it were
-  // also frozen.
-  function withFrozenSnapshotIfAvailable(entry) {
+  // estimate) was never frozen in either format -- only straight picks
+  // got a full agreeing-cappers snapshot. A snapshotted parlay's TOTAL
+  // score is still exact; its leg breakdown is left empty with an
+  // explanatory note rather than silently shown as if it were also frozen.
+  function applySnapshot(entry, source, score, bd) {
     const p = entry.pick;
-    if (!p.is_published || p.published_score === null || p.published_score === undefined) {
-      return { ...entry, _frozen: false };
-    }
-    const bd = p.published_score_breakdown || {};
     const knownPts = (bd.overall_pts || 0) + (bd.bet_type_pts || 0) + (bd.streak_pts || 0) + (bd.confluence_pts || 0);
-    const tierResidual = Math.round((p.published_score - knownPts) * 10) / 10;
+    const tierResidual = Math.round((score - knownPts) * 10) / 10;
     return {
       ...entry,
-      _frozen: true,
+      _snapshotSource: source,
       overallRecord: bd.overall_record ?? entry.overallRecord,
       overallAdjPct: bd.overall_adj_pct ?? entry.overallAdjPct,
       betTypeRecord: bd.bet_type_record ?? entry.betTypeRecord,
       betTypeAdjPct: bd.bet_type_adj_pct ?? entry.betTypeAdjPct,
       broadBetTypeAdjPct: bd.broad_bet_type_adj_pct ?? entry.broadBetTypeAdjPct,
       streak: bd.streak ?? entry.streak,
-      tierRecord: p.pick_tier ? 'not split out at publish time' : entry.tierRecord,
+      tierRecord: p.pick_tier ? 'not split out at snapshot time' : entry.tierRecord,
       tierAdjWinPctPct: entry.tierAdjWinPctPct,
       tierSampleMet: true,
       agreeingCappers: entry.isParlayCandidate ? [] : (bd.agreeing_cappers || []),
@@ -13887,7 +13935,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       combinedWinProbGradedLegCount: 0,
       conflicts: undefined,
       score: {
-        total: p.published_score,
+        total: score,
         overallPts: bd.overall_pts ?? 0,
         betTypePts: bd.bet_type_pts ?? 0,
         streakPts: bd.streak_pts ?? 0,
@@ -13896,6 +13944,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         confluencePts: bd.confluence_pts ?? 0
       }
     };
+  }
+
+  function withFrozenSnapshotIfAvailable(entry) {
+    const p = entry.pick;
+    if (p.is_published && p.published_score !== null && p.published_score !== undefined) {
+      return applySnapshot(entry, 'published', p.published_score, p.published_score_breakdown || {});
+    }
+    if (p.first_scored_score !== null && p.first_scored_score !== undefined) {
+      return applySnapshot(entry, 'first_ranked', p.first_scored_score, p.first_scored_score_breakdown || {});
+    }
+    return { ...entry, _snapshotSource: 'live' };
   }
 
   function scorecardResultStamp(result) {
@@ -13912,9 +13971,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // .resultBadge shows the actual win/loss/push/pending result, which the
   // live card never has anything to show for (nothing's graded yet there).
   function scorecardSnapshotBadge(s) {
-    return s._frozen
-      ? '<span style="display:block;margin-top:2px;font-size:9px;color:var(--stamp-green);font-weight:bold;">&#128274; FROZEN AT PUBLISH</span>'
-      : '<span style="display:block;margin-top:2px;font-size:9px;color:var(--stamp-amber);font-weight:bold;">RECOMPUTED — NOT YET PUBLISHED</span>';
+    if (s._snapshotSource === 'published') {
+      return '<span style="display:block;margin-top:2px;font-size:9px;color:var(--stamp-green);font-weight:bold;">&#128274; FROZEN AT PUBLISH</span>';
+    }
+    if (s._snapshotSource === 'first_ranked') {
+      return '<span style="display:block;margin-top:2px;font-size:9px;color:var(--stamp-gray);font-weight:bold;">&#128274; FROZEN AT FIRST RANKING</span>';
+    }
+    return '<span style="display:block;margin-top:2px;font-size:9px;color:var(--stamp-amber);font-weight:bold;">RECOMPUTED — NEVER RANKED</span>';
   }
 
   function renderScorecard(entries, targetDate) {
@@ -13928,15 +13991,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const pushes = entries.filter(e => e.pick.result === 'push').length;
     const pending = entries.filter(e => e.pick.result === 'pending').length;
     const conflictCount = entries.filter(e => e.conflicts && e.conflicts.length).length;
-    const frozenCount = entries.filter(e => e._frozen).length;
+    const publishedFrozenCount = entries.filter(e => e._snapshotSource === 'published').length;
+    const firstRankedFrozenCount = entries.filter(e => e._snapshotSource === 'first_ranked').length;
+    const liveCount = entries.filter(e => e._snapshotSource === 'live').length;
 
     const cardsHtml = entries.map((s, i) => {
-      // A published parlay's TOTAL score is exact (frozen), but its
-      // leg-by-leg breakdown was never stored at publish time at all --
+      // A snapshotted parlay's TOTAL score is exact (frozen), but its
+      // leg-by-leg breakdown was never stored in either snapshot format --
       // shown explicitly rather than silently left blank, which would
       // otherwise look like a bug instead of a real historical data gap.
-      const extraNote = (s._frozen && s.isParlayCandidate)
-        ? '&#128274; This total is the exact frozen score from publish time. Leg-by-leg agreement detail was never stored for parlays specifically, so it can\'t be shown here without recomputing it live -- which would defeat the purpose of this screen. The total above is not affected.'
+      const extraNote = (s._snapshotSource !== 'live' && s.isParlayCandidate)
+        ? '&#128274; This total is the exact frozen score. Leg-by-leg agreement detail was never stored for parlays specifically, so it can\'t be shown here without recomputing it live -- which would defeat the purpose of this screen. The total above is not affected.'
         : '';
       return publishRankCardHtml(s, i + 1, {
         readOnly: true,
@@ -13950,7 +14015,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <strong>${entries.length}</strong> scored pick${entries.length === 1 ? '' : 's'} for ${targetDate}, highest score first — ${wins}-${losses}${pushes ? '-' + pushes : ''}${pending ? `, ${pending} still pending` : ''}.${conflictCount ? ` <strong style="color:var(--stamp-red);">&#9888; ${conflictCount} pick${conflictCount === 1 ? '' : 's'} in a head-to-head conflict</strong>` : ''}
       </div>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:12px;">
-        <strong style="color:var(--stamp-green);">&#128274; Frozen at publish</strong> (${frozenCount} of ${entries.length}) means this is the exact score you saw and acted on -- it will never change, no matter how capper records move afterward. <strong style="color:var(--stamp-amber);">Recomputed</strong> means this pick was never published, so there's no snapshot to show -- this is today's live estimate only, and will keep changing until it's either published (freezing it) or the underlying records shift again.
+        <strong style="color:var(--stamp-green);">&#128274; Frozen at publish</strong> (${publishedFrozenCount}) is the exact score at the moment you actually published it -- the real decision record. <strong style="color:var(--stamp-gray);">&#128274; Frozen at first ranking</strong> (${firstRankedFrozenCount}) is the score the very first time Publish Ranking ever scored it, whether or not it went on to get published -- also permanent, never recalculated. <strong style="color:var(--stamp-amber);">Recomputed</strong> (${liveCount}) means this pick was never ranked through Publish Ranking at all -- a live estimate only, and the one figure here that can still change.
       </div>
       ${cardsHtml}`;
     wireDetailsToggle(wrap);
@@ -14881,7 +14946,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 278; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 279; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
