@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -12336,6 +12336,347 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return avgSignedFactor * 100 * scoringConfig.confluenceWeight * countMultiplier;
   }
 
+  // ---------- Shared Publish Ranking scoring + card rendering ----------
+  // Hoisted to top-level (previously nested inside runPublishRank /
+  // renderPublishRank) so Scorecard Review below can call the EXACT same
+  // scoring and card-rendering logic the live tool uses, just fed a
+  // different (point-in-time, historical) stats snapshot instead of
+  // "current full history" -- guarantees true parity instead of a
+  // lookalike copy that could silently drift from the live tool over
+  // time. Direct request: "a dropdown for each one which then populates
+  // the scorecard exactly as I would have seen it in the pending publish
+  // section." Every function below is now a pure function of whatever
+  // stats/context it's explicitly given, no closure over module state.
+
+  function buildBaseEntry(p, stats) {
+    const o = stats.overallByCapper[p.capper_id] || { wins: 0, losses: 0 };
+    const bt = stats.byCapperBetType[`${p.capper_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+    const sbt = stats.byCapperSportBetType[`${p.capper_id}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+    const streak = stats.streakByCapper[p.capper_id] || { type: null, len: 0 };
+    const overallAdj = adjustedWinPct(o.wins, o.losses);
+    const broadBetTypeAdj = adjustedWinPct(bt.wins, bt.losses);
+    const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
+    const tier = Number(p.pick_tier) || 0;
+    const t = stats.byCapperTier[`${p.capper_id}::${tier}`] || { wins: 0, losses: 0 };
+    const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
+    const fmt = (n) => Math.round(n * 10) / 10;
+    return {
+      pick: p,
+      isLeg: !!p.is_parlay_leg,
+      isParlayCandidate: !!(p.bet_types && p.bet_types.name === 'Parlay'),
+      overallRecord: `${fmt(o.wins)}-${fmt(o.losses)}`,
+      overallAdj,
+      overallAdjPct: Math.round(overallAdj * 1000) / 10,
+      betTypeRecord: `${fmt(sbt.wins)}-${fmt(sbt.losses)}`,
+      broadBetTypeAdjPct: Math.round(broadBetTypeAdj * 1000) / 10,
+      betTypeAdjPct: Math.round(betTypeAdj * 1000) / 10,
+      tierRecord: `${fmt(t.wins)}-${fmt(t.losses)}`,
+      tierAdjWinPctPct: Math.round(tierAdjWinPct * 1000) / 10,
+      tierSampleMet: (t.wins + t.losses) >= scoringConfig.tierCalibrationMinSample,
+      streak,
+      base: scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, t.wins, t.losses)
+    };
+  }
+
+  function scoreConfluenceFor(entry, groups) {
+    const group = groups[confluenceKey(entry.pick)] || [];
+    const others = group.filter(o => o.pick.capper_id !== entry.pick.capper_id);
+    return {
+      confPts: confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) }))),
+      agreeingCappers: others.map(o => ({
+        name: o.pick.cappers ? o.pick.cappers.name : '—',
+        overallRecord: o.overallRecord,
+        overallAdjPct: o.overallAdjPct,
+        betTypeRecord: o.betTypeRecord,
+        betTypeAdjPct: o.betTypeAdjPct,
+        isLeg: o.isLeg,
+        tier: o.pick.pick_tier,
+        rawSignal: o.pick.raw_confidence_signal,
+        isHotStreak: o.streak.type === 'win' && o.streak.len >= scoringConfig.hotPickStreakThreshold,
+        streakLen: o.streak.len
+      }))
+    };
+  }
+
+  // ctx = { groups, parlayLegIdsByParlayId, legDetailsById, withBaseAllById, publishedStraightKeySet }
+  function scoreParlayConfluence(entry, ctx) {
+    const legIds = ctx.parlayLegIdsByParlayId[entry.pick.id] || [];
+    const legBreakdown = legIds.map(legId => {
+      const details = ctx.legDetailsById[legId];
+      if (!details) return null;
+      const legKey = confluenceKey(details);
+      const alreadyPublishedElsewhere = ctx.publishedStraightKeySet.has(legKey);
+      const legEntry = ctx.withBaseAllById[legId];
+      if (!legEntry) {
+        return {
+          selection: details.selection, line: details.line, confPts: 0, agreeingCappers: [],
+          standaloneScore: null, overallAdjPct: null, alreadyGraded: details.result, alreadyPublishedElsewhere, legKey
+        };
+      }
+      const { confPts, agreeingCappers } = scoreConfluenceFor(legEntry, ctx.groups);
+      const legTotal = legEntry.base.overallPts + legEntry.base.betTypePts + legEntry.base.streakPts
+        + legEntry.base.tierPts + legEntry.base.tierCalibrationPts + confPts;
+      return {
+        selection: legEntry.pick.selection, line: legEntry.pick.line, confPts, agreeingCappers,
+        standaloneScore: Math.round(legTotal * 10) / 10,
+        overallAdjPct: legEntry.overallAdjPct, alreadyGraded: null, alreadyPublishedElsewhere, legKey
+      };
+    }).filter(Boolean);
+    const confPts = legBreakdown.length
+      ? legBreakdown.reduce((sum, l) => sum + l.confPts, 0) / legBreakdown.length
+      : 0;
+    return { confPts, legBreakdown };
+  }
+
+  // Head-to-head conflict detection + dedup to one card per real bet.
+  // Pure function of the scored straight candidates alone, so both the
+  // live tool and Scorecard Review get identical conflict/dedup behavior.
+  function finalizeStraightScored(scoredStraight) {
+    const conflictGroups = {};
+    scoredStraight.forEach(e => {
+      const eventId = e.pick.rundown_event_id;
+      if (!eventId) return;
+      const key = `${eventId}::${e.pick.bet_type_id}`;
+      if (!conflictGroups[key]) conflictGroups[key] = [];
+      conflictGroups[key].push(e);
+    });
+    Object.values(conflictGroups).forEach(group => {
+      const distinctSelections = new Set(group.map(e => e.pick.selection));
+      if (distinctSelections.size < 2) return;
+      group.forEach(e => {
+        e.conflicts = group
+          .filter(o => o.pick.selection !== e.pick.selection)
+          .map(o => ({ capperName: o.pick.cappers ? o.pick.cappers.name : '—', selection: o.pick.selection, score: o.score.total }));
+      });
+    });
+
+    const scoredStraightByGroup = {};
+    scoredStraight.forEach(entry => {
+      const key = confluenceKey(entry.pick);
+      if (!scoredStraightByGroup[key] || entry.score.total > scoredStraightByGroup[key].score.total) {
+        scoredStraightByGroup[key] = entry;
+      }
+    });
+    return Object.values(scoredStraightByGroup);
+  }
+
+  // Delegated on the given wrap (stable across re-renders) rather than
+  // re-wired per card -- catches the toggle click no matter how many
+  // times the wrap's innerHTML gets replaced. CONFIRMED REAL BUG,
+  // originally found here: re-attaching this listener on every render (on
+  // the same persistent wrap element, nothing removing the old one) meant
+  // each click fired every stacked listener at once -- an even
+  // accumulated count canceled out (looked completely broken), an odd
+  // count happened to net out to one real toggle (looked fine), purely by
+  // coincidence of how many times the list had been re-rendered before.
+  // Guarded so this only ever attaches once per wrap element, no matter
+  // how many times it's called. Shared between the live Publish Ranking
+  // list and Scorecard Review, since both use the same .pr-card/.pr-
+  // toggle-btn/.pr-details structure via publishRankCardHtml.
+  function wireDetailsToggle(wrap) {
+    if (wrap.dataset.toggleWired) return;
+    wrap.dataset.toggleWired = '1';
+    wrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('.pr-toggle-btn');
+      if (!btn) return;
+      const details = btn.closest('.pr-card').querySelector('.pr-details');
+      const showing = details.style.display !== 'none';
+      details.style.display = showing ? 'none' : 'block';
+      btn.innerHTML = showing ? 'Details &#9662;' : 'Details &#9652;';
+    });
+  }
+
+  function describeTierSignal(tier, rawSignal) {
+    if (!tier) return null;
+    let label = null;
+    if (rawSignal && rawSignal.startsWith('label:')) label = rawSignal.slice(6).split('@')[0];
+    else if (rawSignal && rawSignal.startsWith('lotto:')) label = rawSignal.slice(6);
+    return { tier, label };
+  }
+
+  function agreeingTierBadgeHtml(tier, rawSignal) {
+    const sig = describeTierSignal(tier, rawSignal);
+    if (!sig) return '';
+    const labelText = sig.label ? ` (${escapeHtml(sig.label)})` : '';
+    if (sig.tier >= 3) {
+      return ` <span style="background:var(--stamp-amber);color:#22281f;font-weight:bold;padding:1px 7px;border-radius:3px;">&#11088; his Tier ${sig.tier}${labelText}</span>`;
+    }
+    if (sig.tier > 0) {
+      return ` <span style="color:var(--stamp-amber);font-weight:bold;">&#11088; his Tier ${sig.tier}${labelText}</span>`;
+    }
+    return ` <span style="color:var(--stamp-red);font-weight:bold;">&#9660; his Tier ${sig.tier}${labelText}</span>`;
+  }
+
+  // opts.readOnly suppresses the Publish/Unpublish action button (shown
+  // instead as a static label) -- used by Scorecard Review, since a
+  // historical review screen shouldn't double as a place to accidentally
+  // publish/unpublish something. opts.resultBadge is an HTML string shown
+  // next to the score in the card head -- the live pending list never has
+  // one (nothing's graded yet), Scorecard Review always does.
+  function publishRankCardHtml(s, rank, opts) {
+    opts = opts || {};
+    const p = s.pick;
+    const propBit = (p.prop_player || p.prop_stat) ? ` — ${escapeHtml(p.prop_player || '')} ${escapeHtml(p.prop_stat || '')}`.trim() : '';
+    const streakLbl = streakLabel(s.streak);
+    const streakColor = s.streak.type === 'win' ? '#2d6a4f' : (s.streak.type === 'loss' ? '#8a2f3a' : 'var(--ink-soft)');
+    const betTypeName = p.bet_types ? p.bet_types.name : 'this bet type';
+
+    const hasLine = p.line !== null && p.line !== undefined;
+    const isTeamOverUnder = hasLine && isOverUnderStyleBetType(p.bet_types) && p.selection !== 'Over' && p.selection !== 'Under';
+    let callText;
+    if (p.selection === 'Over' || p.selection === 'Under') {
+      callText = `${escapeHtml(p.selection)}${hasLine ? ' ' + p.line : ''}`;
+    } else if (isTeamOverUnder) {
+      callText = `${escapeHtml(p.selection)} ${p.line < 0 ? 'Over' : 'Under'} ${Math.abs(p.line)}`;
+    } else {
+      callText = `${escapeHtml(p.selection)}${hasLine ? ' ' + (p.line > 0 ? '+' + p.line : p.line) : ''}`;
+    }
+
+    let conflictHtml = '';
+    if (s.conflicts && s.conflicts.length) {
+      conflictHtml = `
+      <div class="pr-confluence" style="border-color:var(--stamp-red);background:rgba(138,47,58,0.06);">
+        <div class="pr-confluence-header" style="color:var(--stamp-red);">&#9888; Head-to-head conflict — ${s.conflicts.length} other pending pick${s.conflicts.length === 1 ? '' : 's'} took the opposite side of this exact game</div>
+        ${s.conflicts.map(c => `
+          <div class="pr-agreeing-row">
+            <span class="pr-agreeing-name">${escapeHtml(c.capperName)} — ${escapeHtml(c.selection)}</span>
+            <span>Their score: <strong>${c.score}</strong> (this pick: <strong>${s.score.total}</strong>)</span>
+          </div>`).join('')}
+      </div>`;
+    }
+
+    let confluenceHtml = '';
+    if (s.isParlayCandidate) {
+      const allLegs = s.legConfluenceBreakdown || [];
+      if (allLegs.length) {
+        const gradedCount = s.combinedWinProbGradedLegCount || 0;
+        const liveCount = s.combinedWinProbLiveLegCount || 0;
+        const probColor = s.combinedWinProbPct === null ? 'var(--ink-soft)'
+          : (s.combinedWinProbPct >= 50 ? 'var(--stamp-green)' : (s.combinedWinProbPct >= 25 ? 'var(--stamp-amber)' : 'var(--stamp-red)'));
+        const probLabel = gradedCount
+          ? `Combined win estimate (${liveCount} of ${allLegs.length} legs still live)`
+          : `Combined win estimate (all ${allLegs.length} legs hitting)`;
+        const probHtml = s.combinedWinProbPct !== null ? `
+          <div class="pr-agreeing-row" style="border-bottom:1px solid var(--field);padding-bottom:8px;margin-bottom:8px;">
+            <span class="pr-agreeing-name" style="font-weight:bold;">${probLabel}</span>
+            <span style="color:${probColor};font-weight:bold;">${s.combinedWinProbPct}%</span>
+          </div>` : '';
+        confluenceHtml = `
+          <div class="pr-confluence">
+            <div class="pr-confluence-header">Legs (${allLegs.length}) — each scored as if standalone, confluence averaged across all (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
+            ${probHtml}
+            ${allLegs.map((l, legIdx) => {
+              const legHotAgreeing = l.agreeingCappers.filter(c => c.isHotStreak).length;
+              const legHotNote = legHotAgreeing >= 2
+                ? `<span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${legHotAgreeing} agreeing cappers on a hot streak too</span>` : '';
+              return `
+              <div class="pr-agreeing-row pr-leg-row${l.alreadyPublishedElsewhere ? ' pr-leg-published' : ''}" data-leg-key="${escapeHtml(l.legKey)}" style="border-bottom:1px dashed var(--field);padding-bottom:6px;margin-bottom:6px;">
+                <span class="pr-agreeing-name"><span style="font-weight:normal;color:var(--ink-soft);">Leg ${legIdx + 1}</span> — ${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''}</span>
+                <span class="pr-leg-published-note" style="display:${l.alreadyPublishedElsewhere ? 'inline' : 'none'};color:var(--stamp-green);font-weight:bold;">&#10003; Already published independently</span>
+                ${l.alreadyGraded
+                  ? `<span style="color:var(--ink-soft);">Already graded: <strong>${escapeHtml(l.alreadyGraded)}</strong> — no live score (outcome already known)</span>`
+                  : `<span>Standalone score: <strong>${l.standaloneScore}</strong> · ${l.agreeingCappers.length ? `${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)` : '<span style="color:var(--ink-soft);">no outside agreement</span>'}</span>`}
+                ${legHotNote}
+                ${l.agreeingCappers.map(c => `<div style="padding-left:14px;">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)}${c.isHotStreak ? ` <span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${c.streakLen}-game streak</span>` : ''} — Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</div>`).join('')}
+              </div>`;
+            }).join('')}
+          </div>`;
+      }
+    } else if (s.agreeingCappers.length) {
+      const highTierAgreeing = s.agreeingCappers.filter(c => c.tier >= 3).length;
+      const highTierNote = highTierAgreeing
+        ? ` — <span style="color:var(--stamp-amber);font-weight:bold;">${highTierAgreeing} of them at Tier 3+</span>`
+        : '';
+      const hotAgreeing = s.agreeingCappers.filter(c => c.isHotStreak).length;
+      const hotNote = hotAgreeing >= 2
+        ? ` — <span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${hotAgreeing} of them on a hot streak too</span>`
+        : '';
+      confluenceHtml = `
+      <div class="pr-confluence">
+        <div class="pr-confluence-header">Confluence — ${s.agreeingCappers.length} other capper${s.agreeingCappers.length === 1 ? '' : 's'} independently picked this same game (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)${highTierNote}${hotNote}</div>
+        ${s.agreeingCappers.map(c => `
+          <div class="pr-agreeing-row">
+            <span class="pr-agreeing-name">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);font-weight:normal;">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)}${c.isHotStreak ? ` <span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${c.streakLen}-game streak</span>` : ''}</span>
+            <span>Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</span>
+            <span>${escapeHtml(betTypeName)} in ${escapeHtml(p.sports ? p.sports.name : 'this sport')}: ${c.betTypeRecord} (${c.betTypeAdjPct}% blended)</span>
+          </div>`).join('')}
+      </div>`;
+    }
+
+    const tierColor = p.pick_tier < 0 ? 'var(--stamp-red)' : 'var(--stamp-amber)';
+    const tierIcon = p.pick_tier < 0 ? '&#9660;' : '&#11088;';
+    const tierBadge = p.pick_tier !== 0 ? `<span style="color:${tierColor};font-weight:bold;">${tierIcon} Tier ${p.pick_tier}</span> ` : '';
+    const tierStatBox = p.pick_tier !== 0 ? `
+        <div class="pr-stat">
+          <div class="pr-stat-label">Tier</div>
+          <div class="pr-stat-value" style="color:${tierColor};">Tier ${p.pick_tier} <span style="font-weight:normal;color:var(--ink-soft);">(${s.tierRecord}, ${s.tierAdjWinPctPct}% adj)</span></div>
+          <div class="pr-stat-sub">his own record specifically at this tier -- scales the nominal bonus</div>
+          <div class="pr-stat-pts">${s.score.tierPts >= 0 ? '+' : ''}${s.score.tierPts}pt</div>
+        </div>` : '';
+
+    const calibColor = s.score.tierCalibrationPts > 0 ? 'var(--stamp-green)' : (s.score.tierCalibrationPts < 0 ? 'var(--stamp-red)' : 'var(--ink-soft)');
+    const sampleNote = (!s.tierSampleMet && scoringConfig.tierCalibrationWeight)
+      ? ` <span style="font-weight:normal;color:var(--ink-soft);">(sample too small yet -- needs ${scoringConfig.tierCalibrationMinSample})</span>` : '';
+    const tierCalibrationStatBox = p.pick_tier !== 0 ? `
+        <div class="pr-stat">
+          <div class="pr-stat-label">Tier calibration</div>
+          <div class="pr-stat-value" style="color:${calibColor};">${s.tierRecord} at this tier${sampleNote}</div>
+          <div class="pr-stat-sub">vs. his own ${s.overallAdjPct}% overall -- rewards/penalizes how THIS tier compares to HIS baseline</div>
+          <div class="pr-stat-pts">${s.score.tierCalibrationPts >= 0 ? '+' : ''}${s.score.tierCalibrationPts}pt</div>
+        </div>` : '';
+
+    const isHotPick = s.streak.type === 'win' && s.streak.len >= scoringConfig.hotPickStreakThreshold;
+    const hotPickBadge = isHotPick ? `<span class="stamp" style="border-color:var(--stamp-amber);color:var(--stamp-amber);transform:none;margin-right:8px;">&#128293; Hot Pick</span>` : '';
+    const actionHtml = opts.readOnly
+      ? (p.is_published ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span>' : '<span style="color:var(--ink-soft);">Not published</span>')
+      : (p.is_published
+          ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span> <button type="button" class="ghost small unpublish-btn" data-id="' + p.id + '">Unpublish</button>'
+          : '<button type="button" class="publish-btn" data-id="' + p.id + '">Publish</button>');
+    return `
+    <div class="pr-card" data-pick-id="${p.id}">
+      <div class="pr-card-head">
+        <span class="pr-rank">#${rank}</span>
+        <span class="pr-score">${s.score.total}</span>
+        ${opts.resultBadge || ''}
+        ${hotPickBadge}
+        <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${callText}${propBit}</span>
+        <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')}</span>
+        <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
+        <span class="pr-action">${actionHtml}</span>
+      </div>
+      <div class="pr-details" style="display:none;">
+        <div class="pr-body">
+          <div class="pr-stat" style="min-width:100%;">
+            <div class="pr-stat-label">Capper</div>
+            <div class="pr-stat-value">${escapeHtml(p.cappers ? p.cappers.name : '—')}${tierBadge ? ' — ' + tierBadge : ''}</div>
+            <div class="pr-stat-sub">for reference only -- the score above, not who submitted it, is what should drive the publish decision</div>
+          </div>
+          <div class="pr-stat">
+            <div class="pr-stat-label">This sport + bet type</div>
+            <div class="pr-stat-value">${s.betTypeRecord} <span style="font-weight:normal;color:var(--ink-soft);">(${s.betTypeAdjPct}% blended)</span></div>
+            <div class="pr-stat-sub">vs. ${s.broadBetTypeAdjPct}% all-sport ${escapeHtml(betTypeName)} rate</div>
+            <div class="pr-stat-pts">${s.score.betTypePts >= 0 ? '+' : ''}${s.score.betTypePts}pt</div>
+          </div>
+          <div class="pr-stat">
+            <div class="pr-stat-label">Overall</div>
+            <div class="pr-stat-value">${s.overallRecord} <span style="font-weight:normal;color:var(--ink-soft);">(${s.overallAdjPct}% adj)</span></div>
+            <div class="pr-stat-pts">${s.score.overallPts >= 0 ? '+' : ''}${s.score.overallPts}pt</div>
+          </div>
+          <div class="pr-stat"${isHotPick ? ' style="background:rgba(212,161,42,0.15);border-radius:3px;"' : ''}>
+            <div class="pr-stat-label">Streak</div>
+            <div class="pr-stat-value" style="color:${streakColor};">${isHotPick ? '&#128293; ' : ''}${streakLbl}</div>
+            ${isHotPick ? `<div class="pr-stat-sub" style="color:var(--stamp-amber);font-weight:bold;">Hot Pick -- ${s.streak.len}-game win streak meets the ${scoringConfig.hotPickStreakThreshold}+ threshold</div>` : ''}
+            <div class="pr-stat-pts">${s.score.streakPts >= 0 ? '+' : ''}${s.score.streakPts}pt</div>
+          </div>
+          ${tierStatBox}
+          ${tierCalibrationStatBox}
+        </div>
+        ${conflictHtml}
+        ${confluenceHtml}
+      </div>
+    </div>`;
+  }
+
   async function runPublishRank() {
     const sportFilter = $('prSport').value;
     const from = $('prFrom').value;
@@ -12446,57 +12787,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // What changes is purely which section they're grouped into below.
       const today = new Date().toISOString().slice(0, 10);
 
-      // Base scoring components (overall, bet-type, tier, streak) work
-      // identically for a straight pick, a leg, OR a parlay candidate now --
-      // Pass 1 already gives a "Parlay" bet_type_id its own real record, and
-      // a parlay's own pick_tier is real since it became tier-taggable, so
-      // no special-casing is needed here at all. Only confluence (below)
-      // genuinely differs for a parlay.
-      function buildBaseEntry(p) {
-        const o = overallByCapper[p.capper_id] || { wins: 0, losses: 0 };
-        const bt = byCapperBetType[`${p.capper_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 }; // this bet type, all sports
-        const sbt = byCapperSportBetType[`${p.capper_id}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 }; // this exact sport + bet type
-        const streak = streakByCapper[p.capper_id] || { type: null, len: 0 };
-        const overallAdj = adjustedWinPct(o.wins, o.losses);
-        const broadBetTypeAdj = adjustedWinPct(bt.wins, bt.losses);
-        // The actual "bet type" score component: this exact sport+bet-type
-        // record, blended toward the broader all-sport bet-type rate as its
-        // prior (not a flat 50%) -- so "2-0 in Tennis Spreads" leans on
-        // "60% in Spreads overall" until enough Tennis-specific picks pile up.
-        const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
-        // How good is THIS capper specifically at THIS tier -- scales the
-        // tier bonus below. No tier-specific history yet lands at a neutral
-        // 50% (half credit), same starting point as every other adjusted
-        // rate here, until real results accumulate.
-        const tier = Number(p.pick_tier) || 0;
-        const t = byCapperTier[`${p.capper_id}::${tier}`] || { wins: 0, losses: 0 };
-        const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
-        const fmt = (n) => Math.round(n * 10) / 10; // weighted sums can be fractional (e.g. legs at 0.5)
-        return {
-          pick: p,
-          isLeg: !!p.is_parlay_leg,
-          isParlayCandidate: !!(p.bet_types && p.bet_types.name === 'Parlay'),
-          overallRecord: `${fmt(o.wins)}-${fmt(o.losses)}`,
-          overallAdj,
-          overallAdjPct: Math.round(overallAdj * 1000) / 10,
-          betTypeRecord: `${fmt(sbt.wins)}-${fmt(sbt.losses)}`, // sport-specific record shown to the user
-          broadBetTypeAdjPct: Math.round(broadBetTypeAdj * 1000) / 10, // all-sport rate used as the fallback prior
-          betTypeAdjPct: Math.round(betTypeAdj * 1000) / 10, // final blended %, this is what's actually scored
-          tierRecord: `${fmt(t.wins)}-${fmt(t.losses)}`, // this capper's own record specifically AT this tier
-          tierAdjWinPctPct: Math.round(tierAdjWinPct * 1000) / 10,
-          tierSampleMet: (t.wins + t.losses) >= scoringConfig.tierCalibrationMinSample,
-          streak,
-          base: scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, t.wins, t.losses)
-        };
-      }
+      // buildBaseEntry/scoreConfluenceFor are now shared (top-level, above
+      // runPublishRank) so Scorecard Review can call the exact same
+      // functions with a different (point-in-time) stats snapshot -- this
+      // pass just packages ITS OWN live "full current history" stats into
+      // the shape they expect.
+      const liveStats = { overallByCapper, byCapperBetType, byCapperSportBetType, byCapperTier, streakByCapper };
 
       // withBaseAll = the FULL confluence pool (candidates + legs) -- a leg
       // needs its own overallAdj etc. computed so it can serve as evidence
       // for other cappers, even though it's never rendered as its own
       // candidate row below. Parlay candidates are built separately since
       // they're never confluence evidence for anyone else.
-      const withBaseAll = confluencePool.map(buildBaseEntry);
-      const parlayBaseEntries = parlayCandidatePool.map(buildBaseEntry);
+      const withBaseAll = confluencePool.map(p => buildBaseEntry(p, liveStats));
+      const parlayBaseEntries = parlayCandidatePool.map(p => buildBaseEntry(p, liveStats));
 
       // Group by "same pick" to find confluence, then compute each pick's
       // confluence points from the OTHER cappers in its group. Past-due and
@@ -12510,33 +12814,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         groups[key].push(entry);
       });
 
-      function scoreConfluenceFor(entry) {
-        const group = groups[confluenceKey(entry.pick)] || [];
-        const others = group.filter(o => o.pick.capper_id !== entry.pick.capper_id);
-        return {
-          confPts: confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) }))),
-          agreeingCappers: others.map(o => ({
-            name: o.pick.cappers ? o.pick.cappers.name : '—',
-            overallRecord: o.overallRecord,
-            overallAdjPct: o.overallAdjPct,
-            betTypeRecord: o.betTypeRecord, // this same sport+bet-type combo, for their capper
-            betTypeAdjPct: o.betTypeAdjPct,
-            isLeg: o.isLeg,
-            tier: o.pick.pick_tier, // THIS agreeing capper's own confidence on THIS pick -- an
-            rawSignal: o.pick.raw_confidence_signal, // agreement called at his own Tier 4 means far more than one at Tier 0
-            // CONFIRMED real need, direct report: "if multiple cappers within
-            // that pick are hot a notification beside the ones that agree
-            // with the capper as that would be a huge indicator boost if I
-            // saw 2 or more cappers on 10+ winning streaks agreed." Same
-            // hot-streak rule used everywhere else (win streak >= configured
-            // threshold), computed per AGREEING capper here so the render
-            // can flag it directly next to their name, and count how many
-            // agreeing cappers are hot at once.
-            isHotStreak: o.streak.type === 'win' && o.streak.len >= scoringConfig.hotPickStreakThreshold,
-            streakLen: o.streak.len
-          }))
-        };
-      }
+      // scoreConfluenceFor(entry, groups) is now the shared top-level
+      // version above -- everything below just calls it with `groups`.
 
       // Fetch which legs belong to which parlay candidate, so a parlay's
       // OWN confluence can be computed from each of its legs' individual
@@ -12591,53 +12870,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       );
       const publishedStraightKeySet = new Set(publishedStraightRows.map(confluenceKey));
 
-      function scoreParlayConfluence(entry) {
-        const legIds = parlayLegIdsByParlayId[entry.pick.id] || [];
-        const legBreakdown = legIds.map(legId => {
-          const details = legDetailsById[legId];
-          if (!details) return null; // leg row itself no longer exists (deleted) -- genuinely nothing to show
-          const legKey = confluenceKey(details);
-          const alreadyPublishedElsewhere = publishedStraightKeySet.has(legKey);
-          const legEntry = withBaseAllById[legId];
-          if (!legEntry) {
-            // Already graded (or otherwise not in the live pending pool) --
-            // still show which game this leg actually is, just without a
-            // live pre-game score, since scoring a decided outcome isn't
-            // meaningful.
-            return {
-              selection: details.selection, line: details.line, confPts: 0, agreeingCappers: [],
-              standaloneScore: null, overallAdjPct: null, alreadyGraded: details.result, alreadyPublishedElsewhere, legKey
-            };
-          }
-          const { confPts, agreeingCappers } = scoreConfluenceFor(legEntry);
-          // Same score a leg would get if it were ever rendered as its own
-          // standalone candidate (it never is -- see the note above on why
-          // legs don't get their own card) -- surfaced here so a parlay's
-          // OWN card can show whether each leg actually holds up on its own
-          // merit, or whether the parlay's total is mostly just riding the
-          // capper's overall streak/record. CONFIRMED real need, direct
-          // report: a 4-leg parlay scored highly almost entirely off the
-          // capper's own 10-game win streak, with no visibility into
-          // whether any individual leg was actually strong -- exactly the
-          // "lotto parlay" case a flat aggregate score can hide.
-          const legTotal = legEntry.base.overallPts + legEntry.base.betTypePts + legEntry.base.streakPts
-            + legEntry.base.tierPts + legEntry.base.tierCalibrationPts + confPts;
-          return {
-            selection: legEntry.pick.selection, line: legEntry.pick.line, confPts, agreeingCappers,
-            standaloneScore: Math.round(legTotal * 10) / 10,
-            overallAdjPct: legEntry.overallAdjPct, alreadyGraded: null, alreadyPublishedElsewhere, legKey
-          };
-        }).filter(Boolean);
-        // Combined win-probability below only makes sense across legs that
-        // are still genuinely live -- an already-graded leg's "win chance"
-        // isn't a probability anymore, it's a known fact, so it's excluded
-        // from that specific multiplication (still shown on the card with
-        // its real result instead).
-        const confPts = legBreakdown.length
-          ? legBreakdown.reduce((sum, l) => sum + l.confPts, 0) / legBreakdown.length
-          : 0;
-        return { confPts, legBreakdown };
-      }
+      // scoreParlayConfluence(entry, ctx) is now the shared top-level
+      // version above -- this pass just packages its own live pool data
+      // into the ctx shape it expects.
+      const parlayCtx = { groups, parlayLegIdsByParlayId, legDetailsById, withBaseAllById, publishedStraightKeySet };
 
       // Only genuine standalone calls (and, opt-in, parlay candidates) are
       // ever scored/rendered as their own candidate -- legs exist in
@@ -12645,7 +12881,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const straightCandidateEntries = withBaseAll.filter(e => !e.isLeg);
 
       const scoredStraight = straightCandidateEntries.map(entry => {
-        const { confPts, agreeingCappers } = scoreConfluenceFor(entry);
+        const { confPts, agreeingCappers } = scoreConfluenceFor(entry, groups);
         const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
         return {
           ...entry,
@@ -12663,7 +12899,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       });
 
       const scoredParlays = parlayBaseEntries.map(entry => {
-        const { confPts, legBreakdown } = scoreParlayConfluence(entry);
+        const { confPts, legBreakdown } = scoreParlayConfluence(entry, parlayCtx);
         const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
         // Rough "how likely is EVERY still-pending leg to hit" estimate --
         // each live leg's own adjusted win% (this capper's blended
@@ -12701,63 +12937,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         };
       });
 
-      // Head-to-head conflict detection -- CONFIRMED as a real scoring gap
-      // by the project owner: two opposing picks for the SAME real game can
-      // each score well independently (a hot-streak capper on the Yankees
-      // ML and a different hot-streak capper on the Blue Jays ML when
-      // they're playing each other; or a crowd of average cappers piling
-      // onto one side while the single best capper calls the other side)
-      // since nothing today checks whether a high-scoring pick is directly
-      // contradicted by another high-scoring pick. rundown_event_id (set by
-      // schedule sync) is the real, specific game a pick was matched to --
-      // two picks sharing it with DIFFERENT selections are unambiguously
-      // opposing sides of the same game, not just a matching-logic guess.
-      // Scoped to straight picks only, same bet type only (Moneyline vs
-      // Moneyline, Over vs Under) per the project owner's own call -- this
-      // is Stage 1, surfacing the conflict for a human decision, not yet
-      // adjusting the score itself; that's a deliberate follow-on once
-      // there's real data on how these actually resolve.
-      const conflictGroups = {};
-      scoredStraight.forEach(e => {
-        const eventId = e.pick.rundown_event_id;
-        if (!eventId) return; // not schedule-synced yet -- nothing to safely compare against
-        const key = `${eventId}::${e.pick.bet_type_id}`;
-        if (!conflictGroups[key]) conflictGroups[key] = [];
-        conflictGroups[key].push(e);
-      });
-      Object.values(conflictGroups).forEach(group => {
-        const distinctSelections = new Set(group.map(e => e.pick.selection));
-        if (distinctSelections.size < 2) return; // same side, multiple cappers -- that's confluence, not conflict
-        group.forEach(e => {
-          e.conflicts = group
-            .filter(o => o.pick.selection !== e.pick.selection)
-            .map(o => ({ capperName: o.pick.cappers ? o.pick.cappers.name : '—', selection: o.pick.selection, score: o.score.total }));
-        });
-      });
-
-      // Dedup straight candidates down to one card per real bet -- direct
-      // request: multiple cappers independently calling the SAME
-      // game/bet-type/selection each produced their own separate top-level
-      // card, even though the confluence math on the highest scorer
-      // already accounts for every other capper backing it. "The score
-      // should drive this, then the information below is what we use to
-      // analyze why it has that score" -- so only the single
-      // highest-scoring entry per group survives as its own card; every
-      // other capper on the same bet is still fully visible in that
-      // survivor's own confluence breakdown, just no longer duplicated as
-      // a separate card. Grouped by the exact same key confluence itself
-      // already uses, computed AFTER head-to-head conflict detection above
-      // (which needs the full, un-deduped set to correctly find opposing
-      // selections on the same game) -- dedup only ever drops redundant
-      // SAME-selection duplicates, never touches conflicting ones.
-      const scoredStraightByGroup = {};
-      scoredStraight.forEach(entry => {
-        const key = confluenceKey(entry.pick);
-        if (!scoredStraightByGroup[key] || entry.score.total > scoredStraightByGroup[key].score.total) {
-          scoredStraightByGroup[key] = entry;
-        }
-      });
-      const dedupedStraight = Object.values(scoredStraightByGroup);
+      // Head-to-head conflict detection + dedup to one card per real bet
+      // is now the shared finalizeStraightScored() above -- see its own
+      // comment for the full reasoning (unchanged from before).
+      const dedupedStraight = finalizeStraightScored(scoredStraight);
 
       const allScored = dedupedStraight.concat(scoredParlays);
 
@@ -12799,289 +12982,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     function renderPastDueCards(pickTypeFilter) {
       if (!pastDueScored || !pastDueScored.length) return;
       const filtered = pastDueScored.filter(s => pickTypeMatches(s, pickTypeFilter));
-      const cardsHtml = filtered.map(s => cardHtml(s, pastDueScored.indexOf(s) + 1)).join('');
+      const cardsHtml = filtered.map(s => publishRankCardHtml(s, pastDueScored.indexOf(s) + 1)).join('');
       $('pastDueCardsWrap').innerHTML = cardsHtml || '<div class="empty-state">Nothing matches that filter.</div>';
       wireCardActions(filtered);
     }
 
-    // An agreeing capper's OWN confidence on this exact pick matters just as
-    // much as the fact that he agrees at all -- a capper who independently
-    // called this his own Tier 4 "Whale Play" is a far stronger signal than
-    // one who called it at his base Tier 0, even though both count as one
-    // agreeing capper today. raw_confidence_signal (added alongside the
-    // per-capper relative tier engine) carries that capper's own branding
-    // for the signal when it's a label, e.g. "label:Whale" -- shown here so
-    // "Tier 4" reads as "Tier 4 (Whale)" instead of a bare number.
-    function describeTierSignal(tier, rawSignal) {
-      if (!tier) return null;
-      let label = null;
-      if (rawSignal && rawSignal.startsWith('label:')) label = rawSignal.slice(6).split('@')[0];
-      else if (rawSignal && rawSignal.startsWith('lotto:')) label = rawSignal.slice(6);
-      return { tier, label };
-    }
-
-    function agreeingTierBadgeHtml(tier, rawSignal) {
-      const sig = describeTierSignal(tier, rawSignal);
-      if (!sig) return '';
-      const labelText = sig.label ? ` (${escapeHtml(sig.label)})` : '';
-      if (sig.tier >= 3) {
-        // High-confidence agreement -- deliberately the loudest thing in
-        // the row, since this is the exact case worth stopping to notice.
-        return ` <span style="background:var(--stamp-amber);color:#22281f;font-weight:bold;padding:1px 7px;border-radius:3px;">&#11088; his Tier ${sig.tier}${labelText}</span>`;
-      }
-      if (sig.tier > 0) {
-        return ` <span style="color:var(--stamp-amber);font-weight:bold;">&#11088; his Tier ${sig.tier}${labelText}</span>`;
-      }
-      return ` <span style="color:var(--stamp-red);font-weight:bold;">&#9660; his Tier ${sig.tier}${labelText}</span>`;
-    }
-
-    function cardHtml(s, rank) {
-      const p = s.pick;
-      const propBit = (p.prop_player || p.prop_stat) ? ` — ${escapeHtml(p.prop_player || '')} ${escapeHtml(p.prop_stat || '')}`.trim() : '';
-      const streakLbl = streakLabel(s.streak);
-      const streakColor = s.streak.type === 'win' ? '#2d6a4f' : (s.streak.type === 'loss' ? '#8a2f3a' : 'var(--ink-soft)');
-      const betTypeName = p.bet_types ? p.bet_types.name : 'this bet type';
-
-      // Assembles the actual call into one readable phrase, e.g. "Carolina
-      // Hurricanes -1.5" or "Over 220.5" -- direct report: "I can see this
-      // is Philadelphia Phillies but it's not very clear this is Moneyline
-      // First5... I can also see there is a spread bet but not what the
-      // spread they are calling is." Two real phrasing cases:
-      // Selection literally "Over"/"Under" (player props, and older
-      // free-text Total entries) already encodes direction, so the line
-      // just appends directly ("Over 220.5"). Everything else with a line
-      // (Spread, and the newer Team 1/Team 2 matchup-field entries) shows
-      // an explicit sign so a positive number never reads as ambiguous
-      // ("Carolina Hurricanes -1.5", not "Carolina Hurricanes 1.5"). NOTE:
-      // for the matchup-field Over/Under bet types specifically, the line
-      // has no stored direction at all (no Over/Under toggle exists on
-      // that entry form the way Player Prop's sign convention does) --
-      // this shows the signed number as-is, it can't invent a direction
-      // that was never captured.
-      const hasLine = p.line !== null && p.line !== undefined;
-      // Team-based Over/Under (Team 1/Team 2 matchup-field entries) now
-      // carries a real direction via the same sign convention Player Props
-      // use (negative = Over, positive = Under) -- phrased out explicitly
-      // here ("Yankees/Blue Jays Over 7.5") rather than left as a bare
-      // signed number, since nobody's backing a team on one of these, the
-      // team names just identify the game.
-      const isTeamOverUnder = hasLine && isOverUnderStyleBetType(p.bet_types) && p.selection !== 'Over' && p.selection !== 'Under';
-      let callText;
-      if (p.selection === 'Over' || p.selection === 'Under') {
-        callText = `${escapeHtml(p.selection)}${hasLine ? ' ' + p.line : ''}`;
-      } else if (isTeamOverUnder) {
-        callText = `${escapeHtml(p.selection)} ${p.line < 0 ? 'Over' : 'Under'} ${Math.abs(p.line)}`;
-      } else {
-        callText = `${escapeHtml(p.selection)}${hasLine ? ' ' + (p.line > 0 ? '+' + p.line : p.line) : ''}`;
-      }
-
-      // Head-to-head conflict -- a DIFFERENT candidate pick landed the
-      // opposite side of this exact same real game (same rundown_event_id,
-      // same bet type, different selection). Shown ABOVE confluence and in
-      // red, deliberately louder than agreement -- this is the case worth
-      // stopping and looking at before publishing either side, not a
-      // background data point.
-      let conflictHtml = '';
-      if (s.conflicts && s.conflicts.length) {
-        conflictHtml = `
-        <div class="pr-confluence" style="border-color:var(--stamp-red);background:rgba(138,47,58,0.06);">
-          <div class="pr-confluence-header" style="color:var(--stamp-red);">&#9888; Head-to-head conflict — ${s.conflicts.length} other pending pick${s.conflicts.length === 1 ? '' : 's'} took the opposite side of this exact game</div>
-          ${s.conflicts.map(c => `
-            <div class="pr-agreeing-row">
-              <span class="pr-agreeing-name">${escapeHtml(c.capperName)} — ${escapeHtml(c.selection)}</span>
-              <span>Their score: <strong>${c.score}</strong> (this pick: <strong>${s.score.total}</strong>)</span>
-            </div>`).join('')}
-        </div>`;
-      }
-
-      // A parlay candidate's confluence is the AVERAGE of each of its own
-      // legs' confluence -- how much outside agreement exists on each team
-      // in the combo -- not a match on its own meaningless "N-Leg Parlay"
-      // selection text. Shown per leg since a single flat list wouldn't
-      // make sense here (each leg has its own, potentially different,
-      // agreeing cappers).
-      let confluenceHtml = '';
-      if (s.isParlayCandidate) {
-        // Every leg, always -- previously filtered to only legs WITH
-        // outside agreement, which silently hid any leg nobody else had
-        // picked (the exact legs most worth a second look before
-        // publishing). CONFIRMED real gap, direct report: a 4-leg parlay's
-        // card only showed 2 of its 4 legs for this reason, with no way to
-        // see the other 2 without leaving this tool for the All Picks
-        // pop-out's separate "LEGS" expand.
-        const allLegs = s.legConfluenceBreakdown || [];
-        if (allLegs.length) {
-          const gradedCount = s.combinedWinProbGradedLegCount || 0;
-          const liveCount = s.combinedWinProbLiveLegCount || 0;
-          const probColor = s.combinedWinProbPct === null ? 'var(--ink-soft)'
-            : (s.combinedWinProbPct >= 50 ? 'var(--stamp-green)' : (s.combinedWinProbPct >= 25 ? 'var(--stamp-amber)' : 'var(--stamp-red)'));
-          // Label is explicit about how many of the parlay's legs the
-          // estimate actually covers whenever it's not all of them --
-          // CONFIRMED real confusion otherwise: a 4-leg parlay showing "all
-          // 2 legs hitting" (silently meaning only 2 of 4 were still live)
-          // read as if the parlay only had 2 legs at all, not that 2 more
-          // were already decided.
-          const probLabel = gradedCount
-            ? `Combined win estimate (${liveCount} of ${allLegs.length} legs still live)`
-            : `Combined win estimate (all ${allLegs.length} legs hitting)`;
-          const probHtml = s.combinedWinProbPct !== null ? `
-            <div class="pr-agreeing-row" style="border-bottom:1px solid var(--field);padding-bottom:8px;margin-bottom:8px;">
-              <span class="pr-agreeing-name" style="font-weight:bold;">${probLabel}</span>
-              <span style="color:${probColor};font-weight:bold;">${s.combinedWinProbPct}%</span>
-            </div>` : '';
-          confluenceHtml = `
-            <div class="pr-confluence">
-              <div class="pr-confluence-header">Legs (${allLegs.length}) — each scored as if standalone, confluence averaged across all (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)</div>
-              ${probHtml}
-              ${allLegs.map((l, legIdx) => {
-                const legHotAgreeing = l.agreeingCappers.filter(c => c.isHotStreak).length;
-                const legHotNote = legHotAgreeing >= 2
-                  ? `<span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${legHotAgreeing} agreeing cappers on a hot streak too</span>` : '';
-                // data-leg-key + stable, always-present (just hidden) note
-                // element -- refreshPublishedLegFlags() below toggles these
-                // directly via a lightweight re-fetch, without needing a
-                // full "Rank pending picks" re-scan or access back into this
-                // closure's own legDetailsById.
-                return `
-                <div class="pr-agreeing-row pr-leg-row${l.alreadyPublishedElsewhere ? ' pr-leg-published' : ''}" data-leg-key="${escapeHtml(l.legKey)}" style="border-bottom:1px dashed var(--field);padding-bottom:6px;margin-bottom:6px;">
-                  <span class="pr-agreeing-name"><span style="font-weight:normal;color:var(--ink-soft);">Leg ${legIdx + 1}</span> — ${escapeHtml(l.selection)}${l.line !== null && l.line !== undefined ? ` (${l.line})` : ''}</span>
-                  <span class="pr-leg-published-note" style="display:${l.alreadyPublishedElsewhere ? 'inline' : 'none'};color:var(--stamp-green);font-weight:bold;">&#10003; Already published independently</span>
-                  ${l.alreadyGraded
-                    ? `<span style="color:var(--ink-soft);">Already graded: <strong>${escapeHtml(l.alreadyGraded)}</strong> — no live score (outcome already known)</span>`
-                    : `<span>Standalone score: <strong>${l.standaloneScore}</strong> · ${l.agreeingCappers.length ? `${l.agreeingCappers.length} agreeing (${l.confPts >= 0 ? '+' : ''}${Math.round(l.confPts * 10) / 10}pt)` : '<span style="color:var(--ink-soft);">no outside agreement</span>'}</span>`}
-                  ${legHotNote}
-                  ${l.agreeingCappers.map(c => `<div style="padding-left:14px;">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)}${c.isHotStreak ? ` <span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${c.streakLen}-game streak</span>` : ''} — Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</div>`).join('')}
-                </div>`;
-              }).join('')}
-            </div>`;
-        }
-      } else if (s.agreeingCappers.length) {
-        const highTierAgreeing = s.agreeingCappers.filter(c => c.tier >= 3).length;
-        const highTierNote = highTierAgreeing
-          ? ` — <span style="color:var(--stamp-amber);font-weight:bold;">${highTierAgreeing} of them at Tier 3+</span>`
-          : '';
-        // CONFIRMED real need, direct report: "if multiple cappers within
-        // that pick are hot a notification beside the ones that agree with
-        // the capper as that would be a huge indicator boost if I saw 2 or
-        // more cappers on 10+ winning streaks agreed." Called out loudly in
-        // the header when 2+ agreeing cappers are independently hot, not
-        // just per-name badges -- this is specifically the "huge indicator
-        // boost" case worth surfacing at a glance, not something to notice
-        // only after reading every row.
-        const hotAgreeing = s.agreeingCappers.filter(c => c.isHotStreak).length;
-        const hotNote = hotAgreeing >= 2
-          ? ` — <span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${hotAgreeing} of them on a hot streak too</span>`
-          : '';
-        confluenceHtml = `
-        <div class="pr-confluence">
-          <div class="pr-confluence-header">Confluence — ${s.agreeingCappers.length} other capper${s.agreeingCappers.length === 1 ? '' : 's'} independently picked this same game (${s.score.confluencePts >= 0 ? '+' : ''}${s.score.confluencePts}pt)${highTierNote}${hotNote}</div>
-          ${s.agreeingCappers.map(c => `
-            <div class="pr-agreeing-row">
-              <span class="pr-agreeing-name">${escapeHtml(c.name)}${c.isLeg ? ' <span style="color:var(--stamp-amber);font-weight:normal;">(parlay leg — half weight)</span>' : ''}${agreeingTierBadgeHtml(c.tier, c.rawSignal)}${c.isHotStreak ? ` <span style="color:var(--stamp-amber);font-weight:bold;">&#128293; ${c.streakLen}-game streak</span>` : ''}</span>
-              <span>Overall: ${c.overallRecord} (${c.overallAdjPct}% adj)</span>
-              <span>${escapeHtml(betTypeName)} in ${escapeHtml(p.sports ? p.sports.name : 'this sport')}: ${c.betTypeRecord} (${c.betTypeAdjPct}% blended)</span>
-            </div>`).join('')}
-        </div>`;
-      }
-
-      const tierColor = p.pick_tier < 0 ? 'var(--stamp-red)' : 'var(--stamp-amber)';
-      const tierIcon = p.pick_tier < 0 ? '&#9660;' : '&#11088;';
-      const tierBadge = p.pick_tier !== 0 ? `<span style="color:${tierColor};font-weight:bold;">${tierIcon} Tier ${p.pick_tier}</span> ` : '';
-      const tierStatBox = p.pick_tier !== 0 ? `
-          <div class="pr-stat">
-            <div class="pr-stat-label">Tier</div>
-            <div class="pr-stat-value" style="color:${tierColor};">Tier ${p.pick_tier} <span style="font-weight:normal;color:var(--ink-soft);">(${s.tierRecord}, ${s.tierAdjWinPctPct}% adj)</span></div>
-            <div class="pr-stat-sub">his own record specifically at this tier -- scales the nominal bonus</div>
-            <div class="pr-stat-pts">${s.score.tierPts >= 0 ? '+' : ''}${s.score.tierPts}pt</div>
-          </div>` : '';
-
-      // Separate from the nominal tier bonus above -- this compares his OWN
-      // tier record against his OWN overall rate, not a flat 50%, so it can
-      // reward/penalize individual calibration even while the nominal bonus
-      // for this tier sits at 0. Sample note only shows once the weight is
-      // actually on, since below-minimum is a non-issue while it's off anyway.
-      const calibColor = s.score.tierCalibrationPts > 0 ? 'var(--stamp-green)' : (s.score.tierCalibrationPts < 0 ? 'var(--stamp-red)' : 'var(--ink-soft)');
-      const sampleNote = (!s.tierSampleMet && scoringConfig.tierCalibrationWeight)
-        ? ` <span style="font-weight:normal;color:var(--ink-soft);">(sample too small yet -- needs ${scoringConfig.tierCalibrationMinSample})</span>` : '';
-      const tierCalibrationStatBox = p.pick_tier !== 0 ? `
-          <div class="pr-stat">
-            <div class="pr-stat-label">Tier calibration</div>
-            <div class="pr-stat-value" style="color:${calibColor};">${s.tierRecord} at this tier${sampleNote}</div>
-            <div class="pr-stat-sub">vs. his own ${s.overallAdjPct}% overall -- rewards/penalizes how THIS tier compares to HIS baseline</div>
-            <div class="pr-stat-pts">${s.score.tierCalibrationPts >= 0 ? '+' : ''}${s.score.tierCalibrationPts}pt</div>
-          </div>` : '';
-
-      // CONFIRMED real need, direct report: "there's a lot of scrolling and
-      // the data while super valid might be too much all at once if we are
-      // pressed for time... a super clean quick view of the say top 10
-      // picks their score so that when time is of the essence we can make
-      // quick judgements." Card head (rank/score/pick/bet type/spread-or-
-      // total value) is unchanged and already IS that quick-glance row --
-      // what changes is everything below it (stat boxes, conflict warning,
-      // confluence/legs) now starts collapsed behind a "Details" toggle,
-      // shown only on demand, so a long ranked list reads as one line per
-      // pick by default with the deep-dive still one click away.
-      // Tier badge dropped from the header -- direct report: "The Tier
-      // ranking for each pick is irrelevant as that's a capper marker...
-      // it's not a tier 4 overall pick for everyone so that's misleading"
-      // when shown as a bare banner badge. Still shown properly framed
-      // ("his own record specifically at this tier") in the Details stat
-      // boxes below -- only the misleading bare badge is removed.
-      //
-      // Hot Pick flag added instead -- direct report: "I noticed when I
-      // published A11's picks it was a hot pick but I wouldn't know that
-      // before publishing and that's something I should absolutely get
-      // flagged on... Score/Confluence/Streaks are what should drive our
-      // decision." Computed identically to the real publish-time flag
-      // (wireActionCell below sets published_was_hot the same way), just
-      // surfaced here BEFORE publishing instead of only after.
-      const isHotPick = s.streak.type === 'win' && s.streak.len >= scoringConfig.hotPickStreakThreshold;
-      const hotPickBadge = isHotPick ? `<span class="stamp" style="border-color:var(--stamp-amber);color:var(--stamp-amber);transform:none;margin-right:8px;">&#128293; Hot Pick</span>` : '';
-      return `
-      <div class="pr-card" data-pick-id="${p.id}">
-        <div class="pr-card-head">
-          <span class="pr-rank">#${rank}</span>
-          <span class="pr-score">${s.score.total}</span>
-          ${hotPickBadge}
-          <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${callText}${propBit}</span>
-          <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')}</span>
-          <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
-          <span class="pr-action">${p.is_published
-            ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span> <button type="button" class="ghost small unpublish-btn" data-id="' + p.id + '">Unpublish</button>'
-            : '<button type="button" class="publish-btn" data-id="' + p.id + '">Publish</button>'}</span>
-        </div>
-        <div class="pr-details" style="display:none;">
-          <div class="pr-body">
-            <div class="pr-stat" style="min-width:100%;">
-              <div class="pr-stat-label">Capper</div>
-              <div class="pr-stat-value">${escapeHtml(p.cappers ? p.cappers.name : '—')}${tierBadge ? ' — ' + tierBadge : ''}</div>
-              <div class="pr-stat-sub">for reference only -- the score above, not who submitted it, is what should drive the publish decision</div>
-            </div>
-            <div class="pr-stat">
-              <div class="pr-stat-label">This sport + bet type</div>
-              <div class="pr-stat-value">${s.betTypeRecord} <span style="font-weight:normal;color:var(--ink-soft);">(${s.betTypeAdjPct}% blended)</span></div>
-              <div class="pr-stat-sub">vs. ${s.broadBetTypeAdjPct}% all-sport ${escapeHtml(betTypeName)} rate</div>
-              <div class="pr-stat-pts">${s.score.betTypePts >= 0 ? '+' : ''}${s.score.betTypePts}pt</div>
-            </div>
-            <div class="pr-stat">
-              <div class="pr-stat-label">Overall</div>
-              <div class="pr-stat-value">${s.overallRecord} <span style="font-weight:normal;color:var(--ink-soft);">(${s.overallAdjPct}% adj)</span></div>
-              <div class="pr-stat-pts">${s.score.overallPts >= 0 ? '+' : ''}${s.score.overallPts}pt</div>
-            </div>
-            <div class="pr-stat"${isHotPick ? ' style="background:rgba(212,161,42,0.15);border-radius:3px;"' : ''}>
-              <div class="pr-stat-label">Streak</div>
-              <div class="pr-stat-value" style="color:${streakColor};">${isHotPick ? '&#128293; ' : ''}${streakLbl}</div>
-              ${isHotPick ? `<div class="pr-stat-sub" style="color:var(--stamp-amber);font-weight:bold;">Hot Pick -- ${s.streak.len}-game win streak meets the ${scoringConfig.hotPickStreakThreshold}+ threshold</div>` : ''}
-              <div class="pr-stat-pts">${s.score.streakPts >= 0 ? '+' : ''}${s.score.streakPts}pt</div>
-            </div>
-            ${tierStatBox}
-            ${tierCalibrationStatBox}
-          </div>
-          ${conflictHtml}
-          ${confluenceHtml}
-        </div>
-      </div>`;
-    }
 
     const publishedCount = scored.filter(s => s.pick.is_published).length;
     const conflictCount = scored.filter(s => s.conflicts && s.conflicts.length).length;
@@ -13102,7 +13007,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // Rank shown always reflects position in the FULL sorted list, not
       // the filtered view -- so "#1" still means "#1 overall," even when
       // searching narrows what's on screen.
-      const cardsHtml = filtered.map(s => cardHtml(s, scored.indexOf(s) + 1)).join('');
+      const cardsHtml = filtered.map(s => publishRankCardHtml(s, scored.indexOf(s) + 1)).join('');
       $('prCardsWrap').innerHTML = cardsHtml || '<div class="empty-state">No pending picks match these filters.</div>';
       wireCardActions(filtered);
       renderPastDueCards(pickTypeFilter);
@@ -13158,17 +13063,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // pending picks" had been clicked before, nothing to do with parlays
     // themselves. Guarded so this only ever attaches once per page load,
     // no matter how many times renderPublishRank() re-runs.
-    if (!wrap.dataset.toggleWired) {
-      wrap.dataset.toggleWired = '1';
-      wrap.addEventListener('click', (e) => {
-        const btn = e.target.closest('.pr-toggle-btn');
-        if (!btn) return;
-        const details = btn.closest('.pr-card').querySelector('.pr-details');
-        const showing = details.style.display !== 'none';
-        details.style.display = showing ? 'none' : 'block';
-        btn.innerHTML = showing ? 'Details &#9662;' : 'Details &#9652;';
-      });
-    }
+    wireDetailsToggle(wrap);
     applyFilterAndRender();
 
     function renderActionCell(pickId, isPublished) {
@@ -13776,99 +13671,156 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const targetDate = $('scDate').value;
     const wrap = $('scorecardWrap');
     if (!targetDate) { alert('Pick a date first.'); return; }
-    wrap.innerHTML = '<div class="empty-state">Re-scoring every pick from this date using only data that existed at the time...</div>';
+    wrap.innerHTML = '<div class="empty-state">Re-scoring every pick from this date using only data that existed before it...</div>';
 
     await loadScoringConfig();
 
     try {
-      // Everything on or before the target date -- picks strictly before it
-      // build the running point-in-time stats; picks ON it are what
-      // actually get displayed. Deliberately NOT filtered by is_published
-      // or result -- an unpublished or still-pending pick needs to go
-      // through this exact same walk to be scored fairly.
-      const query = `picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,prop_team,event_date,created_at,result,pick_tier,is_parlay_leg,is_published,cappers(name),sports(name),bet_types(name)&event_date=lte.${targetDate}&order=event_date.asc,created_at.asc`;
-      const picksRaw = await restAllPages(query);
-      // Same "never a standalone candidate" exclusion as Backtest/Publish
-      // Ranking -- a Parlay wrapper row is never itself scored (legs are
-      // filtered out further down, after they've had their chance to count
-      // as confluence evidence for others, same order as Backtest).
-      const picks = picksRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
-
-      if (!picks.length) {
-        wrap.innerHTML = `<div class="empty-state">No picks found on or before ${targetDate}.</div>`;
-        return;
-      }
+      // Pass 1 (point-in-time): every GRADED pick strictly BEFORE the
+      // target date -- the exact same aggregation Publish Ranking's own
+      // Pass 1 does for "right now," just frozen at the START of this
+      // date instead of today. This is what makes the result "exactly as
+      // I would have seen it" on that actual day -- using today's full
+      // history instead would silently use information that didn't exist
+      // yet (the same lookahead problem Formula Backtest already guards
+      // against).
+      const gradedQuery = `picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at,is_parlay_leg,pick_tier,bet_types(name)&result=in.(win,loss,push)&event_date=lt.${targetDate}&order=id.asc`;
+      const gradedRaw = await restAllPages(gradedQuery);
 
       const overallByCapper = {};
-      const broadBetTypeByCapper = {};
-      const sportBetTypeByCapper = {};
-      const tierByCapper = {};
-      const historyByCapper = {};
-
-      const scored = picks.map(p => {
-        const cap = p.capper_id;
+      const byCapperBetType = {};
+      const byCapperSportBetType = {};
+      const byCapperTier = {};
+      gradedRaw.forEach(p => {
+        const isParlayUnit = !!(p.bet_types && p.bet_types.name === 'Parlay');
         const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
+
+        const btKey = `${p.capper_id}::${p.bet_type_id}`;
+        if (!byCapperBetType[btKey]) byCapperBetType[btKey] = { wins: 0, losses: 0 };
+        if (p.result === 'win') byCapperBetType[btKey].wins += w;
+        else if (p.result === 'loss') byCapperBetType[btKey].losses += w;
+
+        const sbtKey = `${p.capper_id}::${p.sport_id}::${p.bet_type_id}`;
+        if (!byCapperSportBetType[sbtKey]) byCapperSportBetType[sbtKey] = { wins: 0, losses: 0 };
+        if (p.result === 'win') byCapperSportBetType[sbtKey].wins += w;
+        else if (p.result === 'loss') byCapperSportBetType[sbtKey].losses += w;
+
+        if (isParlayUnit) return;
+
+        if (!overallByCapper[p.capper_id]) overallByCapper[p.capper_id] = { wins: 0, losses: 0, history: [] };
+        const o = overallByCapper[p.capper_id];
+        if (p.result === 'win') o.wins += w;
+        else if (p.result === 'loss') o.losses += w;
+        o.history.push({ result: p.result, event_date: p.event_date, created_at: p.created_at });
+
         const tier = Number(p.pick_tier) || 0;
-        const o = overallByCapper[cap] || { wins: 0, losses: 0 };
-        const bbt = broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
-        const sbt = sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
-        const t = tierByCapper[`${cap}::${tier}`] || { wins: 0, losses: 0 };
-        const hist = historyByCapper[cap] || [];
-
-        const overallAdj = adjustedWinPct(o.wins, o.losses);
-        const broadBetTypeAdj = adjustedWinPct(bbt.wins, bbt.losses);
-        const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
-        const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
-        const streak = computeStreak(hist);
-        const base = scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, t.wins, t.losses);
-
-        const entry = { pick: p, overallAdj, betTypeAdj, base, gameKey: backtestGameKey(p) };
-
-        // Only a real graded result ever updates anyone's running record --
-        // a still-pending pick gets scored using the stats as they stand,
-        // but can't feed evidence to itself or anything scored after it
-        // since its own outcome isn't known yet.
-        if (p.result !== 'pending') {
-          overallByCapper[cap] = { wins: o.wins + (p.result === 'win' ? w : 0), losses: o.losses + (p.result === 'loss' ? w : 0) };
-          broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] = { wins: bbt.wins + (p.result === 'win' ? w : 0), losses: bbt.losses + (p.result === 'loss' ? w : 0) };
-          sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] = { wins: sbt.wins + (p.result === 'win' ? w : 0), losses: sbt.losses + (p.result === 'loss' ? w : 0) };
-          if (tier !== 0) tierByCapper[`${cap}::${tier}`] = { wins: t.wins + (p.result === 'win' ? w : 0), losses: t.losses + (p.result === 'loss' ? w : 0) };
-          historyByCapper[cap] = [...hist, { result: p.result, event_date: p.event_date, created_at: p.created_at }];
+        if (tier !== 0) {
+          const tKey = `${p.capper_id}::${tier}`;
+          if (!byCapperTier[tKey]) byCapperTier[tKey] = { wins: 0, losses: 0 };
+          if (p.result === 'win') byCapperTier[tKey].wins += w;
+          else if (p.result === 'loss') byCapperTier[tKey].losses += w;
         }
+      });
+      const streakByCapper = {};
+      Object.keys(overallByCapper).forEach(id => { streakByCapper[id] = computeStreak(overallByCapper[id].history); });
+      const stats = { overallByCapper, byCapperBetType, byCapperSportBetType, byCapperTier, streakByCapper };
 
-        return entry;
+      // Pass 2: every real pick ON the target date -- published or not,
+      // graded or still pending. Parlays are always included as their own
+      // candidates here (unlike the live tool's opt-in checkbox) -- a full
+      // historical review has no reason to hide half the picture.
+      const dayQuery = `picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,prop_team,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,result,cappers(name),sports(name),bet_types(name)&event_date=eq.${targetDate}&order=id.asc`;
+      const allDayRaw = await restAllPages(dayQuery);
+      if (!allDayRaw.length) {
+        wrap.innerHTML = `<div class="empty-state">No picks found for ${targetDate}.</div>`;
+        return;
+      }
+      const confluencePool = allDayRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
+      const parlayCandidatePool = allDayRaw.filter(p => p.bet_types && p.bet_types.name === 'Parlay');
+
+      const withBaseAll = confluencePool.map(p => buildBaseEntry(p, stats));
+      const parlayBaseEntries = parlayCandidatePool.map(p => buildBaseEntry(p, stats));
+
+      const groups = {};
+      withBaseAll.forEach(entry => {
+        const key = confluenceKey(entry.pick);
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(entry);
       });
 
-      const byGameKey = {};
-      scored.forEach(e => {
-        if (!byGameKey[e.gameKey]) byGameKey[e.gameKey] = [];
-        byGameKey[e.gameKey].push(e);
+      let parlayLegIdsByParlayId = {};
+      if (parlayBaseEntries.length) {
+        const links = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&parlay_pick_id=in.(${parlayBaseEntries.map(e => e.pick.id).join(',')})`);
+        links.forEach(l => {
+          if (!parlayLegIdsByParlayId[l.parlay_pick_id]) parlayLegIdsByParlayId[l.parlay_pick_id] = [];
+          parlayLegIdsByParlayId[l.parlay_pick_id].push(l.leg_pick_id);
+        });
+      }
+      const withBaseAllById = {};
+      withBaseAll.forEach(e => { withBaseAllById[e.pick.id] = e; });
+
+      // Fetched directly by id, same defensive pattern as the live tool --
+      // a leg is never silently missing from a parlay's breakdown just
+      // because it isn't in confluencePool for some reason.
+      let legDetailsById = {};
+      const allLegIds = Object.values(parlayLegIdsByParlayId).flat();
+      if (allLegIds.length) {
+        const legRows = await restAllPages(`picks?select=id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,result&id=in.(${allLegIds.join(',')})`);
+        legRows.forEach(r => { legDetailsById[r.id] = r; });
+      }
+
+      const publishedStraightRows = await restAllPages(
+        'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat' +
+        '&is_published=eq.true&is_parlay_leg=eq.false'
+      );
+      const publishedStraightKeySet = new Set(publishedStraightRows.map(confluenceKey));
+      const parlayCtx = { groups, parlayLegIdsByParlayId, legDetailsById, withBaseAllById, publishedStraightKeySet };
+
+      const straightCandidateEntries = withBaseAll.filter(e => !e.isLeg);
+      const scoredStraight = straightCandidateEntries.map(entry => {
+        const { confPts, agreeingCappers } = scoreConfluenceFor(entry, groups);
+        const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
+        return {
+          ...entry, agreeingCappers,
+          score: {
+            total: Math.round(total * 10) / 10,
+            overallPts: Math.round(entry.base.overallPts * 10) / 10,
+            betTypePts: Math.round(entry.base.betTypePts * 10) / 10,
+            streakPts: Math.round(entry.base.streakPts * 10) / 10,
+            tierPts: Math.round(entry.base.tierPts * 10) / 10,
+            tierCalibrationPts: Math.round(entry.base.tierCalibrationPts * 10) / 10,
+            confluencePts: Math.round(confPts * 10) / 10
+          }
+        };
       });
 
-      const finalScored = scored
-        .filter(e => e.pick.event_date === targetDate && !e.pick.is_parlay_leg)
-        .map(e => {
-          const group = byGameKey[e.gameKey];
-          const others = group.filter(o => o.pick.capper_id !== e.pick.capper_id);
-          // The actual identities, kept for display -- this is the part
-          // that was never persisted anywhere before, even for already-
-          // published picks.
-          const agreeing = others.map(o => ({
-            capperName: o.pick.cappers ? o.pick.cappers.name : '—',
-            adj: o.overallAdj,
-            weight: confluenceWeightFor(o.pick),
-            isLeg: !!o.pick.is_parlay_leg
-          }));
-          const confPts = confluencePoints(agreeing.map(a => ({ adj: a.adj, weight: a.weight })));
-          const total = e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + e.base.tierCalibrationPts + confPts;
-          return {
-            pick: e.pick, overallAdj: e.overallAdj, betTypeAdj: e.betTypeAdj, base: e.base,
-            confPts, agreeing, total: Math.round(total * 10) / 10
-          };
-        })
-        .sort((a, b) => b.total - a.total);
+      const scoredParlays = parlayBaseEntries.map(entry => {
+        const { confPts, legBreakdown } = scoreParlayConfluence(entry, parlayCtx);
+        const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
+        const liveLegs = legBreakdown.filter(l => l.overallAdjPct !== null);
+        const gradedLegs = legBreakdown.filter(l => l.overallAdjPct === null);
+        const combinedWinProbPct = liveLegs.length
+          ? Math.round(liveLegs.reduce((prod, l) => prod * (l.overallAdjPct / 100), 1) * 1000) / 10
+          : null;
+        return {
+          ...entry, agreeingCappers: [], legConfluenceBreakdown: legBreakdown,
+          combinedWinProbPct, combinedWinProbLiveLegCount: liveLegs.length, combinedWinProbGradedLegCount: gradedLegs.length,
+          score: {
+            total: Math.round(total * 10) / 10,
+            overallPts: Math.round(entry.base.overallPts * 10) / 10,
+            betTypePts: Math.round(entry.base.betTypePts * 10) / 10,
+            streakPts: Math.round(entry.base.streakPts * 10) / 10,
+            tierPts: Math.round(entry.base.tierPts * 10) / 10,
+            tierCalibrationPts: Math.round(entry.base.tierCalibrationPts * 10) / 10,
+            confluencePts: Math.round(confPts * 10) / 10
+          }
+        };
+      });
 
-      renderScorecard(finalScored, targetDate);
+      const dedupedStraight = finalizeStraightScored(scoredStraight);
+      const allScored = dedupedStraight.concat(scoredParlays).sort((a, b) => b.score.total - a.score.total);
+
+      renderScorecard(allScored, targetDate);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
     }
@@ -13877,57 +13829,39 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   function scorecardResultStamp(result) {
     if (result === 'win') return '<span class="stamp win">Win</span>';
     if (result === 'loss') return '<span class="stamp loss">Loss</span>';
-    if (result === 'push') return '<span class="stamp pending">Push</span>';
-    return '<span style="color:var(--ink-soft);">Pending</span>';
+    if (result === 'push') return '<span class="stamp push">Push</span>';
+    return '<span style="color:var(--ink-soft);font-weight:bold;">Pending</span>';
   }
 
+  // Renders using the EXACT same publishRankCardHtml the live Publish
+  // Ranking list uses -- true "exactly as I would have seen it" parity,
+  // not a lookalike. opts.readOnly hides the Publish/Unpublish button
+  // (this is a review screen, not a place to publish from); opts
+  // .resultBadge shows the actual win/loss/push/pending result, which the
+  // live card never has anything to show for (nothing's graded yet there).
   function renderScorecard(entries, targetDate) {
     const wrap = $('scorecardWrap');
     if (!entries.length) {
       wrap.innerHTML = `<div class="empty-state">No standalone-caliber picks found for ${targetDate}.</div>`;
       return;
     }
-    const pt = n => Math.round(n * 10) / 10;
-    const pct = n => Math.round(n * 1000) / 10;
+    const wins = entries.filter(e => e.pick.result === 'win').length;
+    const losses = entries.filter(e => e.pick.result === 'loss').length;
+    const pushes = entries.filter(e => e.pick.result === 'push').length;
+    const pending = entries.filter(e => e.pick.result === 'pending').length;
+    const conflictCount = entries.filter(e => e.conflicts && e.conflicts.length).length;
 
-    const cardsHtml = entries.map(e => {
-      const p = e.pick;
-      const propBit = (p.prop_player || p.prop_stat)
-        ? ` — ${escapeHtml(p.prop_player || '')}${p.prop_team ? ` (${escapeHtml(p.prop_team)})` : ''} ${escapeHtml(p.prop_stat || '')}`
-        : '';
-      const agreeingHtml = e.agreeing.length
-        ? e.agreeing.map(a => `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 6px;border:1px solid var(--field);border-radius:2px;font-size:11px;">${escapeHtml(a.capperName)}${a.isLeg ? ' (leg)' : ''} — ${pct(a.adj)}%</span>`).join('')
-        : '<span style="color:var(--ink-soft);font-size:11px;">No other capper picked this same game/selection.</span>';
-      return `
-      <div class="msg" style="margin-bottom:12px;padding:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;">
-          <div>
-            <strong>${escapeHtml(p.cappers ? p.cappers.name : '—')}</strong>
-            — ${escapeHtml(p.sports ? p.sports.name : '—')} / ${escapeHtml(p.bet_types ? p.bet_types.name : '—')}
-            <div style="font-size:13px;">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}${propBit}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0;">
-            <div style="font-size:18px;font-weight:bold;">${e.total}</div>
-            ${scorecardResultStamp(p.result)}
-            <div style="font-size:10px;color:${p.is_published ? 'var(--ink-soft)' : 'var(--stamp-amber)'};">${p.is_published ? 'Published' : 'Not published'}</div>
-          </div>
-        </div>
-        <div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">
-          Overall record ${e.base.overallPts >= 0 ? '+' : ''}${pt(e.base.overallPts)}
-          · Bet-type record ${e.base.betTypePts >= 0 ? '+' : ''}${pt(e.base.betTypePts)}
-          · Streak ${e.base.streakPts >= 0 ? '+' : ''}${pt(e.base.streakPts)}
-          · Tier ${e.base.tierPts >= 0 ? '+' : ''}${pt(e.base.tierPts)}
-          · Consensus ${e.confPts >= 0 ? '+' : ''}${pt(e.confPts)}
-        </div>
-        <div><strong style="font-size:11px;">Who else agreed:</strong><br>${agreeingHtml}</div>
-      </div>`;
-    }).join('');
+    const cardsHtml = entries.map((s, i) => publishRankCardHtml(s, i + 1, {
+      readOnly: true,
+      resultBadge: scorecardResultStamp(s.pick.result)
+    })).join('');
 
     wrap.innerHTML = `
       <div style="font-size:12px;margin-bottom:10px;">
-        <strong>${entries.length}</strong> scored pick${entries.length === 1 ? '' : 's'} for ${targetDate}, highest score first.
+        <strong>${entries.length}</strong> scored pick${entries.length === 1 ? '' : 's'} for ${targetDate}, highest score first — ${wins}-${losses}${pushes ? '-' + pushes : ''}${pending ? `, ${pending} still pending` : ''}.${conflictCount ? ` <strong style="color:var(--stamp-red);">&#9888; ${conflictCount} pick${conflictCount === 1 ? '' : 's'} in a head-to-head conflict</strong>` : ''}
       </div>
       ${cardsHtml}`;
+    wireDetailsToggle(wrap);
   }
 
   $('runScorecardBtn').addEventListener('click', runScorecard);
@@ -14855,7 +14789,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 276; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 277; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
