@@ -12414,9 +12414,29 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     };
   }
 
+  // CONFIRMED REAL NEED, direct report: "there are cappers who put in
+  // 6-7 parlays and we wouldn't want them to put one team on all of those
+  // and it count 6-7 times." Reusing the SAME leg across multiple parlays
+  // already collapses to one row (see findExistingLeg above), so that
+  // case was never actually a problem -- but a capper who now
+  // legitimately has BOTH a standalone pick AND a separate parlay leg for
+  // the same real bet (v281, direct request) would otherwise appear
+  // twice in another capper's confluence list for that game. Deduped to
+  // ONE entry per capper here, keeping whichever of his rows carries the
+  // HIGHEST weight (his standalone call, if he made one, at weight 1,
+  // beats a parlay-leg-only call at parlayLegWeight) -- that's the
+  // strongest real signal he actually gave, not an average or a
+  // double-count.
   function scoreConfluenceFor(entry, groups) {
     const group = groups[confluenceKey(entry.pick)] || [];
-    const others = group.filter(o => o.pick.capper_id !== entry.pick.capper_id);
+    const othersRaw = group.filter(o => o.pick.capper_id !== entry.pick.capper_id);
+    const bestByCapperId = {};
+    othersRaw.forEach(o => {
+      const w = confluenceWeightFor(o.pick);
+      const prevW = bestByCapperId[o.pick.capper_id] ? confluenceWeightFor(bestByCapperId[o.pick.capper_id].pick) : -1;
+      if (w > prevW) bestByCapperId[o.pick.capper_id] = o;
+    });
+    const others = Object.values(bestByCapperId);
     return {
       confPts: confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) }))),
       agreeingCappers: others.map(o => ({
@@ -14982,7 +15002,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 281; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 282; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
