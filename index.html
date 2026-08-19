@@ -4097,24 +4097,33 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // CSV pipeline: a leg is identified by capper+date+sport+bet_type+selection
   // +line+prop_player+prop_stat, regardless of how many parlays reference it
   // or how many times it gets re-entered under a different parlay number.
-  // There is never more than one row for the same natural key, period --
-  // standalone or leg -- backed by a DB-level unique index
-  // (uniq_parlay_leg_per_capper_day) as a hard guarantee, not just app trust.
+  // There is never more than one LEG row for the same natural key --
+  // reusing the same real bet across MULTIPLE parlays correctly links back
+  // to the same shared leg row, backed by a DB-level PARTIAL unique index
+  // (uniq_parlay_leg_per_capper_day, scoped WHERE is_parlay_leg = true) as
+  // a hard guarantee, not just app trust. A STANDALONE pick (is_parlay_leg
+  // = false) for that same natural key is a completely separate, allowed
+  // thing -- the index was always scoped this way and never restricted it.
+  //
   // CONFIRMED REAL BUG (found 2026-08-17), direct report: real duplicate
-  // rows found in production -- a capper's straight pick (e.g. "Baltimore
-  // Orioles" Moneyline, entered standalone, is_parlay_leg=false) got a
-  // SECOND, separate row created minutes later for the exact same real bet
-  // when that same game was added as a parlay leg. Root cause: this
-  // function's own query REQUIRED is_parlay_leg=eq.true, so it could only
-  // ever find an existing pick that was ALREADY flagged as a leg -- it
-  // never even looked for a matching STANDALONE pick, even though the DB's
-  // own unique index (see above) has never cared about is_parlay_leg and
-  // was already silently guarding a stricter invariant than this app-level
-  // check enforced. linkLegToParlay already (idempotently) flips
-  // is_parlay_leg to true on whatever id it's given, specifically so an
-  // originally-standalone pick can correctly become a shared leg the
-  // moment it's reused -- this function just needs to actually FIND that
-  // pick first, which dropping the is_parlay_leg filter now does.
+  // LEG rows found in production -- the same real bet, reused across
+  // multiple parlays, ended up as separate leg rows instead of one shared
+  // one, because a date mismatch meant this query's search for an existing
+  // leg came up empty. Fixed at the time by ALSO matching standalone
+  // picks, which happened to paper over that day's specific symptom.
+  //
+  // REVERTED (2026-08-18), direct correction: "I need to make sure if it
+  // did that it doesn't do that unless I edit one of the legs as this
+  // will happen a lot where I add the same team on a straight bet and on
+  // a parlay." That August 17 fix went too far -- matching an existing
+  // STANDALONE pick and converting it into a leg destroys a genuinely
+  // separate, deliberate call (a capper backing a team straight up AND
+  // including it in a parlay are two different pieces of advice, not the
+  // same bet said twice). Restored to leg-only matching -- adding a
+  // selection to a parlay now only reuses an EXISTING LEG (correctly
+  // deduping across multiple parlays sharing one leg), and always creates
+  // a brand-new, fully independent row when only a standalone pick
+  // exists, exactly as the DB's own partial index already allowed for.
   function eqOrNullFilter(field, value) {
     if (value === null || value === undefined || value === '') return `${field}=is.null`;
     return `${field}=eq.${encodeURIComponent(value)}`;
@@ -4126,6 +4135,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       `event_date=eq.${payload.event_date}`,
       `bet_type_id=eq.${payload.bet_type_id}`,
       `selection=eq.${encodeURIComponent(payload.selection)}`,
+      'is_parlay_leg=eq.true',
       eqOrNullFilter('sport_id', payload.sport_id),
       eqOrNullFilter('line', payload.line),
       eqOrNullFilter('prop_player', payload.prop_player),
@@ -14972,7 +14982,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 280; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 281; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
