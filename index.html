@@ -286,6 +286,29 @@
   }
   .pr-leg-published { background: rgba(45,106,79,0.1); border-left: 3px solid var(--stamp-green); padding-left: 8px; }
   .pr-agreeing-name { font-weight: bold; min-width: 100px; }
+  .pr-duplicates {
+    width: 100%; padding: 8px 12px; border-top: 1px dashed var(--field); background: #f7f4ea;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px;
+  }
+  .pr-duplicates-label { color: var(--ink-soft); margin-right: 2px; }
+  .dup-capper-btn, .dup-showall-btn {
+    font-family: inherit; font-size: 11px; padding: 3px 9px; border-radius: 2px; cursor: pointer;
+  }
+  .dup-capper-btn { background: #fff; border: 1px solid var(--field); color: var(--ink); }
+  .dup-showall-btn { background: var(--field); border: 1px solid var(--field); color: var(--paper); font-weight: bold; }
+  .pr-modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(34,40,31,0.65); z-index: 500;
+    align-items: flex-start; justify-content: center; padding: 40px 24px; overflow-y: auto;
+  }
+  .pr-modal-box {
+    background: var(--paper); border: 1px solid var(--field); border-radius: 4px; max-width: 920px;
+    width: 100%; padding: 16px; max-height: calc(100vh - 80px); overflow-y: auto;
+  }
+  .pr-modal-header {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1.5px solid var(--field);
+  }
+  .pr-modal-header strong { font-size: 14px; }
   .msf-empty { padding: 8px 10px; font-size: 11px; color: var(--ink-soft); font-style: italic; }
   .msf-actions {
     padding: 8px 10px; border-top: 1px solid var(--field); display: flex; justify-content: space-between;
@@ -296,6 +319,21 @@
 </style>
 </head>
 <body>
+
+<!-- Shared "other cappers on this exact bet" modal -- opened from either
+     the live Publish Ranking board or Scorecard Review (see
+     openDuplicateCardsModal/wireDetailsToggle). Lives outside #app so its
+     fixed overlay always covers the whole page regardless of which tab is
+     active underneath it. -->
+<div class="pr-modal-overlay" id="dupCardsModal">
+  <div class="pr-modal-box">
+    <div class="pr-modal-header">
+      <strong id="dupCardsModalTitle">Other cappers on this bet</strong>
+      <button type="button" class="ghost small" id="dupCardsModalCloseBtn">&times; Close</button>
+    </div>
+    <div id="dupCardsModalBody"></div>
+  </div>
+</div>
 
 <div class="ticket-app" id="app">
   <div id="versionBanner" style="display:none;background:var(--stamp-red);color:var(--paper);padding:10px 14px;border-radius:2px;margin-bottom:14px;font-size:12px;font-weight:bold;"></div>
@@ -12506,14 +12544,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       });
     });
 
-    const scoredStraightByGroup = {};
+    // Direct report: a lower-scoring duplicate call on the exact same real
+    // bet (e.g. a second capper on the same team) used to just vanish here
+    // with zero trace once a higher-scoring duplicate won the group -- if
+    // THAT vanished row happened to be the one actually published, there
+    // was no way to find or manage it from this board at all. Every loser
+    // in the group is now kept on the winner as duplicateEntries (each
+    // still a full scored entry, sorted highest to lowest) instead of being
+    // discarded, so the card can surface them for the "other cappers on
+    // this bet" modal below -- the winning card shown/ranked is unchanged.
+    const groupsByKey = {};
     scoredStraight.forEach(entry => {
       const key = confluenceKey(entry.pick);
-      if (!scoredStraightByGroup[key] || entry.score.total > scoredStraightByGroup[key].score.total) {
-        scoredStraightByGroup[key] = entry;
-      }
+      if (!groupsByKey[key]) groupsByKey[key] = [];
+      groupsByKey[key].push(entry);
     });
-    return Object.values(scoredStraightByGroup);
+    return Object.values(groupsByKey).map(group => {
+      group.sort((a, b) => b.score.total - a.score.total);
+      const winner = group[0];
+      winner.duplicateEntries = group.slice(1);
+      return winner;
+    });
   }
 
   // Delegated on the given wrap (stable across re-renders) rather than
@@ -12534,11 +12585,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     wrap.dataset.toggleWired = '1';
     wrap.addEventListener('click', (e) => {
       const btn = e.target.closest('.pr-toggle-btn');
-      if (!btn) return;
-      const details = btn.closest('.pr-card').querySelector('.pr-details');
-      const showing = details.style.display !== 'none';
-      details.style.display = showing ? 'none' : 'block';
-      btn.innerHTML = showing ? 'Details &#9662;' : 'Details &#9652;';
+      if (btn) {
+        const details = btn.closest('.pr-card').querySelector('.pr-details');
+        const showing = details.style.display !== 'none';
+        details.style.display = showing ? 'none' : 'block';
+        btn.innerHTML = showing ? 'Details &#9662;' : 'Details &#9652;';
+        return;
+      }
+      // Opens the shared duplicate-cappers modal (see openDuplicateCardsModal
+      // above) -- readOnly is carried per-wrap via a data attribute set once
+      // by whichever board (live Publish Ranking vs. read-only Scorecard
+      // Review) called wireDetailsToggle on it, so a single delegated
+      // listener here serves both without needing to know which board it's
+      // on at click time.
+      const dupBtn = e.target.closest('.dup-capper-btn');
+      if (dupBtn) {
+        const entry = cardEntryRegistry[dupBtn.getAttribute('data-dup-id')];
+        if (entry) openDuplicateCardsModal([entry], { readOnly: wrap.dataset.modalReadOnly === '1' });
+        return;
+      }
+      const allBtn = e.target.closest('.dup-showall-btn');
+      if (allBtn) {
+        const winner = cardEntryRegistry[allBtn.getAttribute('data-group-id')];
+        if (winner) openDuplicateCardsModal([winner, ...(winner.duplicateEntries || [])], { readOnly: wrap.dataset.modalReadOnly === '1' });
+        return;
+      }
     });
   }
 
@@ -12659,6 +12730,28 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </div>`;
     }
 
+    // Direct request: keep the ranked card itself capper-agnostic (the
+    // score, not who submitted it, drives the publish decision) while still
+    // making every other capper's identical call on this exact bet visible
+    // and clickable for management -- each name/score is its own duplicate
+    // card away (see openDuplicateCardsModal), including a published flag,
+    // since a duplicate can be independently published even when it never
+    // won this dedup group.
+    let duplicatesHtml = '';
+    if (s.duplicateEntries && s.duplicateEntries.length) {
+      const dupBtns = s.duplicateEntries.map(d => {
+        const dName = escapeHtml(d.pick.cappers ? d.pick.cappers.name : '—');
+        const dPub = d.pick.is_published ? ' <span style="color:var(--stamp-green);font-weight:bold;">&#10003; published</span>' : '';
+        return `<button type="button" class="dup-capper-btn" data-dup-id="${d.pick.id}">${dName} — ${d.score.total}${dPub}</button>`;
+      }).join('');
+      duplicatesHtml = `
+      <div class="pr-duplicates">
+        <span class="pr-duplicates-label">${s.duplicateEntries.length} other capper${s.duplicateEntries.length === 1 ? '' : 's'} on this exact bet:</span>
+        ${dupBtns}
+        <button type="button" class="dup-showall-btn" data-group-id="${p.id}">Show all (${s.duplicateEntries.length + 1})</button>
+      </div>`;
+    }
+
     const tierColor = p.pick_tier < 0 ? 'var(--stamp-red)' : 'var(--stamp-amber)';
     const tierIcon = p.pick_tier < 0 ? '&#9660;' : '&#11088;';
     const tierBadge = p.pick_tier !== 0 ? `<span style="color:${tierColor};font-weight:bold;">${tierIcon} Tier ${p.pick_tier}</span> ` : '';
@@ -12700,6 +12793,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
         <span class="pr-action">${actionHtml}</span>
       </div>
+      ${duplicatesHtml}
       <div class="pr-details" style="display:none;">
         <div class="pr-body">
           <div class="pr-stat" style="min-width:100%;">
@@ -12733,6 +12827,138 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </div>
     </div>`;
   }
+
+  // Extracted out of renderPublishRank (was a nested closure there) so the
+  // "view other cappers" modal below can wire the exact same real Publish/
+  // Unpublish behavior onto duplicate cards -- no closure dependency on
+  // renderPublishRank's own locals, purely rest()/scoringConfig/
+  // refreshPublishedLegFlags, all already module-level. Behavior unchanged.
+  function renderActionCell(pickId, isPublished) {
+    return isPublished
+      ? `<span style="color:var(--stamp-green);font-weight:bold;">Published</span> <button type="button" class="ghost small unpublish-btn" data-id="${pickId}">Unpublish</button>`
+      : `<button type="button" class="publish-btn" data-id="${pickId}">Publish</button>`;
+  }
+
+  function wireActionCell(cell, scoredEntry) {
+    const publishBtn = cell.querySelector('.publish-btn');
+    if (publishBtn) {
+      publishBtn.addEventListener('click', async () => {
+        const id = publishBtn.getAttribute('data-id');
+        publishBtn.disabled = true;
+        publishBtn.textContent = 'Publishing...';
+        try {
+          // Snapshot the score AS OF RIGHT NOW, not recalculated later --
+          // this is what lets you later ask "did a 70+ score actually
+          // predict a win," using the number that was true at publish
+          // time, not whatever it happens to be if you look it up after
+          // the capper's record has since changed.
+          const payload = { is_published: true };
+          if (scoredEntry) {
+            payload.published_score = scoredEntry.score.total;
+            payload.published_at = new Date().toISOString();
+            // Frozen at publish time, same threshold the public page uses
+            // (10+ game win streak) -- this is what actually decides the
+            // "Hot Pick" badge going forward, not the capper's current
+            // streak, so a pick that was genuinely hot when published
+            // never silently loses that status later just because the
+            // capper's record has since changed.
+            payload.published_was_hot = scoredEntry.streak.type === 'win' && scoredEntry.streak.len >= scoringConfig.hotPickStreakThreshold;
+            payload.published_score_breakdown = {
+              overall_pts: scoredEntry.score.overallPts,
+              bet_type_pts: scoredEntry.score.betTypePts,
+              streak_pts: scoredEntry.score.streakPts,
+              confluence_pts: scoredEntry.score.confluencePts,
+              overall_record: scoredEntry.overallRecord,
+              overall_adj_pct: scoredEntry.overallAdjPct,
+              bet_type_record: scoredEntry.betTypeRecord,
+              bet_type_adj_pct: scoredEntry.betTypeAdjPct,
+              broad_bet_type_adj_pct: scoredEntry.broadBetTypeAdjPct,
+              streak: scoredEntry.streak,
+              agreeing_cappers: scoredEntry.agreeingCappers
+            };
+          }
+          await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+          cell.innerHTML = renderActionCell(id, true);
+          wireActionCell(cell, scoredEntry);
+          // Auto-refresh right after publishing -- direct request: "I
+          // don't think it's a good workflow to have to stop and re-rank
+          // everything." Catches the common case (publishing a leg's
+          // independent pick while a parlay containing it is currently on
+          // screen) with zero extra clicks. Never lets a refresh failure
+          // undo the publish that already succeeded.
+          refreshPublishedLegFlags().catch(() => {});
+        } catch (e) {
+          alert('Could not publish: ' + e.message);
+          publishBtn.disabled = false;
+          publishBtn.textContent = 'Publish';
+        }
+      });
+    }
+    const unpublishBtn = cell.querySelector('.unpublish-btn');
+    if (unpublishBtn) {
+      unpublishBtn.addEventListener('click', async () => {
+        const id = unpublishBtn.getAttribute('data-id');
+        unpublishBtn.disabled = true;
+        try {
+          await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_published: false }) });
+          cell.innerHTML = renderActionCell(id, false);
+          wireActionCell(cell, scoredEntry);
+          refreshPublishedLegFlags().catch(() => {});
+        } catch (e) {
+          alert('Could not unpublish: ' + e.message);
+          unpublishBtn.disabled = false;
+        }
+      });
+    }
+  }
+
+  function wireCardActions(entries) {
+    entries.forEach(s => {
+      const card = document.querySelector(`.pr-card[data-pick-id="${s.pick.id}"] .pr-action`);
+      if (card) wireActionCell(card, s);
+    });
+  }
+
+  // Direct request: dedup (finalizeStraightScored) means most duplicate
+  // capper calls on the same real bet never get their own visible card --
+  // real operational risk, confirmed live: "Bullies picks... duplicate...
+  // I would have no way of [finding/managing] it." cardEntryRegistry keeps
+  // every scored entry (the winning card AND every duplicate it absorbed)
+  // reachable by its own pick id, purely in memory -- populated fresh each
+  // time a ranking run completes, so a click always resolves to the
+  // current run's real entry object, never stale data from a prior run.
+  let cardEntryRegistry = {};
+  function registerScoredEntries(entries) {
+    cardEntryRegistry = {};
+    entries.forEach(e => {
+      cardEntryRegistry[e.pick.id] = e;
+      (e.duplicateEntries || []).forEach(d => { cardEntryRegistry[d.pick.id] = d; });
+    });
+  }
+
+  // Renders one or more full scored entries into the shared overlay modal,
+  // reusing publishRankCardHtml exactly -- a duplicate capper's card is
+  // never a stripped-down lookalike, it's the identical rendering the main
+  // list would give it. opts.readOnly matches whichever board opened it:
+  // the live Publish Ranking board wires real Publish/Unpublish (so a
+  // hidden duplicate can actually be managed, the whole point of this),
+  // Scorecard Review stays read-only like the rest of that screen.
+  function openDuplicateCardsModal(entries, opts) {
+    opts = opts || {};
+    const modal = $('dupCardsModal');
+    const body = $('dupCardsModalBody');
+    $('dupCardsModalTitle').textContent = entries.length === 1
+      ? 'Capper detail'
+      : `${entries.length} cappers on this exact bet`;
+    body.innerHTML = entries.map((e, i) => publishRankCardHtml(e, i + 1, opts)).join('');
+    wireDetailsToggle(body); // guarded to attach once ever on this persistent element -- see its own comment
+    if (!opts.readOnly) wireCardActions(entries);
+    modal.style.display = 'flex';
+  }
+  $('dupCardsModalCloseBtn').addEventListener('click', () => { $('dupCardsModal').style.display = 'none'; });
+  $('dupCardsModal').addEventListener('click', (e) => {
+    if (e.target.id === 'dupCardsModal') $('dupCardsModal').style.display = 'none';
+  });
 
   async function runPublishRank() {
     const sportFilter = $('prSport').value;
@@ -13000,6 +13226,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const dedupedStraight = finalizeStraightScored(scoredStraight);
 
       const allScored = dedupedStraight.concat(scoredParlays);
+      registerScoredEntries(allScored);
 
       // Split AFTER scoring, purely for display grouping -- both groups
       // now carry a real score either way.
@@ -13174,92 +13401,6 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // no matter how many times renderPublishRank() re-runs.
     wireDetailsToggle(wrap);
     applyFilterAndRender();
-
-    function renderActionCell(pickId, isPublished) {
-      return isPublished
-        ? `<span style="color:var(--stamp-green);font-weight:bold;">Published</span> <button type="button" class="ghost small unpublish-btn" data-id="${pickId}">Unpublish</button>`
-        : `<button type="button" class="publish-btn" data-id="${pickId}">Publish</button>`;
-    }
-
-    function wireActionCell(cell, scoredEntry) {
-      const publishBtn = cell.querySelector('.publish-btn');
-      if (publishBtn) {
-        publishBtn.addEventListener('click', async () => {
-          const id = publishBtn.getAttribute('data-id');
-          publishBtn.disabled = true;
-          publishBtn.textContent = 'Publishing...';
-          try {
-            // Snapshot the score AS OF RIGHT NOW, not recalculated later --
-            // this is what lets you later ask "did a 70+ score actually
-            // predict a win," using the number that was true at publish
-            // time, not whatever it happens to be if you look it up after
-            // the capper's record has since changed.
-            const payload = { is_published: true };
-            if (scoredEntry) {
-              payload.published_score = scoredEntry.score.total;
-              payload.published_at = new Date().toISOString();
-              // Frozen at publish time, same threshold the public page uses
-              // (10+ game win streak) -- this is what actually decides the
-              // "Hot Pick" badge going forward, not the capper's current
-              // streak, so a pick that was genuinely hot when published
-              // never silently loses that status later just because the
-              // capper's record has since changed.
-              payload.published_was_hot = scoredEntry.streak.type === 'win' && scoredEntry.streak.len >= scoringConfig.hotPickStreakThreshold;
-              payload.published_score_breakdown = {
-                overall_pts: scoredEntry.score.overallPts,
-                bet_type_pts: scoredEntry.score.betTypePts,
-                streak_pts: scoredEntry.score.streakPts,
-                confluence_pts: scoredEntry.score.confluencePts,
-                overall_record: scoredEntry.overallRecord,
-                overall_adj_pct: scoredEntry.overallAdjPct,
-                bet_type_record: scoredEntry.betTypeRecord,
-                bet_type_adj_pct: scoredEntry.betTypeAdjPct,
-                broad_bet_type_adj_pct: scoredEntry.broadBetTypeAdjPct,
-                streak: scoredEntry.streak,
-                agreeing_cappers: scoredEntry.agreeingCappers
-              };
-            }
-            await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
-            cell.innerHTML = renderActionCell(id, true);
-            wireActionCell(cell, scoredEntry);
-            // Auto-refresh right after publishing -- direct request: "I
-            // don't think it's a good workflow to have to stop and re-rank
-            // everything." Catches the common case (publishing a leg's
-            // independent pick while a parlay containing it is currently on
-            // screen) with zero extra clicks. Never lets a refresh failure
-            // undo the publish that already succeeded.
-            refreshPublishedLegFlags().catch(() => {});
-          } catch (e) {
-            alert('Could not publish: ' + e.message);
-            publishBtn.disabled = false;
-            publishBtn.textContent = 'Publish';
-          }
-        });
-      }
-      const unpublishBtn = cell.querySelector('.unpublish-btn');
-      if (unpublishBtn) {
-        unpublishBtn.addEventListener('click', async () => {
-          const id = unpublishBtn.getAttribute('data-id');
-          unpublishBtn.disabled = true;
-          try {
-            await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_published: false }) });
-            cell.innerHTML = renderActionCell(id, false);
-            wireActionCell(cell, scoredEntry);
-            refreshPublishedLegFlags().catch(() => {});
-          } catch (e) {
-            alert('Could not unpublish: ' + e.message);
-            unpublishBtn.disabled = false;
-          }
-        });
-      }
-    }
-
-    function wireCardActions(entries) {
-      entries.forEach(s => {
-        const card = document.querySelector(`.pr-card[data-pick-id="${s.pick.id}"] .pr-action`);
-        if (card) wireActionCell(card, s);
-      });
-    }
   }
 
   $('runPublishRankBtn').addEventListener('click', runPublishRank);
@@ -13930,6 +14071,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const allScored = dedupedStraight.concat(scoredParlays)
         .map(withFrozenSnapshotIfAvailable)
         .sort((a, b) => b.score.total - a.score.total);
+      registerScoredEntries(allScored);
 
       renderScorecard(allScored, targetDate);
     } catch (e) {
@@ -14038,6 +14180,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   function renderScorecard(entries, targetDate) {
     const wrap = $('scorecardWrap');
+    // Read by wireDetailsToggle's delegated click handler when a duplicate-
+    // cappers modal is opened from this board -- Scorecard Review is a
+    // historical review screen, so its duplicate cards stay read-only too,
+    // same as its main cards.
+    wrap.dataset.modalReadOnly = '1';
     if (!entries.length) {
       wrap.innerHTML = `<div class="empty-state">No standalone-caliber picks found for ${targetDate}.</div>`;
       return;
@@ -15002,7 +15149,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 282; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 283; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
