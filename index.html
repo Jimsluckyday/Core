@@ -1580,6 +1580,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <input id="fsTierCalibrationMinSample" type="number" min="1" step="1" />
           </div>
         </div>
+        <p class="stub-title" style="margin-bottom:8px;">Consensus visibility on Publish Ranking (display only — never changes any score)</p>
+        <div class="row">
+          <div class="field">
+            <label>"High consensus" badge threshold (cappers)</label>
+            <input id="fsHighConsensusThreshold" type="number" min="1" step="1" />
+          </div>
+          <div class="field">
+            <label>Pin-to-top threshold (cappers)</label>
+            <input id="fsConsensusPinThreshold" type="number" min="1" step="1" />
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:14px;">
+          <strong>High consensus badge threshold</strong> is the total agreeing-capper headcount (standalone + parlay legs, this pick included) needed to show the red "Consensus Pick" badge/tag on a card. <strong>Pin-to-top threshold</strong> is a separate, usually higher bar -- clearing it pins a second copy of that card in a callout above the #1 ranked pick on Publish Ranking, regardless of search/sort/filter, so a big pile-on can never get buried at a low rank without being seen. Neither of these touches the actual score or ranking in any way -- confluenceCapCappers above is the only thing that does that.
+        </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:14px;">
           <strong>Smoothing (k)</strong> controls how fast a capper's win % is trusted as sample size grows — higher means more proof required before trusting a small sample. <strong>Streak cap</strong> is the longest streak that still adds extra weight beyond it (a 25-game streak scores the same as one right at the cap). <strong>Confluence cap</strong> is how many agreeing cappers it takes to reach full confluence weight. <strong>Hot Pick threshold</strong> is the win-streak length required to earn the public "Hot Pick" badge at the moment a pick is published. <strong>Parlay leg weight</strong> is how much an individual game inside a parlay counts everywhere in scoring, relative to a straight bet (100%) — his own overall/bet-type record, streak, and how much weight his agreement adds to another capper's confluence. A capper only bundling a game into a parlay (rather than calling it on its own) wasn't confident enough to call it standalone, so it's real evidence, just weaker evidence; a parlay's own bundled win/loss is never counted anywhere, since it's the same correlated outcome as its legs, and a parlay is never itself scored or published. <strong>Tier bonuses</strong> are the MAXIMUM points a pick can earn for the tier the capper marked it as (Tier 0 never gets a bonus) — the actual bonus is that maximum scaled by how good THIS SPECIFIC capper's own track record is within THAT SPECIFIC tier (not flat, and not the same for every capper). A capper who's 5-for-10 in his own Tier 2 picks gets roughly half the Tier 2 maximum; one who's genuinely strong there gets most of it; one with no Tier 2 history yet starts at half credit and moves from there as real results come in. Same sample-size smoothing as everything else applies, so even a perfect small sample never earns the full maximum. <strong>Tier -1</strong> is for a pick the capper explicitly signaled as below his normal base confidence (a lotto pick, an explicitly smaller unit size than usual) -- same scaling logic, just typically expected to be a negative number once backtesting shows the pattern is real, since it's meant to actively hurt a score, not just withhold a bonus. <strong>Tier -1 confluence weight</strong> is separate from the bonus above and solves a different problem: the bonus only affects a Tier -1 pick's OWN score, it does nothing to stop a pile of low-confidence "lotto"/dartboard picks from several cappers inflating a game's confluence signal at full weight, same as if they were real standalone calls. This is how much a Tier -1 pick counts as "agreement" toward some OTHER capper's confluence bonus on the same game -- defaults to 25%, lower than Parlay leg weight (50%), since an explicit reduced-confidence signal is reasoned as weaker evidence than even a parlay leg call. Combines multiplicatively with Parlay leg weight if a pick is both (a Tier -1 parlay leg counts for less on both counts at once, not just whichever discount is larger). Each tier defaults to 0 (no effect) independently; check the Formula Backtest's tier breakdown first to see whether the real data actually supports setting a given tier away from 0, since one tier being worth adjusting doesn't mean they all are. <strong>Tier calibration</strong> is a completely separate signal from the tier bonuses above, and works even while every one of those stays at 0 -- a tier can look unremarkable in aggregate (e.g. Tier 3 sitting at 50% combined across everyone) while still hiding a real split underneath: one capper going 10-0 in his own Tier 3, another going 0-10 in his, roughly canceling out in the combined number. This compares each capper's OWN record at a tier against his OWN overall rate (not a flat 50%, and not the tier's combined rate either), so a capper who's genuinely better or worse AT a specific tier gets a real bonus or penalty for it, independent of whether that tier is worth anything as a blanket rule for every capper. <strong>Tier calibration minimum sample</strong> is a hard cutoff, not smoothing -- below this many picks at that exact tier for that exact capper, this returns zero, no partial credit. Defaults to 10: doesn't matter if he's called 50 or 500 picks overall, once his own sample at that one tier clears this number it's treated as a strong enough indicator to act on. Raise it if 10 turns out too low once real data comes in (check the Tier calibration points quartile section in Formula Backtest, which only appears once this weight is turned on).
         </div>
@@ -12216,7 +12230,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // clears 10 that's judged a strong enough indicator to act on;
     // adjustable later if that number turns out too low in practice.
     tierCalibrationWeight: 0,
-    tierCalibrationMinSample: 10
+    tierCalibrationMinSample: 10,
+    // Tunable without a rebuild, direct request -- see the "High consensus"
+    // badge/pin section further down for what each one actually does.
+    highConsensusThreshold: 6,
+    consensusPinThreshold: 8
   };
 
   async function loadScoringConfig() {
@@ -12242,7 +12260,12 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           parlayLegWeight: r.parlay_leg_weight !== null && r.parlay_leg_weight !== undefined ? Number(r.parlay_leg_weight) : 0.5,
           tierMinus1ConfluenceWeight: r.tier_minus1_confluence_weight !== null && r.tier_minus1_confluence_weight !== undefined ? Number(r.tier_minus1_confluence_weight) : 0.25,
           tierCalibrationWeight: r.tier_calibration_weight !== null && r.tier_calibration_weight !== undefined ? Number(r.tier_calibration_weight) : 0,
-          tierCalibrationMinSample: r.tier_calibration_min_sample !== null && r.tier_calibration_min_sample !== undefined ? Number(r.tier_calibration_min_sample) : 10
+          tierCalibrationMinSample: r.tier_calibration_min_sample !== null && r.tier_calibration_min_sample !== undefined ? Number(r.tier_calibration_min_sample) : 10,
+          // Nullish-fallback like the other newer optional fields above --
+          // keeps this working even before the ALTER TABLE that adds these
+          // two columns has been run.
+          highConsensusThreshold: r.high_consensus_threshold !== null && r.high_consensus_threshold !== undefined ? Number(r.high_consensus_threshold) : 6,
+          consensusPinThreshold: r.consensus_pin_threshold !== null && r.consensus_pin_threshold !== undefined ? Number(r.consensus_pin_threshold) : 8
         };
       }
     } catch (e) {
@@ -12545,25 +12568,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return { confPts, legBreakdown };
   }
 
-  // Deliberately separate from scoringConfig.confluenceCapCappers (which
-  // caps how much headcount can move the composite SCORE) -- this only
-  // controls when the always-visible consensus line below gets flagged
-  // "High consensus," independent of whatever the score does with that
-  // same agreement. Direct request: a big pile-on should always be visible
-  // for a manual look, even when the formula correctly declines to let it
-  // dominate the ranking on its own.
-  const HIGH_CONSENSUS_THRESHOLD = 6;
-
-  // Direct request: "leaving it near the same position on the page would
-  // cause us to miss this every time... anything above 7 people agreeing
-  // gets bumped up to the very top of the list above the #1 ranked pick.
-  // It can keep the ranking score." A separate, higher bar than the
-  // on-card badge above -- pinning above #1 is a much bigger visual
-  // interruption than a badge, reserved for the genuinely rare, can't-
-  // miss-this case. The pinned copy never changes the pick's real score or
-  // its normal position further down the list -- see renderPublishRank's
-  // pinned section below.
-  const CONSENSUS_PIN_THRESHOLD = 8;
+  // scoringConfig.highConsensusThreshold / .consensusPinThreshold (see
+  // scoringConfig's own declaration + Formula Settings panel) -- both
+  // direct requests to be tunable without a rebuild: "add a button or
+  // dropdown to change the amount of consensus [that] gets pushed to the
+  // top so we avoid rebuilds every time we think the value should change."
+  // Deliberately two SEPARATE numbers, not one: highConsensusThreshold only
+  // flags the always-visible on-card badge/tag, independent of what the
+  // score does with that same agreement (confluenceCapCappers caps the
+  // SCORE'S OWN benefit from headcount, a different lever entirely).
+  // consensusPinThreshold is a much bigger visual interruption (pins a
+  // second copy of the card above #1), reserved for the genuinely
+  // can't-miss-this case -- the pinned copy never changes the pick's real
+  // score or its normal position further down the list.
 
   // Same total the consensus line/badge on the card itself is built from --
   // kept as its own tiny helper (rather than reading it back off the
@@ -12841,7 +12858,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const standaloneCount = s.agreeingCappers.filter(c => !c.isLeg).length + 1; // +1: this card's own pick is always the standalone/winning call
       const legCount = s.agreeingCappers.filter(c => c.isLeg).length;
       const totalCount = standaloneCount + legCount;
-      isHighConsensus = totalCount >= HIGH_CONSENSUS_THRESHOLD;
+      isHighConsensus = totalCount >= scoringConfig.highConsensusThreshold;
       const breakdown = legCount
         ? `${standaloneCount} independently, ${legCount} via parlay leg${legCount === 1 ? '' : 's'}`
         : `all called independently`;
@@ -13506,26 +13523,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     // Direct request: "leaving it near the same position on the page would
     // cause us to miss this every time." A badge alone wasn't enough --
-    // this pulls anything past CONSENSUS_PIN_THRESHOLD out to a dedicated
-    // callout above the #1 ranked pick, regardless of current search/sort/
-    // filter state, so it's physically impossible to scroll past without
-    // seeing it. The card rendered here is the exact same card (same real
-    // score, same rank number) -- it's shown a second time, not moved;
-    // it still sits in its normal spot further down the list too. Past-due
-    // picks are eligible too, same reasoning as everywhere else they're
-    // still real, scoreable candidates.
+    // this pulls anything past scoringConfig.consensusPinThreshold out to a
+    // dedicated callout above the #1 ranked pick, regardless of current
+    // search/sort/filter state, so it's physically impossible to scroll
+    // past without seeing it. The card rendered here is the exact same
+    // card (same real score, same rank number) -- it's shown a second
+    // time, not moved; it still sits in its normal spot further down the
+    // list too. Past-due picks are eligible too, same reasoning as
+    // everywhere else they're still real, scoreable candidates.
     const realRankOf = (s) => {
       const i1 = scored.indexOf(s);
       if (i1 >= 0) return i1 + 1;
       const i2 = (pastDueScored || []).indexOf(s);
       return i2 >= 0 ? i2 + 1 : 0;
     };
+    const pinThreshold = scoringConfig.consensusPinThreshold;
     const pinnedEntries = scored.concat(pastDueScored || [])
-      .filter(s => consensusTotalFor(s) >= CONSENSUS_PIN_THRESHOLD)
+      .filter(s => consensusTotalFor(s) >= pinThreshold)
       .sort((a, b) => consensusTotalFor(b) - consensusTotalFor(a));
     const pinnedSectionHtml = pinnedEntries.length ? `
       <div class="pr-pinned-section">
-        <div class="pr-pinned-header">&#128681; High consensus — ${pinnedEntries.length} pick${pinnedEntries.length === 1 ? '' : 's'} with ${CONSENSUS_PIN_THRESHOLD}+ cappers agreeing, pinned here regardless of rank so it's never missed. Ranking score is unchanged -- this doesn't mean publish it, it means look at it.</div>
+        <div class="pr-pinned-header">&#128681; High consensus — ${pinnedEntries.length} pick${pinnedEntries.length === 1 ? '' : 's'} with ${pinThreshold}+ cappers agreeing, pinned here regardless of rank so it's never missed. Ranking score is unchanged -- this doesn't mean publish it, it means look at it.</div>
         ${pinnedEntries.map(s => publishRankCardHtml(s, realRankOf(s))).join('')}
       </div>` : '';
 
@@ -14423,7 +14441,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
     parlayLegWeight: 0.5,
     tierMinus1ConfluenceWeight: 0.25,
-    tierCalibrationWeight: 0, tierCalibrationMinSample: 10
+    tierCalibrationWeight: 0, tierCalibrationMinSample: 10,
+    highConsensusThreshold: 6, consensusPinThreshold: 8
   };
 
   function populateFormulaSettingsForm(cfg) {
@@ -14444,6 +14463,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('fsParlayLegWeight').value = Math.round(cfg.parlayLegWeight * 100);
     $('fsTierCalibrationWeight').value = Math.round(cfg.tierCalibrationWeight * 100);
     $('fsTierCalibrationMinSample').value = cfg.tierCalibrationMinSample;
+    $('fsHighConsensusThreshold').value = cfg.highConsensusThreshold;
+    $('fsConsensusPinThreshold').value = cfg.consensusPinThreshold;
     updateWeightTotal();
   }
 
@@ -14492,7 +14513,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       tier4BonusPoints: Number($('fsTier4Bonus').value),
       parlayLegWeight: Number($('fsParlayLegWeight').value) / 100,
       tierCalibrationWeight: Number($('fsTierCalibrationWeight').value) / 100,
-      tierCalibrationMinSample: Number($('fsTierCalibrationMinSample').value)
+      tierCalibrationMinSample: Number($('fsTierCalibrationMinSample').value),
+      highConsensusThreshold: Number($('fsHighConsensusThreshold').value),
+      consensusPinThreshold: Number($('fsConsensusPinThreshold').value)
     };
     if (Object.values(newCfg).some(v => isNaN(v))) {
       alert('One or more fields are blank or not a number — fill in every field before saving.');
@@ -14532,6 +14555,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           parlay_leg_weight: newCfg.parlayLegWeight,
           tier_calibration_weight: newCfg.tierCalibrationWeight,
           tier_calibration_min_sample: newCfg.tierCalibrationMinSample,
+          high_consensus_threshold: newCfg.highConsensusThreshold,
+          consensus_pin_threshold: newCfg.consensusPinThreshold,
           updated_at: new Date().toISOString()
         })
       });
@@ -15339,7 +15364,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 288; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 289; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
