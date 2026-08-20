@@ -340,6 +340,16 @@ Deno.serve(async (req) => {
       pointsrebounds: [{ key: '', group: 'batting' }],
       pointsassists: [{ key: '', group: 'batting' }],
       reboundsassists: [{ key: '', group: 'batting' }],
+      // CONFIRMED REAL GAP, direct report 2026-08-20: "Pts/Assists" (a real
+      // transcribed prop_stat) normalizes to "ptsassists" and had no entry
+      // here at all, even though the single-stat abbreviations just above
+      // (pts/ast/reb/stl/blk) already work fine -- the combo stats simply
+      // never got the same abbreviated-form treatment. Same reasoning
+      // extended to the other two/three-stat combos.
+      ptsrebassists: [{ key: '', group: 'batting' }],
+      ptsreb: [{ key: '', group: 'batting' }],
+      ptsassists: [{ key: '', group: 'batting' }],
+      rebassists: [{ key: '', group: 'batting' }],
     };
 
     // Compound "made-attempted" fields (e.g. "3-8") -- caller wants the
@@ -467,14 +477,15 @@ Deno.serve(async (req) => {
           const hr = hrIdx >= 0 ? espnStatToNumber(row.stats[hrIdx]) : null;
           const rbi = rbiIdx >= 0 ? espnStatToNumber(row.stats[rbiIdx]) : null;
           value = (hr !== null && rbi !== null) ? hr + rbi : null;
-        } else if (statNorm === 'pointsreboundsassists' || statNorm === 'pointsrebounds' || statNorm === 'pointsassists' || statNorm === 'reboundsassists') {
+        } else if (statNorm === 'pointsreboundsassists' || statNorm === 'pointsrebounds' || statNorm === 'pointsassists' || statNorm === 'reboundsassists'
+          || statNorm === 'ptsrebassists' || statNorm === 'ptsreb' || statNorm === 'ptsassists' || statNorm === 'rebassists') {
           const pIdx = row.keys.indexOf('points'), rIdx = row.keys.indexOf('rebounds'), aIdx = row.keys.indexOf('assists');
           const p = pIdx >= 0 ? espnStatToNumber(row.stats[pIdx]) : null;
           const r = rIdx >= 0 ? espnStatToNumber(row.stats[rIdx]) : null;
           const a = aIdx >= 0 ? espnStatToNumber(row.stats[aIdx]) : null;
-          if (statNorm === 'pointsreboundsassists') value = (p !== null && r !== null && a !== null) ? p + r + a : null;
-          else if (statNorm === 'pointsrebounds') value = (p !== null && r !== null) ? p + r : null;
-          else if (statNorm === 'pointsassists') value = (p !== null && a !== null) ? p + a : null;
+          if (statNorm === 'pointsreboundsassists' || statNorm === 'ptsrebassists') value = (p !== null && r !== null && a !== null) ? p + r + a : null;
+          else if (statNorm === 'pointsrebounds' || statNorm === 'ptsreb') value = (p !== null && r !== null) ? p + r : null;
+          else if (statNorm === 'pointsassists' || statNorm === 'ptsassists') value = (p !== null && a !== null) ? p + a : null;
           else value = (r !== null && a !== null) ? r + a : null;
         } else {
           const idx = row.keys.indexOf(spec.key);
