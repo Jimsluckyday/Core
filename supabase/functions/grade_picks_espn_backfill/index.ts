@@ -292,8 +292,18 @@ Deno.serve(async (req) => {
       return combined < threshold ? 'win' : 'loss';
     }
 
-    // ---- Player Prop grading (MLB + WNBA only) ----
-    const PLAYER_PROP_SPORTS = ['mlb', 'wnba'];
+    // ---- Player Prop grading (MLB, WNBA, NBA) ----
+    // CONFIRMED REAL GAP, direct report 2026-08-20: NBA was the single
+    // largest remaining category of "unsupported" picks after the WNBA/MLB
+    // Player Prop work above (roughly 48 of ~60 in one real day's batch) --
+    // not a data problem, NBA was simply never added to this list at all.
+    // Confirmed directly against ESPN's own NBA box score data (a real
+    // June 5 2026 Knicks @ Spurs game): identical schema to WNBA -- same
+    // stat keys (points/rebounds/assists/steals/blocks/turnovers/3PM), one
+    // single stat group with no pitching/batting-style split (same as
+    // WNBA), so NBA_STAT_SPECS below is a straight copy of WNBA_STAT_SPECS
+    // and needs no new matching logic at all.
+    const PLAYER_PROP_SPORTS = ['mlb', 'wnba', 'nba'];
 
     // Which raw ESPN box-score stat group + key to read for each prop
     // stat, in the order to try them. "strikeouts" tries pitching first
@@ -351,6 +361,9 @@ Deno.serve(async (req) => {
       ptsassists: [{ key: '', group: 'batting' }],
       rebassists: [{ key: '', group: 'batting' }],
     };
+    // Identical box-score schema to WNBA (confirmed directly, see
+    // PLAYER_PROP_SPORTS comment above) -- same spec, same keys.
+    const NBA_STAT_SPECS: Record<string, StatSpec[]> = WNBA_STAT_SPECS;
 
     // Compound "made-attempted" fields (e.g. "3-8") -- caller wants the
     // made count, always the first number. Plain numeric fields pass
@@ -410,7 +423,7 @@ Deno.serve(async (req) => {
     }
 
     async function gradePlayerProp(
-      pick: any, sportNorm: 'mlb' | 'wnba', espnPath: string, games: any[], boxCache: Record<string, any>
+      pick: any, sportNorm: 'mlb' | 'wnba' | 'nba', espnPath: string, games: any[], boxCache: Record<string, any>
     ): Promise<{ grade: 'win' | 'loss' | 'push' | null; note: string | null; notFinal?: boolean; unsupported?: boolean }> {
       const statNorm = normalize(pick.prop_stat || '');
       // Confirmed real finding (direct report): Total Bases can't be
@@ -421,7 +434,10 @@ Deno.serve(async (req) => {
       if (statNorm === 'totalbases' && sportNorm === 'mlb') {
         return { grade: null, unsupported: true, note: "Total Bases can't be computed from ESPN's box score data -- it doesn't break out doubles/triples, and the only rate stats available here (AVG/OBP/SLG) are season totals, not this game's -- needs manual grading." };
       }
-      const specs = (sportNorm === 'mlb' ? MLB_STAT_SPECS : WNBA_STAT_SPECS)[statNorm];
+      const STAT_SPECS_BY_SPORT: Record<'mlb' | 'wnba' | 'nba', Record<string, StatSpec[]>> = {
+        mlb: MLB_STAT_SPECS, wnba: WNBA_STAT_SPECS, nba: NBA_STAT_SPECS
+      };
+      const specs = STAT_SPECS_BY_SPORT[sportNorm][statNorm];
       if (!specs) return { grade: null, unsupported: true, note: `Stat "${pick.prop_stat}" is not supported by this grader yet -- needs manual grading.` };
 
       const playerNorm = normalize(pick.prop_player || '');
@@ -725,7 +741,7 @@ Deno.serve(async (req) => {
 
           if (isPlayerProp) {
             const propLabel = `${pick.prop_player || '?'} ${pick.prop_stat || '?'}`;
-            const result = await gradePlayerProp(pick, sportNormForProps as 'mlb' | 'wnba', espnPath, games, boxscoreCache);
+            const result = await gradePlayerProp(pick, sportNormForProps as 'mlb' | 'wnba' | 'nba', espnPath, games, boxscoreCache);
             if (result.notFinal) {
               sportResult.not_final_yet.push({ id: pick.id, selection: propLabel });
               continue;
