@@ -105,6 +105,29 @@ const STAT_ROUND_MATCHUP = normalize('Round Matchup');
 const STAT_TOURNAMENT_MATCHUP = normalize('Tournament Matchup');
 const STAT_TOURNAMENT_WINNER = normalize('Tournament Winner');
 
+// CONFIRMED FIX, ported from validate-nba-player-txt/validate-wnba-player-txt
+// (same real-world failure, same real fix): a bare fetch() to ESPN sends no
+// User-Agent header at all, which is a known trigger for an API's bot-
+// protection/WAF to hard-reset the connection instead of responding
+// normally, even though the identical request works fine from anywhere
+// that sends a real browser-style User-Agent. Applied proactively here
+// (not from a confirmed failure of THIS specific function yet) since the
+// underlying cause is about how Deno's Edge Function runtime talks to
+// ESPN, not anything specific to golf data -- same root cause already
+// twice-confirmed for two sibling functions calling the same host.
+async function espnFetch(url: string, attempts = 2): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CoreBettingSolutions-ScheduleSync/1.0)' } });
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 async function db(supabaseUrl: string, serviceRoleKey: string, path: string, opts: RequestInit = {}) {
   const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...opts,
@@ -178,7 +201,7 @@ Deno.serve(async (req) => {
     }
 
     const espnDate = targetDate.replace(/-/g, '');
-    const scoreboardRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?dates=${espnDate}`);
+    const scoreboardRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?dates=${espnDate}`);
     if (!scoreboardRes.ok) {
       return new Response(JSON.stringify({ ...result, error: `ESPN golf scoreboard request failed (${scoreboardRes.status})` }), {
         status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
