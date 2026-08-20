@@ -22,6 +22,20 @@
 // approach (e.g. a proxy, or a paid data source) rather than this direct
 // fetch.
 //
+// CONFIRMED FIX, applied proactively for exactly this suspected issue:
+// validate-nba-player-txt and validate-wnba-player-txt both hit a real,
+// confirmed version of this same failure shape against ESPN (not this
+// host, but the same class of API) -- "request failed" from inside Deno's
+// Edge Function runtime on a URL that worked fine fetched directly, root-
+// caused to Deno's default fetch() sending no User-Agent header at all, a
+// common bot-protection/WAF trigger for a hard connection reset instead
+// of a normal response. Every call to api-web.nhle.com in this file now
+// goes through the nhlFetch() wrapper below (real User-Agent + one retry)
+// instead of a bare fetch() -- this doesn't independently confirm the
+// caveat above, but it's the same fix that resolved the confirmed NBA/
+// WNBA case, so it's the natural first thing to try here too before
+// assuming a proxy or paid source is actually needed.
+//
 // Call with: POST /validate-nhl-player
 // Body: { date: "2026-06-04", checks: [{ id: "row-1", playerName: "Jack Eichel" }, ...] }
 
@@ -32,6 +46,19 @@ const corsHeaders = {
 
 function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+}
+
+async function nhlFetch(url: string, attempts = 2): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CoreBettingSolutions-ScheduleSync/1.0)' } });
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 Deno.serve(async (req) => {
@@ -53,7 +80,7 @@ Deno.serve(async (req) => {
     // (a gameWeek array, each entry its own date), not just the single
     // requested day -- confirmed directly from real documentation/usage
     // examples, not assumed. Filter down to the one matching date.
-    const scheduleRes = await fetch(`https://api-web.nhle.com/v1/schedule/${targetDate}`);
+    const scheduleRes = await nhlFetch(`https://api-web.nhle.com/v1/schedule/${targetDate}`);
     if (!scheduleRes.ok) {
       return new Response(JSON.stringify({ error: 'NHL schedule request failed', status: scheduleRes.status }), {
         status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -94,7 +121,7 @@ Deno.serve(async (req) => {
     let loggedFirstRoster = false;
     for (const t of teamsToday) {
       try {
-        const rosterRes = await fetch(`https://api-web.nhle.com/v1/roster/${t.abbrev}/current`);
+        const rosterRes = await nhlFetch(`https://api-web.nhle.com/v1/roster/${t.abbrev}/current`);
         if (!rosterRes.ok) continue;
         const rosterData = await rosterRes.json();
         if (!loggedFirstRoster) {
