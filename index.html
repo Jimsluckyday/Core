@@ -204,33 +204,26 @@
     border: 1.5px solid currentColor;
     transform: rotate(-2deg);
   }
-  .stamp.win { color: var(--stamp-green); }
-  .stamp.loss { color: var(--stamp-red); }
-  .stamp.push { color: var(--stamp-gray); }
   .stamp.pending { color: var(--stamp-amber); }
-  /* Direct request: a rotated text word was hard to tell apart at a glance
-     across several stacked parlay legs. Win/loss/push become a plain dot --
-     solid fill, same colors as before -- so a graded leg reads left-to-right
-     without stopping to parse rotated text. Pending deliberately KEEPS its
-     original readable text badge (direct follow-up request: it should stand
-     out MORE than the others, not blend in as a same-size dot) -- so it's
-     excluded here and still gets the base .stamp pill look below. Scoped to
-     .win/.loss/.push only, so this never touches the base .stamp look used
-     elsewhere for Hot Pick / Consensus Pick / Verify date flags. */
+  /* Direct request: a rotated colored-text word was hard to tell apart at a
+     glance across several stacked parlay legs. Win/loss/push become a solid
+     color pill with the word in WHITE -- reads as "here's a definite result"
+     at a glance without needing to parse rotated colored text, while a
+     solid fill vs. Pending's hollow outline is itself the pending-vs-graded
+     signal. Pending deliberately KEEPS its original hollow outline + colored
+     text (direct follow-up request: it should stand out MORE than the
+     others, not blend in) -- so it's excluded here and still gets the base
+     .stamp pill look above. Scoped to .win/.loss/.push only, so this never
+     touches the base .stamp look used elsewhere for Hot Pick / Consensus
+     Pick / Verify date flags. */
   .stamp.win, .stamp.loss, .stamp.push {
-    width: 12px;
-    height: 12px;
-    padding: 0;
-    border-radius: 50%;
-    border-width: 2px;
-    font-size: 0;
-    line-height: 0;
-    overflow: hidden;
-    text-indent: -9999px;
+    color: #fff;
+    border: none;
     transform: none;
-    vertical-align: middle;
-    background: currentColor;
   }
+  .stamp.win { background: var(--stamp-green); }
+  .stamp.loss { background: var(--stamp-red); }
+  .stamp.push { background: var(--stamp-gray); }
 
   .grade-btns { display: flex; gap: 4px; align-items: center; }
   .grade-btns button.win { border-color: var(--stamp-green); color: var(--stamp-green); background: transparent; }
@@ -6458,7 +6451,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         tierCell,
         unitSizeCell,
         oddsText,
-        `<span class="stamp ${p.result}">${p.result}</span>`,
+        `<span class="stamp ${p.result}">${p.result === 'win' ? 'Win' : p.result === 'loss' ? 'Loss' : p.result === 'push' ? 'Push' : 'Pending'}</span>`,
         escapeHtml(p.source_image || '—'),
         eventNameCell,
         startTimeCell,
@@ -6671,8 +6664,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
   .filter-panel .btn-ok { background: #234d35; color: #eae5d6; border: 1px solid #234d35; }
   .filter-panel .btn-clear { background: transparent; border: 1px solid #b9b09a; }
   .stamp { display: inline-block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 20px; border: 1.5px solid currentColor; transform: rotate(-2deg); }
-  .stamp.win { color: #2d6a4f; } .stamp.loss { color: #8a2f3a; } .stamp.push { color: #6b6456; } .stamp.pending { color: #a3730a; }
-  .stamp.win, .stamp.loss, .stamp.push { width: 12px; height: 12px; padding: 0; border-radius: 50%; border-width: 2px; font-size: 0; line-height: 0; overflow: hidden; text-indent: -9999px; transform: none; vertical-align: middle; background: currentColor; }
+  .stamp.pending { color: #a3730a; }
+  .stamp.win, .stamp.loss, .stamp.push { color: #fff; border: none; transform: none; }
+  .stamp.win { background: #2d6a4f; } .stamp.loss { background: #8a2f3a; } .stamp.push { background: #6b6456; }
   .mini { font-family: inherit; font-size: 10px; padding: 4px 8px; border-radius: 2px; cursor: pointer; margin: 2px 2px 2px 0; border: 1.5px solid #234d35; background: transparent; color: #234d35; }
   .mini.win { border-color: #2d6a4f; color: #2d6a4f; }
   .mini.loss { border-color: #8a2f3a; color: #8a2f3a; }
@@ -7334,7 +7328,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
                   '<button class="mini loss" data-leg-grade="' + leg.id + '" data-result="loss">Loss</button>' +
                   '<button class="mini push" data-leg-grade="' + leg.id + '" data-result="push">Push</button>' +
                 '</span>'
-              : '<span class="stamp ' + leg.result + '"></span>';
+              : '<span class="stamp ' + leg.result + '">' + (leg.result === 'win' ? 'Win' : leg.result === 'loss' ? 'Loss' : 'Push') + '</span>';
             const link = linkByLegId[leg.id] || {};
             const linkTier = link.pick_tier;
             const tierSelectHtml = '<select class="leg-tier-select" data-parlay-id="' + parlayId + '" data-leg-id="' + leg.id + '" style="font-family:inherit;font-size:10px;padding:1px 2px;margin-left:6px;">' +
@@ -7374,7 +7368,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
                 method: 'PATCH',
                 body: JSON.stringify({ result: result, graded_at: new Date().toISOString() })
               });
-              span.outerHTML = '<span class="stamp ' + result + '">' + result + '</span>';
+              span.outerHTML = '<span class="stamp ' + result + '">' + (result === 'win' ? 'Win' : result === 'loss' ? 'Loss' : 'Push') + '</span>';
               if (typeof op2.cascadeGradeMatchingPending === 'function') {
                 await op2.cascadeGradeMatchingPending({
                   id: legId,
@@ -10024,8 +10018,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
   .empty-state { font-style: italic; color: #55584d; }
   .stamp { display: inline-block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 20px; border: 1.5px solid currentColor; transform: rotate(-2deg); }
-  .stamp.win { color: #2d6a4f; } .stamp.loss { color: #8a2f3a; } .stamp.push { color: #6b6456; } .stamp.pending { color: #a3730a; }
-  .stamp.win, .stamp.loss, .stamp.push { width: 12px; height: 12px; padding: 0; border-radius: 50%; border-width: 2px; font-size: 0; line-height: 0; overflow: hidden; text-indent: -9999px; transform: none; vertical-align: middle; background: currentColor; }
+  .stamp.pending { color: #a3730a; }
+  .stamp.win, .stamp.loss, .stamp.push { color: #fff; border: none; transform: none; }
+  .stamp.win { background: #2d6a4f; } .stamp.loss { background: #8a2f3a; } .stamp.push { background: #6b6456; }
 </style>
 </head><body>
   <h1>Consensus Picks <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
@@ -11142,7 +11137,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
         <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
         <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
-        <td><span class="stamp ${p.result}">${p.result}</span></td>
+        <td><span class="stamp ${p.result}">${p.result === 'win' ? 'Win' : p.result === 'loss' ? 'Loss' : p.result === 'push' ? 'Push' : 'Pending'}</span></td>
         <td>${p.is_published ? '<span style="color:var(--stamp-amber);font-weight:bold;">Published</span>' : '—'}</td>
       </tr>`).join('');
 
@@ -15666,7 +15661,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 299; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 300; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
