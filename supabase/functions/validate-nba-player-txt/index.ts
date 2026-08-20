@@ -61,6 +61,34 @@ function normalize(s: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+// CONFIRMED FIX, direct real-world report: two consecutive live runs both
+// failed with "ESPN NBA scoreboard request failed" on a date independently
+// confirmed to have real games (2026-06-05, NBA Finals Game 2) -- ruled out
+// ESPN being down (the exact same URL fetched fine from a normal browser
+// at the same time). Same root cause and fix already proven in this
+// project for CricketData.org (schedule-sync-backfill's own Fix #28):
+// Deno's default fetch() sends no User-Agent header at all, which is a
+// common trigger for an API's bot-protection/WAF to hard-reset the
+// connection instead of responding normally, even though the identical
+// request works fine from anywhere that sends a real browser-style
+// User-Agent. Every fetch to ESPN in this file now goes through this
+// wrapper instead of a bare fetch() -- also retries once on a network-
+// level failure, same defensive pattern as the Cricket fix, in case the
+// real cause turns out to be an intermittent block rather than a
+// consistent one either way.
+async function espnFetch(url: string, attempts = 2): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CoreBettingSolutions-ScheduleSync/1.0)' } });
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -79,7 +107,7 @@ Deno.serve(async (req) => {
     // ESPN wants YYYYMMDD, no dashes -- same convention used throughout
     // schedule-sync-backfill and validate-wnba-player.
     const espnDate = targetDate.replace(/-/g, '');
-    const scoreboardRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${espnDate}`);
+    const scoreboardRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${espnDate}`);
     if (!scoreboardRes.ok) {
       return new Response(JSON.stringify({ error: 'ESPN NBA scoreboard request failed', status: scoreboardRes.status }), {
         status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -124,7 +152,7 @@ Deno.serve(async (req) => {
     // every team's roster in parallel, unlike BALLDONTLIE.
     const rosterResults = await Promise.allSettled(
       [...teamsToday.keys()].map(id =>
-        fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${id}/roster`).then(r => r.ok ? r.json() : null)
+        espnFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${id}/roster`).then(r => r.ok ? r.json() : null)
       )
     );
     const rosterByNorm = new Map<string, { teamName: string; opponent: string; displayName: string }>();
