@@ -12522,10 +12522,35 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return { confPts, legBreakdown };
   }
 
+  // Scores any single entry (candidate OR leg) exactly the way a straight
+  // candidate is scored in the main scoredStraight.map() below -- pulled
+  // out here so a published LEG (see finalizeStraightScored's groups param
+  // below) can be given a real, comparable score/card without duplicating
+  // this formula a third time (scoreParlayConfluence's own legBreakdown is
+  // the second place this same math already lives).
+  function scoreEntryStandalone(entry, groups) {
+    const { confPts, agreeingCappers } = scoreConfluenceFor(entry, groups);
+    const total = entry.base.overallPts + entry.base.betTypePts + entry.base.streakPts + entry.base.tierPts + entry.base.tierCalibrationPts + confPts;
+    return {
+      ...entry,
+      agreeingCappers,
+      score: {
+        total: Math.round(total * 10) / 10,
+        overallPts: Math.round(entry.base.overallPts * 10) / 10,
+        betTypePts: Math.round(entry.base.betTypePts * 10) / 10,
+        streakPts: Math.round(entry.base.streakPts * 10) / 10,
+        tierPts: Math.round(entry.base.tierPts * 10) / 10,
+        tierCalibrationPts: Math.round(entry.base.tierCalibrationPts * 10) / 10,
+        confluencePts: Math.round(confPts * 10) / 10
+      }
+    };
+  }
+
   // Head-to-head conflict detection + dedup to one card per real bet.
-  // Pure function of the scored straight candidates alone, so both the
-  // live tool and Scorecard Review get identical conflict/dedup behavior.
-  function finalizeStraightScored(scoredStraight) {
+  // Pure function of the scored straight candidates (plus the full
+  // confluence groups, for the leg lookup below) -- both the live tool and
+  // Scorecard Review get identical conflict/dedup behavior.
+  function finalizeStraightScored(scoredStraight, groups) {
     const conflictGroups = {};
     scoredStraight.forEach(e => {
       const eventId = e.pick.rundown_event_id;
@@ -12562,7 +12587,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return Object.values(groupsByKey).map(group => {
       group.sort((a, b) => b.score.total - a.score.total);
       const winner = group[0];
-      winner.duplicateEntries = group.slice(1);
+      const duplicateEntries = group.slice(1);
+
+      // Direct report, real live case: a capper's own row can be BOTH a
+      // parlay leg AND independently published (a deliberately supported
+      // state -- see findExistingLeg's own history) -- but a leg is NEVER
+      // its own scored candidate (straightCandidateEntries below filters
+      // every leg out on purpose, since a capper never called it standalone).
+      // Without this, a published leg sharing this exact real-bet key was
+      // completely invisible here: not the winning card, not a duplicate,
+      // nowhere -- discoverable only by hunting through "All Published
+      // Picks." Every published leg in this group is scored the identical
+      // way a standalone candidate would be and folded in as a duplicate
+      // too, tagged so it's clear it's a leg, not a competing full call.
+      const legDuplicates = (groups[confluenceKey(winner.pick)] || [])
+        .filter(e => e.isLeg && e.pick.is_published)
+        .map(e => scoreEntryStandalone(e, groups));
+      winner.duplicateEntries = duplicateEntries.concat(legDuplicates);
       return winner;
     });
   }
@@ -12742,7 +12783,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const dupBtns = s.duplicateEntries.map(d => {
         const dName = escapeHtml(d.pick.cappers ? d.pick.cappers.name : '—');
         const dPub = d.pick.is_published ? ' <span style="color:var(--stamp-green);font-weight:bold;">&#10003; published</span>' : '';
-        return `<button type="button" class="dup-capper-btn" data-dup-id="${d.pick.id}">${dName} — ${d.score.total}${dPub}</button>`;
+        // A leg is never a competing standalone candidate (see
+        // finalizeStraightScored's own comment) -- tagged so it reads as
+        // "this capper's published leg on this bet," not another full call.
+        const dLegTag = d.isLeg ? ' <span style="color:var(--stamp-amber);">(leg)</span>' : '';
+        return `<button type="button" class="dup-capper-btn" data-dup-id="${d.pick.id}">${dName} — ${d.score.total}${dLegTag}${dPub}</button>`;
       }).join('');
       duplicatesHtml = `
       <div class="pr-duplicates">
@@ -13223,7 +13268,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // Head-to-head conflict detection + dedup to one card per real bet
       // is now the shared finalizeStraightScored() above -- see its own
       // comment for the full reasoning (unchanged from before).
-      const dedupedStraight = finalizeStraightScored(scoredStraight);
+      const dedupedStraight = finalizeStraightScored(scoredStraight, groups);
 
       const allScored = dedupedStraight.concat(scoredParlays);
       registerScoredEntries(allScored);
@@ -14067,7 +14112,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         };
       });
 
-      const dedupedStraight = finalizeStraightScored(scoredStraight);
+      const dedupedStraight = finalizeStraightScored(scoredStraight, groups);
       const allScored = dedupedStraight.concat(scoredParlays)
         .map(withFrozenSnapshotIfAvailable)
         .sort((a, b) => b.score.total - a.score.total);
@@ -15149,7 +15194,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 283; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 284; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
