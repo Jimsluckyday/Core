@@ -286,19 +286,28 @@
   }
   .pr-leg-published { background: rgba(45,106,79,0.1); border-left: 3px solid var(--stamp-green); padding-left: 8px; }
   .pr-agreeing-name { font-weight: bold; min-width: 100px; }
+  .pr-pinned-section {
+    border: 2px solid var(--stamp-red); border-radius: 3px; background: rgba(138,47,58,0.05);
+    padding: 10px; margin-bottom: 18px;
+  }
+  .pr-pinned-header {
+    font-size: 11px; font-weight: bold; color: var(--stamp-red); margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
   .pr-consensus {
     width: 100%; padding: 6px 12px; border-top: 1px dashed var(--field); background: #f7f4ea;
     font-size: 11px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   }
-  .pr-consensus-high { background: rgba(163,115,10,0.14); border-top: 1px solid var(--stamp-amber); }
+  /* Direct report: the dark-field version blended into the page's usual
+     green/white palette -- this is meant to catch the eye, not match the
+     furniture. Red pops hard against the paper/green backdrop everywhere
+     else on this page and is already a proven-contrast color here. */
+  .pr-consensus-high { background: rgba(138,47,58,0.14); border-top: 2px solid var(--stamp-red); }
   .pr-consensus-tag {
-    /* Direct report: black-on-amber (the previous fill) reads poorly --
-       same category of issue as the earlier green-chip contrast problem.
-       Dark field / cream text is the same high-contrast combo already used
-       elsewhere in this file for solid-fill chips (~7.6:1, comfortably
-       past WCAG AA) rather than another middling color-on-color pairing. */
+    /* White-on-red, ~8.2:1 contrast -- comfortably past WCAG AA and, per
+       direct report, actually visible against the page's usual palette. */
     font-size: 9px; font-weight: bold; letter-spacing: 0.05em; text-transform: uppercase;
-    background: var(--field); color: var(--paper); padding: 2px 7px; border-radius: 3px;
+    background: var(--stamp-red); color: var(--paper); padding: 2px 7px; border-radius: 3px;
   }
   .pr-duplicates {
     width: 100%; padding: 8px 12px; border-top: 1px dashed var(--field); background: #f7f4ea;
@@ -12545,6 +12554,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // dominate the ranking on its own.
   const HIGH_CONSENSUS_THRESHOLD = 6;
 
+  // Direct request: "leaving it near the same position on the page would
+  // cause us to miss this every time... anything above 7 people agreeing
+  // gets bumped up to the very top of the list above the #1 ranked pick.
+  // It can keep the ranking score." A separate, higher bar than the
+  // on-card badge above -- pinning above #1 is a much bigger visual
+  // interruption than a badge, reserved for the genuinely rare, can't-
+  // miss-this case. The pinned copy never changes the pick's real score or
+  // its normal position further down the list -- see renderPublishRank's
+  // pinned section below.
+  const CONSENSUS_PIN_THRESHOLD = 8;
+
   // Same total the consensus line/badge on the card itself is built from --
   // kept as its own tiny helper (rather than reading it back off the
   // rendered HTML) so the "Sort by consensus" view below can order by it
@@ -12888,7 +12908,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // Placed right in the card head next to Hot Pick -- same prominence,
     // same at-a-glance purpose -- but a handshake, deliberately never fire
     // (that's reserved for the capper-streak signal, a different thing).
-    const consensusBadge = isHighConsensus ? `<span class="stamp" style="border-color:var(--stamp-green);color:var(--stamp-green);transform:none;margin-right:8px;">&#129309; Consensus Pick</span>` : '';
+    const consensusBadge = isHighConsensus ? `<span class="stamp" style="border-color:var(--stamp-red);color:var(--stamp-red);transform:none;margin-right:8px;">&#129309; Consensus Pick</span>` : '';
     const actionHtml = opts.readOnly
       ? (p.is_published ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span>' : '<span style="color:var(--ink-soft);">Not published</span>')
       : (p.is_published
@@ -13028,9 +13048,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   function wireCardActions(entries) {
+    // querySelectorAll, not querySelector -- a high-consensus pick's card
+    // can now render TWICE at once (its normal ranked spot, plus the
+    // pinned callout above the list), each a separate DOM node sharing the
+    // same data-pick-id. A single querySelector would silently leave
+    // whichever copy comes second in DOM order with a dead Publish button.
     entries.forEach(s => {
-      const card = document.querySelector(`.pr-card[data-pick-id="${s.pick.id}"] .pr-action`);
-      if (card) wireActionCell(card, s);
+      document.querySelectorAll(`.pr-card[data-pick-id="${s.pick.id}"] .pr-action`).forEach(card => wireActionCell(card, s));
     });
   }
 
@@ -13480,7 +13504,33 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       renderPastDueCards(pickTypeFilter, sortMode);
     }
 
+    // Direct request: "leaving it near the same position on the page would
+    // cause us to miss this every time." A badge alone wasn't enough --
+    // this pulls anything past CONSENSUS_PIN_THRESHOLD out to a dedicated
+    // callout above the #1 ranked pick, regardless of current search/sort/
+    // filter state, so it's physically impossible to scroll past without
+    // seeing it. The card rendered here is the exact same card (same real
+    // score, same rank number) -- it's shown a second time, not moved;
+    // it still sits in its normal spot further down the list too. Past-due
+    // picks are eligible too, same reasoning as everywhere else they're
+    // still real, scoreable candidates.
+    const realRankOf = (s) => {
+      const i1 = scored.indexOf(s);
+      if (i1 >= 0) return i1 + 1;
+      const i2 = (pastDueScored || []).indexOf(s);
+      return i2 >= 0 ? i2 + 1 : 0;
+    };
+    const pinnedEntries = scored.concat(pastDueScored || [])
+      .filter(s => consensusTotalFor(s) >= CONSENSUS_PIN_THRESHOLD)
+      .sort((a, b) => consensusTotalFor(b) - consensusTotalFor(a));
+    const pinnedSectionHtml = pinnedEntries.length ? `
+      <div class="pr-pinned-section">
+        <div class="pr-pinned-header">&#128681; High consensus — ${pinnedEntries.length} pick${pinnedEntries.length === 1 ? '' : 's'} with ${CONSENSUS_PIN_THRESHOLD}+ cappers agreeing, pinned here regardless of rank so it's never missed. Ranking score is unchanged -- this doesn't mean publish it, it means look at it.</div>
+        ${pinnedEntries.map(s => publishRankCardHtml(s, realRankOf(s))).join('')}
+      </div>` : '';
+
     wrap.innerHTML = `
+      ${pinnedSectionHtml}
       <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">
         ${scored.length} pending pick${scored.length === 1 ? '' : 's'} scored, sorted highest to lowest. <strong>${publishedCount}</strong> currently published from this list.${conflictCount ? ` <strong style="color:var(--stamp-red);">&#9888; ${conflictCount} pick${conflictCount === 1 ? '' : 's'} in a head-to-head conflict</strong> — see the red warning on each affected card below.` : ''}
       </div>
@@ -13539,6 +13589,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // themselves. Guarded so this only ever attaches once per page load,
     // no matter how many times renderPublishRank() re-runs.
     wireDetailsToggle(wrap);
+    wireCardActions(pinnedEntries);
     applyFilterAndRender();
   }
 
@@ -15288,7 +15339,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 287; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 288; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
