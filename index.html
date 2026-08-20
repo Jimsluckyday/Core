@@ -1329,11 +1329,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <select id="prSport"><option value="">All sports</option></select>
           </div>
           <div class="field">
-            <label>Pending picks from</label>
+            <label>Pending picks from (event date)</label>
             <input id="prFrom" type="date" />
           </div>
           <div class="field">
-            <label>Pending picks to</label>
+            <label>Pending picks to (event date)</label>
             <input id="prTo" type="date" />
           </div>
           <div style="align-self:flex-end;">
@@ -1349,7 +1349,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </label>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Scores every currently-pending pick using four equally-weighted signals (25% each): win % <em>in this exact sport + bet type combo</em> (e.g. Tennis Spreads specifically, not Spreads in general), overall win %, current streak (a bad streak actively drags the score down, not just withholds a bonus), and confluence — a bonus or PENALTY when other cappers independently picked this exact same game/selection/line. An agreeing capper above a 50% record helps the score; one below 50% actively hurts it, and the effect grows stronger both with a larger losing sample and with more agreeing cappers (capped at 3+). The sport+bet-type rate blends toward that capper's broader all-sport rate for that bet type until enough sport-specific picks pile up — so "2-0 in Tennis Spreads" leans on their overall Spread record at first, rather than either treating 2-0 as proven or ignoring it as meaningless. All win percentages are otherwise sample-size-adjusted the same way — a lucky small sample can't out-rank a proven track record. Click the small "N agreeing ▾" note under any score to see exactly which other cappers contributed to that pick's confluence bonus. Sort by Score to find the best candidates, then click Publish on however many you want featured.
+          <strong>The date range above filters on event_date (when the game actually happens), never date_entered (when the pick was posted).</strong> A pick entered today for a game two days from now will not appear until that later event date falls inside the range -- so this alone can't publish a pick before its game happens. Every card below also shows its own "Event:" date in the header so you can visually confirm before publishing. Scores every currently-pending pick using four equally-weighted signals (25% each): win % <em>in this exact sport + bet type combo</em> (e.g. Tennis Spreads specifically, not Spreads in general), overall win %, current streak (a bad streak actively drags the score down, not just withholds a bonus), and confluence — a bonus or PENALTY when other cappers independently picked this exact same game/selection/line. An agreeing capper above a 50% record helps the score; one below 50% actively hurts it, and the effect grows stronger both with a larger losing sample and with more agreeing cappers (capped at 3+). The sport+bet-type rate blends toward that capper's broader all-sport rate for that bet type until enough sport-specific picks pile up — so "2-0 in Tennis Spreads" leans on their overall Spread record at first, rather than either treating 2-0 as proven or ignoring it as meaningless. All win percentages are otherwise sample-size-adjusted the same way — a lucky small sample can't out-rank a proven track record. Click the small "N agreeing ▾" note under any score to see exactly which other cappers contributed to that pick's confluence bonus. Sort by Score to find the best candidates, then click Publish on however many you want featured.
           <strong>Include parlays as candidates</strong> is off by default -- a parlay is still a fundamentally weaker bet type in aggregate, so it stays out of the everyday list. Turn it on to go looking for the rare outlier: a capper's own track record specifically ON parlays (his real "Parlay" bet-type win %, e.g. "15-0 on 2-leg parlays") now scores exactly like any other bet type once this is checked. A parlay's overall win % stays excluded from his general record either way (same correlated-outcome reasoning as its legs) -- only its own bet-type-specific record counts. Its confluence is the average of each of ITS OWN legs' confluence (how much other cappers independently agree with each team in the combo), not a match on its own "N-Leg Parlay" label.
         </div>
         <div id="publishRankWrap"></div>
@@ -12959,7 +12959,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         ${hotPickBadge}
         ${consensusBadge}
         <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${callText}${propBit}</span>
-        <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')}</span>
+        <span class="pr-meta">Event: ${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')}</span>
         <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
         <span class="pr-action">${actionHtml}</span>
       </div>
@@ -15383,7 +15383,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 291; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 292; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
