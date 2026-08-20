@@ -8258,6 +8258,57 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     URL.revokeObjectURL(url);
   }
 
+  // Shared CSV-export button + script, interpolated (via ${...}) into the
+  // read-only report pop-out windows below (Capper Leaderboard, Consensus
+  // Picks, etc.) -- a pop-out is a separate document and can't call back
+  // into this page's own downloadCsv, so each one needs its own copy of
+  // the export logic embedded in its template literal. Written here as ONE
+  // real function (not text typed directly inside another popup's template
+  // literal) specifically to avoid the backslash-stripping bug documented
+  // above on allPicksRowsToHtml's own CSV export ("this whole block is
+  // itself text inside the outer template literal... strips any backslash
+  // before a character it doesn't recognize") -- interpolating this
+  // function's already-fully-resolved return STRING via ${} just splices
+  // in plain text, no second escape pass, so this function can use normal
+  // single-backslash JS/regex escapes safely. Reads whatever <table>
+  // elements actually exist in that pop-out's DOM at click time (stripping
+  // any buttons/selects/inputs first), so it needs no per-report column
+  // mapping and stays correct even as a report's columns change later.
+  function csvExportPopoutScript(filenamePrefix) {
+    return `<script>
+(function() {
+  const btn = document.getElementById('exportCsvBtn');
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    const tables = Array.prototype.slice.call(document.querySelectorAll('table'));
+    if (!tables.length) { alert('Nothing to export yet.'); return; }
+    const blocks = tables.map(function(table) {
+      const rows = Array.prototype.slice.call(table.querySelectorAll('tr'));
+      return rows.map(function(tr) {
+        const cells = Array.prototype.slice.call(tr.querySelectorAll('th,td'));
+        return cells.map(function(td) {
+          const clone = td.cloneNode(true);
+          Array.prototype.slice.call(clone.querySelectorAll('button,select,input')).forEach(function(el) { el.parentNode.removeChild(el); });
+          const text = clone.textContent.replace(/\\s+/g, ' ').trim();
+          return /[",\\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+        }).join(',');
+      }).join('\\r\\n');
+    });
+    const csv = '\\ufeff' + blocks.join('\\r\\n\\r\\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '${filenamePrefix}-' + new Date().toISOString().split('T')[0] + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+})();
+<\/script>`;
+  }
+
   $('exportPicksCsvBtn').addEventListener('click', async () => {
     const btn = $('exportPicksCsvBtn');
     btn.disabled = true;
@@ -8798,8 +8849,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .filter-panel .btn-clear { background: transparent; border: 1px solid #b9b09a; }
 </style>
 </head><body>
-  <h1>Capper Leaderboard</h1>
+  <h1>Capper Leaderboard <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   ${tableHtml}
+  ${csvExportPopoutScript('capper-leaderboard')}
 <script>
 (function() {
   const table = document.getElementById('dataTable');
@@ -9079,8 +9131,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .filter-panel .btn-clear { background: transparent; border: 1px solid #b9b09a; }
 </style>
 </head><body>
-  <h1>Capper Performance by Bet Type</h1>
+  <h1>Capper Performance by Bet Type <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   ${tableHtml}
+  ${csvExportPopoutScript('capper-performance-by-bet-type')}
 <script>
 (function() {
   const table = document.getElementById('dataTable');
@@ -9512,10 +9565,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .filter-panel .btn-clear { background: transparent; border: 1px solid #b9b09a; }
 </style>
 </head><body>
-  <h1>Pick Tier Performance</h1>
+  <h1>Pick Tier Performance <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${escapeHtml(filterSummary)}</div>
   ${mainHtml}
   ${legHtml}
+  ${csvExportPopoutScript('pick-tier-performance')}
 <script>
 (function() {
   function wireSortableTable(table) {
@@ -9974,8 +10028,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .stamp.win, .stamp.loss, .stamp.push { width: 12px; height: 12px; padding: 0; border-radius: 50%; border-width: 2px; font-size: 0; line-height: 0; overflow: hidden; text-indent: -9999px; transform: none; vertical-align: middle; background: currentColor; }
 </style>
 </head><body>
-  <h1>Consensus Picks</h1>
+  <h1>Consensus Picks <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   ${bodyHtml}
+  ${csvExportPopoutScript('consensus-picks')}
 </body></html>`);
     win.document.close();
   }
@@ -10085,10 +10140,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .analysis-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head><body>
-  <h1>Top &amp; Bottom Cappers <button id="refreshTopBottomBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;cursor:pointer;vertical-align:middle;">&#8635; Refresh</button></h1>
+  <h1>Top &amp; Bottom Cappers <button id="refreshTopBottomBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;cursor:pointer;vertical-align:middle;">&#8635; Refresh</button> <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)} · min. ${minPicks} graded picks to qualify</div>
   ${topBottomTableHtml('Top 5', topRows)}
   ${topBottomTableHtml('Bottom 5', bottomRows)}
+  ${csvExportPopoutScript('top-bottom-cappers')}
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
     Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show.
   </div>
@@ -10339,7 +10395,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
 </style>
 </head><body>
-  <h1>Notable Statistics</h1>
+  <h1>Notable Statistics <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">
     ${result.totalCappers} cappers · ${result.totalPicks} graded picks · average ${Math.round(result.avgVolume * 10) / 10} picks/capper · minimum sample to qualify: ${result.minSample} (${minPct}% of average, floor ${absMin}) · confidence bar: ${barPct}%
   </div>
@@ -10356,6 +10412,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
     "Wilson range" is the 95% confidence interval on that slice's true win rate given its sample size -- a positive entry's LOWER bound already clears the bar (so it's a real signal, not lucky small-sample noise); a negative entry's UPPER bound already sits below the mirrored bar (so it's a real cold pattern, not an unlucky blip). This is a snapshot for you to act on by hand -- nothing here feeds the scoring formula yet.
   </div>
+  ${csvExportPopoutScript('notable-statistics')}
 </body></html>`);
     win.document.close();
   }
@@ -10421,13 +10478,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .empty-state { font-style: italic; color: #55584d; }
 </style>
 </head><body>
-  <h1>Capper Streaks</h1>
+  <h1>Capper Streaks <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)} · min. streak length ${minLen}</div>
   ${streaksTableHtml('🔥 Hot streaks (currently winning)', hotRows)}
   ${streaksTableHtml('🧊 Cold streaks (currently losing)', coldRows)}
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
     Streak counts consecutive picks, most recent first — a push doesn't break it. "Overall win %" is shown for context only; a capper can be on a cold streak right now even with a strong overall record, or vice versa.
   </div>
+  ${csvExportPopoutScript('capper-streaks')}
 </body></html>`);
     win.document.close();
   }
@@ -10793,7 +10851,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
 </style>
 </head><body>
-  <h1>Capper Analysis</h1>
+  <h1>Capper Analysis <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
 
   ${overallSection}
@@ -10802,6 +10860,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     A parlay that mixes sports (e.g. 8 MLB legs + 1 NHL leg) is credited as one "Total bet" / "Parlay bet" to EVERY sport it has a real leg in, so a sport's row is never left showing "0 Total bets" next to real "Parlay games" activity. This means the By Sport totals can add up to more than the Overall total above (each mixed parlay is still only 1 bet there, not double-counted) -- that's expected, not an error.
   </div>` : ''}
   ${typeSectionHtml}
+  ${csvExportPopoutScript('capper-analysis')}
 </body></html>`);
     win.document.close();
   }
@@ -15607,7 +15666,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 298; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 299; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
