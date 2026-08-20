@@ -12540,6 +12540,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // dominate the ranking on its own.
   const HIGH_CONSENSUS_THRESHOLD = 6;
 
+  // Same total the consensus line/badge on the card itself is built from --
+  // kept as its own tiny helper (rather than reading it back off the
+  // rendered HTML) so the "Sort by consensus" view below can order by it
+  // without needing to duplicate the standalone/leg breakdown logic that
+  // only the card rendering actually needs.
+  function consensusTotalFor(s) {
+    if (s.isParlayCandidate) return 0;
+    if (!s.agreeingCappers || !s.agreeingCappers.length) return 1;
+    return s.agreeingCappers.length + 1;
+  }
+
   // Scores any single entry (candidate OR leg) exactly the way a straight
   // candidate is scored in the main scoredStraight.map() below -- pulled
   // out here so a published LEG (see finalizeStraightScored's groups param
@@ -12800,11 +12811,12 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // uses the fire emoji -- confirmed that's reserved for the Hot Pick
     // capper-streak badge, a different signal entirely.
     let consensusHtml = '';
+    let isHighConsensus = false;
     if (!s.isParlayCandidate && s.agreeingCappers.length) {
       const standaloneCount = s.agreeingCappers.filter(c => !c.isLeg).length + 1; // +1: this card's own pick is always the standalone/winning call
       const legCount = s.agreeingCappers.filter(c => c.isLeg).length;
       const totalCount = standaloneCount + legCount;
-      const isHighConsensus = totalCount >= HIGH_CONSENSUS_THRESHOLD;
+      isHighConsensus = totalCount >= HIGH_CONSENSUS_THRESHOLD;
       const breakdown = legCount
         ? `${standaloneCount} independently, ${legCount} via parlay leg${legCount === 1 ? '' : 's'}`
         : `all called independently`;
@@ -12865,6 +12877,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     const isHotPick = s.streak.type === 'win' && s.streak.len >= scoringConfig.hotPickStreakThreshold;
     const hotPickBadge = isHotPick ? `<span class="stamp" style="border-color:var(--stamp-amber);color:var(--stamp-amber);transform:none;margin-right:8px;">&#128293; Hot Pick</span>` : '';
+    // Direct request: "a clear flag on why a pick with a potential low
+    // score [is near the top] ... similar to the hot flag this one is near
+    // the top because it's a consensus pick and investigate further."
+    // Placed right in the card head next to Hot Pick -- same prominence,
+    // same at-a-glance purpose -- but a handshake, deliberately never fire
+    // (that's reserved for the capper-streak signal, a different thing).
+    const consensusBadge = isHighConsensus ? `<span class="stamp" style="border-color:var(--stamp-green);color:var(--stamp-green);transform:none;margin-right:8px;">&#129309; Consensus Pick</span>` : '';
     const actionHtml = opts.readOnly
       ? (p.is_published ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span>' : '<span style="color:var(--ink-soft);">Not published</span>')
       : (p.is_published
@@ -12877,6 +12896,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <span class="pr-score">${s.score.total}</span>
         ${opts.resultBadge || ''}
         ${hotPickBadge}
+        ${consensusBadge}
         <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${callText}${propBit}</span>
         <span class="pr-meta">${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')}</span>
         <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
@@ -13405,9 +13425,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         </div>`;
     }
 
-    function renderPastDueCards(pickTypeFilter) {
+    function renderPastDueCards(pickTypeFilter, sortMode) {
       if (!pastDueScored || !pastDueScored.length) return;
-      const filtered = pastDueScored.filter(s => pickTypeMatches(s, pickTypeFilter));
+      let filtered = pastDueScored.filter(s => pickTypeMatches(s, pickTypeFilter));
+      // Rank number shown is deliberately always the ORIGINAL score rank
+      // (pastDueScored.indexOf), even in consensus order -- see
+      // applyFilterAndRender's own comment on this same choice.
+      if (sortMode === 'consensus') filtered = filtered.slice().sort((a, b) => consensusTotalFor(b) - consensusTotalFor(a));
       const cardsHtml = filtered.map(s => publishRankCardHtml(s, pastDueScored.indexOf(s) + 1)).join('');
       $('pastDueCardsWrap').innerHTML = cardsHtml || '<div class="empty-state">Nothing matches that filter.</div>';
       wireCardActions(filtered);
@@ -13421,7 +13445,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const term = ($('prSearchBox').value || '').toLowerCase().trim();
       const publishedOnly = $('prPublishedOnlyCb').checked;
       const pickTypeFilter = $('prPickTypeFilter').value; // '' = both, 'straight', 'parlay'
-      const filtered = scored.filter(s => {
+      const sortMode = $('prSortMode').value; // 'score' (default) or 'consensus'
+      let filtered = scored.filter(s => {
         if (!pickTypeMatches(s, pickTypeFilter)) return false;
         if (publishedOnly && !s.pick.is_published) return false;
         if (!term) return true;
@@ -13430,13 +13455,24 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const propPlayer = (s.pick.prop_player || '').toLowerCase();
         return capperName.includes(term) || selection.includes(term) || propPlayer.includes(term);
       });
-      // Rank shown always reflects position in the FULL sorted list, not
-      // the filtered view -- so "#1" still means "#1 overall," even when
-      // searching narrows what's on screen.
+      // Direct request: "a clear flag on why a pick with a potential low
+      // score [is near the top] ... this one is near the top because it's
+      // a consensus pick and investigate further." Sorting here only
+      // reorders which cards appear where on screen -- the rank number
+      // shown on each card is deliberately still its ORIGINAL score rank
+      // (scored.indexOf, unchanged below), never its position in this
+      // consensus order. That's what makes the mismatch visible at all:
+      // seeing "#64" sitting at the top of the consensus view is the whole
+      // point, not something to hide by renumbering.
+      if (sortMode === 'consensus') filtered = filtered.slice().sort((a, b) => consensusTotalFor(b) - consensusTotalFor(a));
+      // Rank shown always reflects position in the FULL score-sorted list,
+      // not the filtered/reordered view -- so "#1" still means "#1 by
+      // score," even when searching or sorting by consensus changes what's
+      // on screen or in what order.
       const cardsHtml = filtered.map(s => publishRankCardHtml(s, scored.indexOf(s) + 1)).join('');
       $('prCardsWrap').innerHTML = cardsHtml || '<div class="empty-state">No pending picks match these filters.</div>';
       wireCardActions(filtered);
-      renderPastDueCards(pickTypeFilter);
+      renderPastDueCards(pickTypeFilter, sortMode);
     }
 
     wrap.innerHTML = `
@@ -13456,6 +13492,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             <option value="parlay">Parlays only</option>
           </select>
         </div>
+        <div class="field">
+          <label>Sort by</label>
+          <select id="prSortMode">
+            <option value="score">Score (highest first)</option>
+            <option value="consensus">Consensus (most cappers agreeing first)</option>
+          </select>
+        </div>
         <div style="align-self:flex-end;">
           <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:normal;">
             <input type="checkbox" id="prPublishedOnlyCb" /> Show published only
@@ -13463,7 +13506,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         </div>
       </div>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-        <strong>Pick type</strong> is a quick way to check parlays without them getting buried in a long ranked list -- switch to "Parlays only" (with "Include parlays as candidates" checked above) for a fast look at whether one stands out today, even if it wouldn't crack a Top 10 sorted by everything blended together.
+        <strong>Pick type</strong> is a quick way to check parlays without them getting buried in a long ranked list -- switch to "Parlays only" (with "Include parlays as candidates" checked above) for a fast look at whether one stands out today, even if it wouldn't crack a Top 10 sorted by everything blended together. <strong>Sort by Consensus</strong> reorders the same scored list by raw agreeing-capper headcount instead of score -- the rank number on each card still shows its real score rank, so a high-consensus pick sitting at the top of this view next to a low rank number (like #64) is exactly the mismatch worth a manual look, not a bug.
       </div>
       <div id="prCardsWrap"></div>
       ${pastDueSectionHtml()}`;
@@ -13471,6 +13514,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('prSearchBox').addEventListener('input', applyFilterAndRender);
     $('prPublishedOnlyCb').addEventListener('change', applyFilterAndRender);
     $('prPickTypeFilter').addEventListener('change', applyFilterAndRender);
+    $('prSortMode').addEventListener('change', applyFilterAndRender);
     // Delegated on wrap (stable across re-renders) rather than re-wired
     // per card on every applyFilterAndRender() call -- catches the toggle
     // click no matter how many times prCardsWrap's innerHTML gets replaced
@@ -15239,7 +15283,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 285; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 286; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
