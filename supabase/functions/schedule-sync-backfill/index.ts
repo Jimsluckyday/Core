@@ -366,6 +366,32 @@ function normalize(s: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+// CONFIRMED FIX, direct real-world report: two consecutive live runs of
+// validate-nba-player-txt/validate-wnba-player-txt both failed with "ESPN
+// scoreboard request failed" on a date confirmed to have real games (NBA
+// Finals Game 2) -- ruled out ESPN being down by fetching the exact same
+// URL directly, which succeeded. Same root cause and fix already proven in
+// THIS file for CricketData.org (see cricketFetch's own Fix #28 comment
+// below): Deno's default fetch() sends no User-Agent header at all, a
+// common trigger for an API's bot-protection/WAF to hard-reset the
+// connection instead of responding normally. Every ESPN call in this file
+// (main scoreboard, Tennis, Soccer, NBA/WNBA rosters) now goes through
+// this wrapper instead of a bare fetch() -- applied proactively to the
+// ones that hadn't failed yet too, since the root cause is about how
+// Deno's Edge Function runtime talks to ESPN, not anything sport-specific.
+async function espnFetch(url: string, attempts = 2): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CoreBettingSolutions-ScheduleSync/1.0)' } });
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 const NAME_SUFFIX_RE = /(jr|sr|ii|iii|iv)$/;
 function registerPlayerName(map: Map<string, { team: string; startTime: string }>, name: string, info: { team: string; startTime: string }) {
   const norm = normalize(name);
@@ -646,7 +672,7 @@ Deno.serve(async (req) => {
           const candidateDates = await getCandidateQueryDates(db, ourSport.id, targetDate, 30);
           const tourResults = await Promise.allSettled(
             candidateDates.flatMap(d => TENNIS_TOURS.map(tour =>
-              fetch(`https://site.api.espn.com/apis/site/v2/sports/tennis/${tour}/scoreboard?dates=${d}`).then(r => r.ok ? r.json() : null)
+              espnFetch(`https://site.api.espn.com/apis/site/v2/sports/tennis/${tour}/scoreboard?dates=${d}`).then(r => r.ok ? r.json() : null)
             ))
           );
           for (const result of tourResults) {
@@ -1095,7 +1121,7 @@ Deno.serve(async (req) => {
           const candidateDates = await getCandidateQueryDates(db, ourSport.id, targetDate, 30);
           const competitionResults = await Promise.allSettled(
             candidateDates.flatMap(d => SOCCER_COMPETITION_SLUGS.map(slug =>
-              fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard?dates=${d}`).then(r => r.ok ? r.json() : null)
+              espnFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard?dates=${d}`).then(r => r.ok ? r.json() : null)
             ))
           );
           const seenEventIds = new Set<string>();
@@ -1153,7 +1179,7 @@ Deno.serve(async (req) => {
             }
           }
         } else {
-          const eventsRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${espnDate}`);
+          const eventsRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${espnDate}`);
           if (!eventsRes.ok) {
             overall.sports_processed.push({ sport: ourSport.name, error: `ESPN request failed (${eventsRes.status})` });
             continue;
@@ -1273,7 +1299,7 @@ Deno.serve(async (req) => {
           if (teamsToday.size) {
             const rosterResults = await Promise.allSettled(
               [...teamsToday.keys()].map(id =>
-                fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnRosterSportPath}/teams/${id}/roster`).then(r => r.ok ? r.json() : null)
+                espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnRosterSportPath}/teams/${id}/roster`).then(r => r.ok ? r.json() : null)
               )
             );
             let i = 0;
