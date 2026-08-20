@@ -1944,6 +1944,41 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- BULK MATCH ODDS (copy known value across, any bet type) -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Bulk-match odds <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— copies a pick's own known odds across, never a universal default</span>
+        <button class="ghost small" id="toggleOddsMatchBtn">Show tool</button>
+      </p>
+      <div id="oddsMatchPanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Distinct from "Bulk-fill standard odds" above -- that tool applies ONE default price you choose (e.g. -110) to picks missing odds entirely, and deliberately excludes Moneyline since there's no sensible universal default for it. This tool does something different: for any pick that already HAS a real, researched value on ONE side (opening or closing) but is missing the OTHER, it copies that pick's own value across to fill the gap -- never a guess, never a universal number, just this specific pick's own already-known odds mirrored onto the blank side. Because it's never inventing a value, <strong>every bet type is included, Moneyline too</strong>. A pick missing BOTH opening and closing is untouched here (nothing to copy from) -- use the bulk-fill tool above or research it individually for those.
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Bet type</label>
+            <select id="omBetType"><option value="">All bet types</option></select>
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="omSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field">
+            <label>From date</label>
+            <input id="omFrom" type="date" />
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="omTo" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="previewOddsMatchBtn">Preview</button>
+          </div>
+        </div>
+        <div id="oddsMatchWrap" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
     <!-- FLAGGED LINES (non-blocking, whenever you have spare time) -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -2937,6 +2972,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     tfSportSel.value = keepTfSport;
 
+    const omSportSel = $('omSport');
+    const keepOmSport = omSportSel.value;
+    omSportSel.innerHTML = '<option value="">All sports</option>' +
+      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    omSportSel.value = keepOmSport;
+
     const rqSportSel = $('rqSport');
     const keepRqSport = rqSportSel.value;
     rqSportSel.innerHTML = '<option value="">All sports</option>' +
@@ -3012,6 +3053,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     tfBetTypeSel.innerHTML = '<option value="">All bet types</option>' +
       betTypes.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
     if (keepTfBetType && betTypes.some(b => String(b.id) === String(keepTfBetType))) tfBetTypeSel.value = keepTfBetType;
+
+    const omBetTypeSel = $('omBetType');
+    const keepOmBetType = omBetTypeSel.value;
+    omBetTypeSel.innerHTML = '<option value="">All bet types</option>' +
+      betTypes.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+    if (keepOmBetType && betTypes.some(b => String(b.id) === String(keepOmBetType))) omBetTypeSel.value = keepOmBetType;
   }
 
   $('tfBetType').addEventListener('change', () => {
@@ -11429,6 +11476,101 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('previewTotalsFillBtn').addEventListener('click', previewTotalsFill);
 
+  // ---------- Bulk-match odds (copy a pick's own known value across) ----------
+  // Direct request 2026-08-20: "I have 54 picks with closing odds that I'd
+  // like to match to all the opening odds... build something where I can
+  // bulk match odds if I have one but not the other regardless of bet
+  // type." Deliberately separate tool from Bulk-fill standard odds above --
+  // that one invents a universal default price and explicitly excludes
+  // Moneyline because no single default makes sense for it. This one never
+  // invents anything -- it only ever copies a PICK'S OWN already-real value
+  // from whichever side is filled onto whichever side is blank, so there's
+  // no accuracy concern that would justify excluding any bet type,
+  // Moneyline included.
+  $('toggleOddsMatchBtn').addEventListener('click', () => {
+    const panel = $('oddsMatchPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleOddsMatchBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+  });
+
+  async function previewOddsMatch() {
+    const betTypeFilter = $('omBetType').value;
+    const sportFilter = $('omSport').value;
+    const from = $('omFrom').value;
+    const to = $('omTo').value;
+    const wrap = $('oddsMatchWrap');
+
+    wrap.innerHTML = '<div class="empty-state">Finding picks with one side of odds but not the other...</div>';
+
+    try {
+      let query = `picks?select=id,event_date,selection,line,opening_odds,closing_odds,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)`;
+      if (betTypeFilter) query += `&bet_type_id=eq.${betTypeFilter}`;
+      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+      if (from) query += `&event_date=gte.${from}`;
+      if (to) query += `&event_date=lte.${to}`;
+      // Exactly one side null, the other real -- a pick missing BOTH has
+      // nothing to copy from and is correctly excluded here (use the
+      // bulk-fill tool above, or research it, for those instead).
+      query += `&or=(and(opening_odds.is.null,closing_odds.not.is.null),and(opening_odds.not.is.null,closing_odds.is.null))`;
+      query += '&order=event_date.desc';
+      const picks = await restAllPages(query);
+
+      if (!picks.length) {
+        wrap.innerHTML = '<div class="empty-state">Nothing matches these filters -- every pick here either has both sides filled or neither.</div>';
+        return;
+      }
+
+      const rows = picks.map(p => {
+        const hasOpening = p.opening_odds !== null && p.opening_odds !== undefined;
+        const knownValue = hasOpening ? p.opening_odds : p.closing_odds;
+        const knownLabel = knownValue > 0 ? `+${knownValue}` : `${knownValue}`;
+        const fillTarget = hasOpening ? 'closing' : 'opening';
+        return `<tr>
+          <td>${p.event_date}</td>
+          <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
+          <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
+          <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
+          <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
+          <td>${hasOpening ? 'opening' : 'closing'} = ${knownLabel}</td>
+          <td>${fillTarget} → ${knownLabel}</td>
+        </tr>`;
+      }).join('');
+
+      wrap.innerHTML = `
+        <div style="font-size:12px;margin-bottom:10px;"><strong>${picks.length}</strong> pick${picks.length === 1 ? '' : 's'} would be updated.</div>
+        <table class="picks-table" style="margin-bottom:14px;">
+          <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Has</th><th>Will fill</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <button class="btn-danger" id="confirmOddsMatchBtn">Match odds on ${picks.length} pick${picks.length === 1 ? '' : 's'}</button>`;
+
+      $('confirmOddsMatchBtn').addEventListener('click', async () => {
+        const btn = $('confirmOddsMatchBtn');
+        if (!confirm(`This will copy each pick's own known odds onto its blank side, on ${picks.length} pick(s) -- never a shared default, only that specific pick's own real value. Continue?`)) return;
+        btn.disabled = true;
+        btn.textContent = 'Applying...';
+        try {
+          await Promise.all(picks.map(p => {
+            const hasOpening = p.opening_odds !== null && p.opening_odds !== undefined;
+            const payload = hasOpening ? { closing_odds: p.opening_odds } : { opening_odds: p.closing_odds };
+            return rest(`picks?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+          }));
+          wrap.innerHTML = `<div class="msg ok">Matched odds across on ${picks.length} pick${picks.length === 1 ? '' : 's'}.</div>`;
+          await refreshPicksList();
+        } catch (e) {
+          alert('Could not apply: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = `Match odds on ${picks.length} pick${picks.length === 1 ? '' : 's'}`;
+        }
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  }
+
+  $('previewOddsMatchBtn').addEventListener('click', previewOddsMatch);
+
   $('toggleFlaggedLinesBtn').addEventListener('click', () => {
     const panel = $('flaggedLinesPanel');
     const showing = panel.style.display !== 'none';
@@ -15437,7 +15579,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 294; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 295; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
