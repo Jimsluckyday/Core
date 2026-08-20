@@ -271,6 +271,34 @@
   }
   .win-amount strong { color: var(--win); font-size: 15px; }
 
+  .parlay-stake-notice {
+    display: block; width: 100%; text-align: left; margin-top: 8px;
+    background: rgba(212, 161, 42, 0.1); border: 1px solid var(--gold); border-radius: 2px;
+    color: var(--gold); font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+    padding: 8px 10px; cursor: pointer;
+  }
+  .parlay-stake-notice:hover { background: rgba(212, 161, 42, 0.2); }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7);
+    z-index: 1000; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    max-width: 460px; width: 100%; background: var(--board-panel);
+    border: 1px solid var(--gold); border-radius: 4px; padding: 24px;
+  }
+  .modal-box h3 {
+    font-family: 'Anton', sans-serif; font-weight: normal; font-size: 20px;
+    color: var(--gold); margin: 0 0 12px;
+  }
+  .modal-box p { font-size: 14px; line-height: 1.6; color: var(--cream); margin: 0 0 12px; }
+  .modal-box p:last-of-type { margin-bottom: 20px; }
+  .modal-box button {
+    background: var(--gold); border: none; color: #1a1206; font-weight: 700; cursor: pointer;
+    padding: 10px 20px; border-radius: 2px; font-family: 'Inter', sans-serif; font-size: 13px;
+  }
+
   footer {
     text-align: center;
     padding: 30px 20px 50px;
@@ -402,7 +430,7 @@
 </header>
 
 <div class="money-hero">
-  <div class="money-hero-label">If you'd bet $100 on every winning pick since we started tracking...</div>
+  <div class="money-hero-label">If you'd bet $100 on every winning straight pick and $25 on every winning parlay since we started tracking...</div>
   <div class="money-hero-value" id="moneyHeroValue">$0.00</div>
   <div class="money-hero-sub" id="moneyHeroSub">Loading...</div>
 </div>
@@ -449,6 +477,16 @@
 </main>
 
 <footer>Odds and results shown are for informational purposes. Bet responsibly.</footer>
+
+<div class="modal-overlay" id="parlayStakeModal">
+  <div class="modal-box">
+    <h3>&#9888; Reduce your bet size on parlays</h3>
+    <p>A parlay needs every leg to hit, so its real win probability is much lower than a single straight bet -- betting it at your normal size doesn't make sense given that reduced chance of winning.</p>
+    <p>To reflect that, every dollar total shown for parlays on this site -- including the "wins $X" figure on this card and the site-wide running total -- is calculated at <strong>25% of our normal $100 unit</strong> ($25), not the full $100 used for straight bets.</p>
+    <p>When you place a parlay yourself, size it the same way: about a quarter of what you'd normally bet on a straight pick.</p>
+    <button type="button" id="parlayStakeModalClose">Got it</button>
+  </div>
+</div>
 
 <script>
 (function() {
@@ -641,17 +679,28 @@
         const startTimeHtml = p.game_start_time
           ? `<span class="start-time-label">Event start:</span> ${new Date(p.game_start_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
           : '';
-        // Hypothetical payout on a flat $100 bet if this specific pick
-        // wins -- always shown regardless of the pick's actual current
-        // result (pending, or even already lost), since the point is
-        // "here's what a win on THIS specific pick would have paid,"
-        // not a running tally. Reuses the exact same calculation as the
+        // Hypothetical payout on a flat bet if this specific pick wins --
+        // always shown regardless of the pick's actual current result
+        // (pending, or even already lost), since the point is "here's
+        // what a win on THIS specific pick would have paid," not a
+        // running tally. Reuses the exact same calculation as the
         // site-wide money total for consistency, just forced to the
         // 'win' branch since we want the hypothetical here, not the
-        // pick's actual outcome.
-        const winAmount = oddsVal !== null ? profitOn100(oddsVal, 'win') : null;
+        // pick's actual outcome. Stake is $25 for a Parlay, $100 for
+        // everything else -- see stakeForBetType's own comment.
+        const betTypeNameForCard = p.bet_types ? p.bet_types.name : '';
+        const isParlayCard = betTypeNameForCard.trim().toLowerCase() === 'parlay';
+        const cardStake = stakeForBetType(betTypeNameForCard);
+        const winAmount = oddsVal !== null ? profitOnStake(oddsVal, 'win', cardStake) : null;
         const winAmountHtml = winAmount !== null
-          ? `<div class="win-amount">$100 wins <strong>$${winAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>`
+          ? `<div class="win-amount">$${cardStake} wins <strong>$${winAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>`
+          : '';
+        // Direct request 2026-08-20: a Parlay ticket gets an inline
+        // callout that opens the reduced-stake explainer modal, so the
+        // warning is visible right where the card shows its (already
+        // reduced) $25 hypothetical, not just buried in a footer note.
+        const parlayStakeNoticeHtml = isParlayCard
+          ? `<button type="button" class="parlay-stake-notice" data-open-parlay-modal="1">&#9888; Parlay -- reduce your bet size. Why?</button>`
           : '';
         // Each leg shown with its own selection/line/odds/result, so a
         // viewer can place any single leg as its own bet, and so a losing
@@ -692,6 +741,7 @@
           </div>
           ${legsHtml}
           ${winAmountHtml}
+          ${parlayStakeNoticeHtml}
           <div class="ticket-bottom">
             <div class="event-date">${p.event_date}</div>
           </div>
@@ -723,7 +773,8 @@
       if (p.result === 'push') return; // contributes $0, no change needed
       const oddsVal = (p.opening_odds !== null && p.opening_odds !== undefined) ? p.opening_odds
         : ((p.closing_odds !== null && p.closing_odds !== undefined) ? p.closing_odds : null);
-      const profit = profitOn100(oddsVal, p.result);
+      const stake = stakeForBetType(p.bet_types ? p.bet_types.name : '');
+      const profit = profitOnStake(oddsVal, p.result, stake);
       if (profit !== null) byDate[p.event_date] += profit;
     });
     const totalDays = Object.keys(byDate).length;
@@ -731,24 +782,37 @@
     return { profitableDays, totalDays };
   }
 
-  // Standard American-odds profit on a flat $100 stake. Only a WIN
-  // actually needs odds to compute the payout size -- a loss is always a
-  // fixed -$100 regardless of what the odds were, and must never be
-  // excluded from the total just because odds happen to be missing for
-  // that specific pick. (Previously the missing-odds check ran before
-  // the loss check, silently dropping real losses out of the public
-  // money total whenever odds weren't on file -- fixed here.)
-  function profitOn100(odds, result) {
-    if (result === 'loss') return -100;
+  // Parlays carry meaningfully lower win probability than a straight bet,
+  // so sizing them the same as every other pick's flat $100 doesn't make
+  // sense -- direct request 2026-08-20. Every dollar total on this page
+  // (per-card hypothetical, site-wide running total, profitable-days
+  // count) now uses a reduced $25 stake for Parlay bet_type rows
+  // specifically, instead of the normal $100 straight-bet stake.
+  const STRAIGHT_STAKE = 100;
+  const PARLAY_STAKE = 25;
+  function stakeForBetType(betTypeName) {
+    return (betTypeName || '').trim().toLowerCase() === 'parlay' ? PARLAY_STAKE : STRAIGHT_STAKE;
+  }
+
+  // Standard American-odds profit on a flat stake (see stakeForBetType
+  // above for which stake applies). Only a WIN actually needs odds to
+  // compute the payout size -- a loss is always a fixed -stake regardless
+  // of what the odds were, and must never be excluded from the total just
+  // because odds happen to be missing for that specific pick. (Previously
+  // the missing-odds check ran before the loss check, silently dropping
+  // real losses out of the public money total whenever odds weren't on
+  // file -- fixed here.)
+  function profitOnStake(odds, result, stake) {
+    if (result === 'loss') return -stake;
     if (result !== 'win') return null;
     if (odds === null || odds === undefined) return null;
-    return odds > 0 ? odds : (10000 / Math.abs(odds));
+    return odds > 0 ? (odds * stake / 100) : (stake * 100 / Math.abs(odds));
   }
 
   async function loadTrackRecord() {
     const bar = document.getElementById('trackRecordBar');
     try {
-      const picks = await rest('picks?select=result,event_date,opening_odds,closing_odds&is_published=eq.true&order=event_date.desc,id.desc');
+      const picks = await rest('picks?select=result,event_date,opening_odds,closing_odds,bet_types(name)&is_published=eq.true&order=event_date.desc,id.desc');
       const wins = picks.filter(p => p.result === 'win').length;
       const losses = picks.filter(p => p.result === 'loss').length;
       const pushes = picks.filter(p => p.result === 'push').length;
@@ -762,10 +826,10 @@
         <div class="track-stat"><div class="track-stat-value">${winPct !== null ? winPct + '%' : '—'}</div><div class="track-stat-label">Win Rate</div></div>
         <div class="track-stat"><div class="track-stat-value" style="color:${profitableDays > 0 ? 'var(--win)' : 'var(--cream)'};">${totalDays > 0 ? `${profitableDays}/${totalDays}` : '—'}</div><div class="track-stat-label">Profitable Days</div></div>`;
 
-      // $100-per-bet running total -- a loss always counts as -$100
-      // regardless of odds (see profitOn100 above); a win still needs
-      // real odds on file to know its payout size, so wins missing odds
-      // are the only picks still excluded here. As odds coverage fills
+      // Flat-stake running total -- a loss always counts as the full
+      // -stake regardless of odds (see profitOnStake above); a win still
+      // needs real odds on file to know its payout size, so wins missing
+      // odds are the only picks still excluded here. As odds coverage fills
       // in over time for wins specifically, this number becomes more
       // complete on its own.
       let total = 0, countedPicks = 0;
@@ -774,7 +838,8 @@
         if (p.result !== 'win' && p.result !== 'loss') return;
         const oddsVal = (p.opening_odds !== null && p.opening_odds !== undefined) ? p.opening_odds
           : ((p.closing_odds !== null && p.closing_odds !== undefined) ? p.closing_odds : null);
-        const profit = profitOn100(oddsVal, p.result);
+        const stake = stakeForBetType(p.bet_types ? p.bet_types.name : '');
+        const profit = profitOnStake(oddsVal, p.result, stake);
         if (profit === null) return;
         total += profit;
         countedPicks++;
@@ -800,8 +865,8 @@
     valueEl.textContent = `${isPositive ? '+' : '\u2212'}$${Math.abs(total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     valueEl.style.color = isPositive ? 'var(--win)' : 'var(--loss)';
     subEl.textContent = countedPicks < totalGraded
-      ? `Based on ${countedPicks} of ${totalGraded} graded picks with odds on file so far.`
-      : `Based on all ${totalGraded} graded picks, $100 per bet.`;
+      ? `Based on ${countedPicks} of ${totalGraded} graded picks with odds on file so far -- $100 per straight bet, $25 per parlay.`
+      : `Based on all ${totalGraded} graded picks -- $100 per straight bet, $25 per parlay.`;
   }
 
   function breakdownRow(label, wins, losses, pushes) {
@@ -934,6 +999,21 @@
       panel.classList.toggle('open');
     });
     document.getElementById('runBreakdownBtn').addEventListener('click', runBreakdown);
+
+    // Parlay reduced-stake explainer modal. The per-card "Why?" buttons
+    // are generated dynamically inside #mainContent every time loadBoard()
+    // re-renders, so this listens on the stable #mainContent container
+    // itself (never replaced, only its innerHTML) rather than trying to
+    // re-attach a listener to each button after every render.
+    const parlayModal = document.getElementById('parlayStakeModal');
+    function openParlayStakeModal() { parlayModal.classList.add('open'); }
+    function closeParlayStakeModal() { parlayModal.classList.remove('open'); }
+    document.getElementById('mainContent').addEventListener('click', (e) => {
+      if (e.target.closest('[data-open-parlay-modal]')) openParlayStakeModal();
+    });
+    document.getElementById('parlayStakeModalClose').addEventListener('click', closeParlayStakeModal);
+    parlayModal.addEventListener('click', (e) => { if (e.target === parlayModal) closeParlayStakeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeParlayStakeModal(); });
 
     const raw = await storageGet('supabase-config');
     if (raw) {
