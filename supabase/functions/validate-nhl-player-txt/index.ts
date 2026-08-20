@@ -1,0 +1,145 @@
+// validate-nhl-player
+// Read-only helper for Bulk Import -- given a date and a batch of player
+// names, checks whether each player's team is actually playing that day,
+// using the NHL's own official, free Web API (api-web.nhle.com). Never
+// writes to any table -- purely a lookup, same safety principle as
+// validate-mlb-player and validate-schedule.
+//
+// Approach: fetch the day's schedule to get every team playing, then
+// fetch each of those teams' current rosters, and check whether the named
+// player appears on any of them. Same known-teams -> known-rosters ->
+// name-match approach as validate-mlb-player, since the NHL API doesn't
+// offer a clean "look up this player's current team" in one call either.
+//
+// HONEST CAVEAT, confirmed directly rather than assumed: a plain browser-
+// style fetch to api-web.nhle.com from outside Supabase's own
+// infrastructure was blocked by bot detection during earlier testing for
+// this project. This function has NOT been confirmed to work end-to-end
+// against the live API from within a real Supabase Edge Function
+// deployment -- test this on a single, small date range first before
+// relying on it for anything time-sensitive. If it turns out Supabase's
+// own infrastructure also gets blocked, this will need a different
+// approach (e.g. a proxy, or a paid data source) rather than this direct
+// fetch.
+//
+// Call with: POST /validate-nhl-player
+// Body: { date: "2026-06-04", checks: [{ id: "row-1", playerName: "Jack Eichel" }, ...] }
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+function normalize(s: string): string {
+  return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  try {
+    const body = await req.json();
+    const targetDate = body.date;
+    const checks = body.checks;
+    if (!targetDate || !Array.isArray(checks)) {
+      return new Response(JSON.stringify({ error: 'Body must include date and a checks array.' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // The NHL's own schedule endpoint returns a whole WEEK of games
+    // (a gameWeek array, each entry its own date), not just the single
+    // requested day -- confirmed directly from real documentation/usage
+    // examples, not assumed. Filter down to the one matching date.
+    const scheduleRes = await fetch(`https://api-web.nhle.com/v1/schedule/${targetDate}`);
+    if (!scheduleRes.ok) {
+      return new Response(JSON.stringify({ error: 'NHL schedule request failed', status: scheduleRes.status }), {
+        status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    const scheduleData = await scheduleRes.json();
+    const gameWeek = scheduleData.gameWeek || [];
+
+    console.log(`[NHL PLAYER DEBUG] gameWeek entries returned: ${gameWeek.length}`);
+    console.log(`[NHL PLAYER DEBUG] Raw first gameWeek entry (unprocessed):`, JSON.stringify(gameWeek[0] || null).slice(0, 1500));
+
+    const dayEntry = gameWeek.find((d: any) => d.date === targetDate);
+    const games = (dayEntry && dayEntry.games) || [];
+
+    // Collect every team playing today, with which game/opponent they're
+    // in, so a match can be reported with real context, not just yes/no.
+    const teamsToday: { abbrev: string; teamName: string; opponent: string }[] = [];
+    for (const g of games) {
+      const away = g.awayTeam;
+      const home = g.homeTeam;
+      if (away && home) {
+        const awayName = (away.placeName && away.placeName.default) || away.abbrev;
+        const homeName = (home.placeName && home.placeName.default) || home.abbrev;
+        teamsToday.push({ abbrev: away.abbrev, teamName: awayName, opponent: `@ ${homeName}` });
+        teamsToday.push({ abbrev: home.abbrev, teamName: homeName, opponent: `vs ${awayName}` });
+      }
+    }
+
+    if (!teamsToday.length) {
+      return new Response(JSON.stringify({ status: 'no_games', date: targetDate, results: checks.map((c: any) => ({ id: c.id, verifiable: true, valid: false, reason: `No NHL games found at all on ${targetDate}` })) }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Fetch every team's current roster (typically 2-16 teams playing on
+    // a given day, well within reasonable free-API use).
+    const rosters: { abbrev: string; teamName: string; opponent: string; players: string[] }[] = [];
+    let loggedFirstRoster = false;
+    for (const t of teamsToday) {
+      try {
+        const rosterRes = await fetch(`https://api-web.nhle.com/v1/roster/${t.abbrev}/current`);
+        if (!rosterRes.ok) continue;
+        const rosterData = await rosterRes.json();
+        if (!loggedFirstRoster) {
+          console.log(`[NHL PLAYER DEBUG] Raw first roster response (unprocessed, team ${t.teamName}):`, JSON.stringify(rosterData).slice(0, 1500));
+          loggedFirstRoster = true;
+        }
+        // Confirmed structure: grouped into forwards/defensemen/goalies,
+        // each player with firstName.default / lastName.default.
+        const players: string[] = [];
+        for (const group of ['forwards', 'defensemen', 'goalies']) {
+          for (const p of (rosterData[group] || [])) {
+            const first = p.firstName && p.firstName.default;
+            const last = p.lastName && p.lastName.default;
+            if (first && last) players.push(`${first} ${last}`);
+          }
+        }
+        rosters.push({ abbrev: t.abbrev, teamName: t.teamName, opponent: t.opponent, players });
+      } catch (e) {
+        console.log(`[NHL PLAYER DEBUG] Roster fetch failed for team ${t.teamName}:`, String(e));
+      }
+    }
+
+    console.log(`[NHL PLAYER DEBUG] Rosters successfully fetched: ${rosters.length} of ${teamsToday.length} teams`);
+
+    const results = checks.map((check: any) => {
+      const norm = normalize(check.playerName || '');
+      if (!norm) return { id: check.id, verifiable: true, valid: false, reason: 'No player name provided' };
+      const match = rosters.find(r => r.players.some((p: string) => normalize(p) === norm || normalize(p).includes(norm) || norm.includes(normalize(p))));
+      if (match) {
+        return { id: check.id, verifiable: true, valid: true, team: match.teamName, matchup: `${match.teamName} ${match.opponent}` };
+      }
+      return {
+        id: check.id, verifiable: true, valid: false,
+        reason: `"${check.playerName}" was not found on any current roster playing on ${targetDate}`,
+        teamsCheckedCount: rosters.length
+      };
+    });
+
+    return new Response(JSON.stringify({ status: 'checked', date: targetDate, teamsPlayingToday: teamsToday.length, rostersFetched: rosters.length, results }), {
+      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+
+  } catch (err) {
+    return new Response(JSON.stringify({ error: String(err) }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+});
