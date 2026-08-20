@@ -1890,6 +1890,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           With a specific date entered: shows every pick still pending for that exact day only — since you already ran the grader on that day, anything still pending is by definition something it couldn't resolve. Working one day at a time keeps this from mixing multiple test days together into one confusing batch. Leave the date blank to instead search broadly across every day whose event date has already passed, plus anything the grader explicitly flagged as ambiguous — useful for an occasional wider sweep, not everyday use. Checking the box above catches problems earlier still — right after you run "Sync Schedule & Odds" in Pending Picks, any pick it couldn't confidently match gets included here too, whether or not its event date has passed yet, so a wrong date or unclear detail can get fixed well before grading day instead of showing up as a surprise later. Export these to CSV, work through them (in this chat, a fresh one, or however you research them), then use "Grading Corrections" below to bulk-apply what you find.
         </div>
+        <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:0 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
+          &#9888; This blank-date sweep is also the correct way to catch Series Winner/Playoff Series Winner picks, and any long-term futures bet (e.g. "Blue Jays to win the World Series," placed in April at good odds, not decided until October). Both share the same shape: <strong>event_date is whenever the pick was entered, not whenever it actually resolves</strong> -- so no date-scoped grading run will ever revisit them on its own, no matter how many times it's re-run for other days. They stay correctly stuck as "pending" for as long as that takes, and this blank-date sweep will keep surfacing them the whole time (no cutoff on how old event_date is) -- nothing gets lost, it just needs this run periodically rather than assumed to happen automatically. In practice: run it whenever a major tournament/series/season you know had an active pick on it wraps up (a Finals ends, a World Cup is decided, a season's playoff picture is final) -- that's your cue to check for anything that's been quietly waiting to resolve.
+        </div>
         <div id="gradingExceptionsWrap"></div>
       </div>
     </div>
@@ -15579,7 +15582,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 295; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 296; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
