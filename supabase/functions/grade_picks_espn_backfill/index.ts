@@ -346,6 +346,11 @@ Deno.serve(async (req) => {
       turnovers: [{ key: 'turnovers', group: 'batting' }],
       threepointersmade: [{ key: 'threePointFieldGoalsMade-threePointFieldGoalsAttempted', group: 'batting' }],
       threesmade: [{ key: 'threePointFieldGoalsMade-threePointFieldGoalsAttempted', group: 'batting' }],
+      // CONFIRMED REAL GAP, direct report 2026-08-20: "3pt made" (a real
+      // transcribed prop_stat, distinct wording from "Threes made"/"3-
+      // Pointers Made" above) normalizes to "3ptmade" and had no entry --
+      // same stat, just a third phrasing nobody had typed yet.
+      '3ptmade': [{ key: 'threePointFieldGoalsMade-threePointFieldGoalsAttempted', group: 'batting' }],
       pointsreboundsassists: [{ key: '', group: 'batting' }],
       pointsrebounds: [{ key: '', group: 'batting' }],
       pointsassists: [{ key: '', group: 'batting' }],
@@ -360,6 +365,12 @@ Deno.serve(async (req) => {
       ptsreb: [{ key: '', group: 'batting' }],
       ptsassists: [{ key: '', group: 'batting' }],
       rebassists: [{ key: '', group: 'batting' }],
+      // CONFIRMED REAL GAP, direct report 2026-08-20: "Pts/Rebounds/Assists"
+      // normalizes to "ptsreboundsassists" (mixed abbreviation -- "Pts" short,
+      // "Rebounds"/"Assists" spelled out) -- yet ANOTHER phrasing distinct
+      // from both "pointsreboundsassists" (all spelled out) and
+      // "ptsrebassists" (all abbreviated) above. Same underlying stat.
+      ptsreboundsassists: [{ key: '', group: 'batting' }],
     };
     // Identical box-score schema to WNBA (confirmed directly, see
     // PLAYER_PROP_SPORTS comment above) -- same spec, same keys.
@@ -494,12 +505,13 @@ Deno.serve(async (req) => {
           const rbi = rbiIdx >= 0 ? espnStatToNumber(row.stats[rbiIdx]) : null;
           value = (hr !== null && rbi !== null) ? hr + rbi : null;
         } else if (statNorm === 'pointsreboundsassists' || statNorm === 'pointsrebounds' || statNorm === 'pointsassists' || statNorm === 'reboundsassists'
-          || statNorm === 'ptsrebassists' || statNorm === 'ptsreb' || statNorm === 'ptsassists' || statNorm === 'rebassists') {
+          || statNorm === 'ptsrebassists' || statNorm === 'ptsreb' || statNorm === 'ptsassists' || statNorm === 'rebassists'
+          || statNorm === 'ptsreboundsassists') {
           const pIdx = row.keys.indexOf('points'), rIdx = row.keys.indexOf('rebounds'), aIdx = row.keys.indexOf('assists');
           const p = pIdx >= 0 ? espnStatToNumber(row.stats[pIdx]) : null;
           const r = rIdx >= 0 ? espnStatToNumber(row.stats[rIdx]) : null;
           const a = aIdx >= 0 ? espnStatToNumber(row.stats[aIdx]) : null;
-          if (statNorm === 'pointsreboundsassists' || statNorm === 'ptsrebassists') value = (p !== null && r !== null && a !== null) ? p + r + a : null;
+          if (statNorm === 'pointsreboundsassists' || statNorm === 'ptsrebassists' || statNorm === 'ptsreboundsassists') value = (p !== null && r !== null && a !== null) ? p + r + a : null;
           else if (statNorm === 'pointsrebounds' || statNorm === 'ptsreb') value = (p !== null && r !== null) ? p + r : null;
           else if (statNorm === 'pointsassists' || statNorm === 'ptsassists') value = (p !== null && a !== null) ? p + a : null;
           else value = (r !== null && a !== null) ? r + a : null;
