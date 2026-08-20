@@ -292,6 +292,37 @@ Deno.serve(async (req) => {
       return combined < threshold ? 'win' : 'loss';
     }
 
+    // Moneyline/Spread 1st Inning (MLB) and 1st Quarter/1st Half (NBA) --
+    // direct request 2026-08-20: "if it's a question of it can be resolved
+    // the answer should always be yes." Confirmed directly against ESPN's
+    // real NBA scoreboard data: each competitor's own linescores array is
+    // exactly one entry per QUARTER (same shape as MLB's per-INNING array
+    // already used for NRFI/First5/First7 above -- {value, displayValue,
+    // period}), so this reuses the exact same sumFirstNInnings() helper
+    // and the exact same first_inning_home/away field already computed
+    // for NRFI/YRFI -- for MLB that field holds the 1st inning score, for
+    // NBA it holds the 1st quarter score, same field, sport-dependent
+    // meaning, no new fetch or parsing needed for either. 1st Half (NBA
+    // only) uses the new first_half_home/away below (periods 1+2 summed).
+    // A tie is graded push, same standard convention as First5/First7.
+    function gradeMoneylinePeriod(homeVal: number | null, awayVal: number | null, isHome: boolean): 'win' | 'loss' | 'push' | null {
+      if (homeVal === null || awayVal === null) return null;
+      const ownScore = isHome ? homeVal : awayVal;
+      const oppScore = isHome ? awayVal : homeVal;
+      if (ownScore > oppScore) return 'win';
+      if (ownScore < oppScore) return 'loss';
+      return 'push';
+    }
+    function gradeSpreadPeriod(homeVal: number | null, awayVal: number | null, isHome: boolean, line: number): 'win' | 'loss' | 'push' | null {
+      if (homeVal === null || awayVal === null) return null;
+      const ownScore = isHome ? homeVal : awayVal;
+      const oppScore = isHome ? awayVal : homeVal;
+      const adjusted = (ownScore - oppScore) + line;
+      if (adjusted > 0) return 'win';
+      if (adjusted < 0) return 'loss';
+      return 'push';
+    }
+
     // ---- Player Prop grading (MLB, WNBA, NBA) ----
     // CONFIRMED REAL GAP, direct report 2026-08-20: NBA was the single
     // largest remaining category of "unsupported" picks after the WNBA/MLB
@@ -633,10 +664,15 @@ Deno.serve(async (req) => {
             // Moneyline/Total First 5/First 7 grading below.
             const first5 = sumFirstNInnings(c.linescores, 5);
             const first7 = sumFirstNInnings(c.linescores, 7);
+            // NBA 1st Half -- periods 1+2 summed, same reasoning/helper as
+            // first5/first7 above. Meaningless for MLB (a baseball game has
+            // no "half"), but harmless to compute either way since nothing
+            // reads it unless the pick's own bet type asks for it.
+            const first2 = sumFirstNInnings(c.linescores, 2);
             return {
               is_home: c.homeAway === 'home', substringSafeNames, exactOnlyNames,
               score: c.score !== undefined ? Number(c.score) : null,
-              firstPeriod, first5, first7
+              firstPeriod, first5, first7, first2
             };
           }
 
@@ -661,7 +697,8 @@ Deno.serve(async (req) => {
             event_status: completed ? 'STATUS_FINAL' : 'NOT_FINAL',
             first_inning_home: homeV.firstPeriod, first_inning_away: awayV.firstPeriod,
             first5_home: homeV.first5, first5_away: awayV.first5,
-            first7_home: homeV.first7, first7_away: awayV.first7
+            first7_home: homeV.first7, first7_away: awayV.first7,
+            first_half_home: homeV.first2, first_half_away: awayV.first2
           } : null;
 
           return {
@@ -732,6 +769,17 @@ Deno.serve(async (req) => {
             && !isTotalFirst5 && !isTotalFirst7;
           const isNRFI = betTypeNorm === 'norunfirstinning';
           const isYRFI = betTypeNorm === 'yesrunfirstinning';
+          // Direct request 2026-08-20: "if it's a question of it can be
+          // resolved the answer should always be yes." MLB Moneyline 1st
+          // Inning reuses first_inning_home/away, already fetched for
+          // NRFI/YRFI above. NBA Spread 1st Quarter reuses the SAME field
+          // (same array shape, different sport -- see gradeMoneylinePeriod/
+          // gradeSpreadPeriod's own comment). Spread/Moneyline 1st Half
+          // (NBA) use the new first_half_home/away above.
+          const isMoneyline1stInning = betTypeNorm === 'moneyline1stinning';
+          const isSpread1stQuarter = betTypeNorm === 'spread1stquarter';
+          const isSpread1stHalf = betTypeNorm === 'spread1sthalf';
+          const isMoneyline1stHalf = betTypeNorm === 'moneyline1sthalf';
           // Direct request 2026-08-17: "that's extra work to have to run 2
           // buttons and wait for results as well as it's possible someone
           // forgets or the button itself breaks and no one notices" --
@@ -742,6 +790,7 @@ Deno.serve(async (req) => {
           const propsSupportedForThisSport = PLAYER_PROP_SPORTS.includes(sportNormForProps);
           const supported = isMoneyline || isSpread || isTotalType || isNRFI || isYRFI
             || isTeamTotal || isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7
+            || isMoneyline1stInning || isSpread1stQuarter || isSpread1stHalf || isMoneyline1stHalf
             || (isPlayerProp && propsSupportedForThisSport);
 
           if (!supported) {
@@ -836,12 +885,27 @@ Deno.serve(async (req) => {
           else if (isMoneylineFirst5) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 5);
           else if (isTotalFirst5) grade = gradeTotalFirstN(game.score, 5, Number(pick.line));
           else if (isTotalFirst7) grade = gradeTotalFirstN(game.score, 7, Number(pick.line));
+          else if (isMoneyline1stInning || isSpread1stQuarter) {
+            // Same field for both -- see gradeMoneylinePeriod/gradeSpreadPeriod's
+            // own comment: first_inning_home/away holds "period 1" of
+            // whatever this sport's linescores represent (1 inning for MLB,
+            // 1 quarter for NBA).
+            grade = isMoneyline1stInning
+              ? gradeMoneylinePeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!)
+              : gradeSpreadPeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!, Number(pick.line));
+          }
+          else if (isSpread1stHalf) grade = gradeSpreadPeriod(game.score.first_half_home, game.score.first_half_away, matchedIsHome!, Number(pick.line));
+          else if (isMoneyline1stHalf) grade = gradeMoneylinePeriod(game.score.first_half_home, game.score.first_half_away, matchedIsHome!);
 
           if (!grade) {
             const note = (isNRFI || isYRFI)
               ? '1st-inning score data looked incomplete or unclear -- needs manual review.'
               : (isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7)
               ? 'First 5/7 innings score data looked incomplete or unclear -- needs manual review.'
+              : (isMoneyline1stInning || isSpread1stQuarter)
+              ? '1st period score data looked incomplete or unclear -- needs manual review.'
+              : (isSpread1stHalf || isMoneyline1stHalf)
+              ? '1st half score data looked incomplete or unclear -- needs manual review.'
               : 'Final score data looked incomplete or unclear -- needs manual review.';
             await db(`picks?id=eq.${pick.id}`, {
               method: 'PATCH',
