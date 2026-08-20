@@ -183,12 +183,38 @@ Deno.serve(async (req) => {
         const games = eventsData.events || [];
         console.log(`[GRADE TIMING] ${ourSport.name} -- parsed ${games.length} games at t=${Date.now() - t0}ms, raw payload size=${JSON.stringify(eventsData).length} chars`);
 
+        // CONFIRMED REAL BUG, direct report 2026-08-20: "Chicago Cubs" and
+        // "Chicago White Sox" both play MLB the same day, and t.name here
+        // is TheRundown's bare city/market field ("Chicago" for both) --
+        // searching "Chicago Cubs" matched the Cubs' own game via the full
+        // "Chicago Cubs" combined name AND the White Sox's game via the
+        // shared bare "Chicago" substring, so BOTH came back as candidate
+        // games even though the search text was completely unambiguous.
+        // Same root pattern hit "New York Mets" vs "New York Yankees".
+        // Same fix as schedule-sync-backfill.ts's bareNameIsUnique gate and
+        // grade_picks_espn_backfill's port of it: only trust the bare
+        // city/market name as a matchable variant when no OTHER team
+        // playing this sport today shares it. t.mascot alone (e.g. "Cubs")
+        // never collides within one sport's daily slate, so it stays
+        // always-safe, same as the combined full name.
+        const allTeamsToday: any[] = [];
+        for (const g of games) for (const t of (g.teams_normalized || g.teams || [])) allTeamsToday.push(t);
+        const bareNameCounts = new Map<string, number>();
+        for (const t of allTeamsToday) {
+          if (!t.name) continue;
+          const n = normalize(t.name);
+          bareNameCounts.set(n, (bareNameCounts.get(n) || 0) + 1);
+        }
+
         const gameEntries = games.map((g: any) => {
           const teams = g.teams_normalized || g.teams || [];
-          const variants = teams.map((t: any) => ({
-            team_id: t.team_id, is_home: !!t.is_home,
-            names: [t.name, t.mascot, t.name && t.mascot ? `${t.name} ${t.mascot}` : null].filter(Boolean).map(normalize)
-          }));
+          const variants = teams.map((t: any) => {
+            const bareNameIsUnique = t.name && (bareNameCounts.get(normalize(t.name)) || 0) <= 1;
+            return {
+              team_id: t.team_id, is_home: !!t.is_home,
+              names: [bareNameIsUnique ? t.name : null, t.mascot, t.name && t.mascot ? `${t.name} ${t.mascot}` : null].filter(Boolean).map(normalize)
+            };
+          });
           const away = teams.find((t: any) => !t.is_home);
           const home = teams.find((t: any) => t.is_home);
           const matchup = away && home ? `${away.name} ${away.mascot} @ ${home.name} ${home.mascot}` : 'unknown matchup';

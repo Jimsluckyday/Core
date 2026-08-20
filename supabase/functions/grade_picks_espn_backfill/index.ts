@@ -532,6 +532,33 @@ Deno.serve(async (req) => {
         // picks reference players from it.
         const boxscoreCache: Record<string, any> = {};
 
+        // CONFIRMED REAL BUG, direct report 2026-08-20: "Chicago Cubs" and
+        // "Chicago White Sox" both play MLB the same day, and both share
+        // location "Chicago" -- searching "Chicago Cubs" matched the Cubs'
+        // own game via displayName AND the White Sox's game via the shared
+        // "Chicago" location substring (since "chicagocubs".includes
+        // ("chicago")), so BOTH came back as candidateGames, even though
+        // the search text was completely unambiguous. Same root pattern
+        // hit "New York Mets" vs "New York Yankees". This is the SAME
+        // fix already shipped in schedule-sync-backfill.ts's own
+        // bareNameIsUnique gate (never ported here) -- only trust a bare
+        // location as a matchable variant when no OTHER team playing this
+        // sport today shares that same city; a capper who really did
+        // write just a bare city name on a two-team-city day still
+        // correctly falls through to "possible games matched" for manual
+        // review, since neither team's bare location gets trusted then.
+        const allTeamsToday: any[] = [];
+        for (const e of games) {
+          const competitors = (e.competitions && e.competitions[0] && e.competitions[0].competitors) || [];
+          for (const c of competitors) if (c.team) allTeamsToday.push(c.team);
+        }
+        const bareNameCounts = new Map<string, number>();
+        for (const t of allTeamsToday) {
+          if (!t.location) continue;
+          const n = normalize(t.location);
+          bareNameCounts.set(n, (bareNameCounts.get(n) || 0) + 1);
+        }
+
         const gameEntries = games.map((e: any) => {
           const competitors = (e.competitions && e.competitions[0] && e.competitions[0].competitors) || [];
           const home = competitors.find((c: any) => c.homeAway === 'home');
@@ -554,7 +581,8 @@ Deno.serve(async (req) => {
             // fine) are checked loosely; shortDisplayName/name/abbreviation
             // (short enough to collide by coincidence) now require an
             // EXACT match only, never substring inclusion.
-            const substringSafeNames = [t.location, t.displayName].filter(Boolean).map(normalize);
+            const bareNameIsUnique = t.location && (bareNameCounts.get(normalize(t.location)) || 0) <= 1;
+            const substringSafeNames = [bareNameIsUnique ? t.location : null, t.displayName].filter(Boolean).map(normalize);
             const exactOnlyNames = [t.shortDisplayName, t.name, t.abbreviation].filter(Boolean).map(normalize);
             // First linescore entry is the 1st inning/period -- only
             // trusted when it's a real number; a missing/null entry means
