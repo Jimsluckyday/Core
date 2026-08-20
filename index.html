@@ -5261,8 +5261,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const n = (sportName || '').toLowerCase();
     return n.includes('tennis') || n.includes('golf') || n.includes('mma');
   }
-  function betTypeUsesLine(betTypeName, usesPropFields) {
+  // Golf-specific exception, direct report 2026-08-20: a Round Matchup,
+  // Tournament Matchup, or Tournament Winner backing (e.g. "Rory McIlroy
+  // to win his round") is a straight win/loss/outright outcome, never a
+  // numeric line -- see prompt_rules.py's GOLF ROUND MATCHUP rule, which
+  // deliberately sets line to null for exactly these three prop_stat
+  // values. Every OTHER Player Prop still has a real stat-line number, so
+  // this only excludes these three specific stats, not Player Prop as a
+  // whole.
+  const GOLF_NO_LINE_PROP_STATS = ['round matchup', 'tournament matchup', 'tournament winner'];
+  function betTypeUsesLine(betTypeName, usesPropFields, propStat) {
     const n = (betTypeName || '').toLowerCase();
+    if (usesPropFields && GOLF_NO_LINE_PROP_STATS.includes((propStat || '').toLowerCase().trim())) return false;
     return !!usesPropFields || n.includes('spread') || n.includes('total');
   }
   // Direct feedback: a Parlay spans multiple games (no single home/away
@@ -5362,7 +5372,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // null, never even attempted), so this was purely an admin.html
     // display gap, not a data or Edge Function problem.
     if (sportUsesEventName(sportName) && !p.event_name && !(betTypeName || '').toLowerCase().includes('parlay')) missing.push('Event name');
-    if (betTypeUsesLine(betTypeName, isProp) && (p.line === null || p.line === undefined)) missing.push('Line');
+    if (betTypeUsesLine(betTypeName, isProp, p.prop_stat) && (p.line === null || p.line === undefined)) missing.push('Line');
     // Direct request: prop_team (shown to customers alongside the player's
     // name, e.g. "LeBron James (LAL)") is only ever meaningful for Player
     // Prop picks -- flagging it as missing on a straight bet would just be
@@ -11550,7 +11560,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     wrap.innerHTML = '<div class="empty-state">Loading incomplete picks...</div>';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,pick_tier,raw_unit_size,capper_id,sport_id,bet_type_id,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,pick_tier,raw_unit_size,prop_stat,capper_id,sport_id,bet_type_id,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -11575,7 +11585,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         if (checkUnitSize && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal)) return true;
         if (checkStartTime && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
-        if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
+        if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields, p.prop_stat)) return true;
         return false;
       });
 
@@ -11603,7 +11613,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const sportName = p.sports ? p.sports.name : '';
     const betTypeName = p.bet_types ? p.bet_types.name : '';
     const eventNameScoped = sportUsesEventName(sportName);
-    const lineScoped = betTypeUsesLine(betTypeName, isProp);
+    const lineScoped = betTypeUsesLine(betTypeName, isProp, p.prop_stat);
     const homeAwayApplies = !isProp && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName);
     const missingParts = [];
     if (!p.odds_unavailable) {
@@ -11823,7 +11833,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // deliberately since this function exists specifically to mirror
       // that same "what genuinely counts as missing" logic.
       if (has('mdCheckEventName') && !p.event_name && sportUsesEventName(sportName) && !betTypeName.toLowerCase().includes('parlay')) return true;
-      if (has('mdCheckLine') && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields)) return true;
+      if (has('mdCheckLine') && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields, p.prop_stat)) return true;
       // Same individual-sport exclusion as missingFieldsSummary's own Prop
       // team check (see its comment for the full story) -- kept in sync
       // deliberately, same as the Event name exclusion just above.
@@ -15427,7 +15437,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 293; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 294; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
