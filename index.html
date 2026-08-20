@@ -292,8 +292,13 @@
   }
   .pr-consensus-high { background: rgba(163,115,10,0.14); border-top: 1px solid var(--stamp-amber); }
   .pr-consensus-tag {
+    /* Direct report: black-on-amber (the previous fill) reads poorly --
+       same category of issue as the earlier green-chip contrast problem.
+       Dark field / cream text is the same high-contrast combo already used
+       elsewhere in this file for solid-fill chips (~7.6:1, comfortably
+       past WCAG AA) rather than another middling color-on-color pairing. */
     font-size: 9px; font-weight: bold; letter-spacing: 0.05em; text-transform: uppercase;
-    background: var(--stamp-amber); color: #22281f; padding: 2px 7px; border-radius: 3px;
+    background: var(--field); color: var(--paper); padding: 2px 7px; border-radius: 3px;
   }
   .pr-duplicates {
     width: 100%; padding: 8px 12px; border-top: 1px dashed var(--field); background: #f7f4ea;
@@ -15283,7 +15288,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 286; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 287; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
