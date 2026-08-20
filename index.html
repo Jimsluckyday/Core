@@ -1997,12 +1997,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div class="field" style="margin-bottom:10px;">
           <label>Find picks missing:</label>
           <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:6px 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
-            &#9888; Checkboxes below are ordered left to right on purpose -- work through them in order, don't jump to a color/warning you happen to notice. <strong>Start time, Parlay leg date mismatch, and Schedule sync flagged come first</strong> because a wrong date is the root cause of most other "missing" results: fix the date before you research anything else, or you'll end up researching the wrong day's game and either come up empty or resolve a win/loss/push that didn't happen on that date. <strong>Event name</strong> and <strong>Prop team</strong> come next -- resolving those narrows what schedule-sync-backfill and Add Pick's Auto-fill button have to search. The remaining fields (Line, Home/Away, odds, Unit size) come last since they don't block other lookups. <strong>Not yet scored</strong> stays last on purpose -- run it as a final end-of-day check, not alongside the field checks above.
+            &#9888; Checkboxes below are ordered left to right on purpose -- work through them in order, don't jump to a color/warning you happen to notice. <strong>Start time, Parlay leg date mismatch, Schedule sync flagged, and Late-night pick</strong> come first because a wrong date is the root cause of most other "missing" results: fix the date before you research anything else, or you'll end up researching the wrong day's game and either come up empty or resolve a win/loss/push that didn't happen on that date. <strong>Event name</strong> and <strong>Prop team</strong> come next -- resolving those narrows what schedule-sync-backfill and Add Pick's Auto-fill button have to search. The remaining fields (Line, Home/Away, odds, Unit size) come last since they don't block other lookups. <strong>Not yet scored</strong> stays last on purpose -- run it as a final end-of-day check, not alongside the field checks above.
           </div>
           <div style="display:flex;gap:20px;margin-top:6px;flex-wrap:wrap;align-items:center;">
             <div class="checkbox-row"><input type="checkbox" id="mdCheckStartTime" /><label for="mdCheckStartTime">Start time</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckStartTime">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckLegDateMismatch" /><label for="mdCheckLegDateMismatch" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Parlay leg date mismatch <span style="color:var(--ink-soft);font-weight:normal;">(leg's own event date no longer matches its parlay's -- the parlay will never grade until fixed)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLegDateMismatch">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckSyncFlagged" /><label for="mdCheckSyncFlagged" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Schedule sync flagged <span style="color:var(--ink-soft);font-weight:normal;">(unmatched or not_supported -- catches a pick whose fields all look complete but the schedule tools found a mismatch, e.g. the real game/match was on a different date than event_date currently says)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckSyncFlagged">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckLateNightRisk" /><label for="mdCheckLateNightRisk" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Late-night pick, verify event date <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/KBO -- the capper's own message timestamp was captured between 9pm-8am, so the owner's batched next-day posting may have crossed past this match's real date)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLateNightRisk">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckEventName" /><label for="mdCheckEventName" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckEventName">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckPropTeam" /><label for="mdCheckPropTeam" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Prop team <span style="color:var(--ink-soft);font-weight:normal;">(Player Prop -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckPropTeam">Only</button></div>
             <div class="checkbox-row"><input type="checkbox" id="mdCheckLine" /><label for="mdCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLine">Only</button></div>
@@ -11756,8 +11757,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('toggleMissingDataBtn').textContent = showing ? 'Show tool' : 'Hide tool';
   });
 
-  const MD_CHECKBOX_IDS = ['mdCheckStartTime', 'mdCheckLegDateMismatch', 'mdCheckSyncFlagged', 'mdCheckEventName', 'mdCheckPropTeam', 'mdCheckLine', 'mdCheckHomeAway', 'mdCheckClosing', 'mdCheckOpening', 'mdCheckUnitSize', 'mdCheckNotScored'];
-  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team', mdCheckNotScored: 'Not yet scored', mdCheckLegDateMismatch: 'Parlay leg date mismatch', mdCheckSyncFlagged: 'Schedule sync flagged' };
+  const MD_CHECKBOX_IDS = ['mdCheckStartTime', 'mdCheckLegDateMismatch', 'mdCheckSyncFlagged', 'mdCheckLateNightRisk', 'mdCheckEventName', 'mdCheckPropTeam', 'mdCheckLine', 'mdCheckHomeAway', 'mdCheckClosing', 'mdCheckOpening', 'mdCheckUnitSize', 'mdCheckNotScored'];
+  const MD_FIELD_LABELS = { mdCheckClosing: 'Closing odds', mdCheckOpening: 'Opening odds', mdCheckHomeAway: 'Home/Away', mdCheckUnitSize: 'Unit size', mdCheckStartTime: 'Start time', mdCheckEventName: 'Event name', mdCheckLine: 'Line', mdCheckPropTeam: 'Prop team', mdCheckNotScored: 'Not yet scored', mdCheckLegDateMismatch: 'Parlay leg date mismatch', mdCheckSyncFlagged: 'Schedule sync flagged', mdCheckLateNightRisk: 'Late-night pick, verify event date' };
   // CONFIRMED REAL BUG (found 2026-08-13), direct report: "if I hit refresh
   // on the pop out page it flips to a different count... showed me 300
   // picks but that is not correct." Root cause: the OR clause a Missing
@@ -11778,6 +11779,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // Refresh -- running from the pop-out's own window via `opener()` -- can
   // call this exact same narrowing logic instead of re-implementing or
   // skipping it.
+  // Reads the HOUR out of a raw "capper_message_timestamp" string (e.g.
+  // "2:38 PM", "8 June 2026, 11:45 PM", "6:42 AM") and flags it as a
+  // late-night/early-morning send. Deliberately a heuristic, not a real
+  // parse -- the capper's own device timezone is unknown, so this can never
+  // be more than "worth a human look," never an auto-correction. Direct
+  // request 2026-08-20: the channel owner batches and posts picks himself,
+  // typically between 11am-noon, so anything a capper sent after he goes to
+  // bed shows up in his FIRST batch of the next day -- for Tennis/KBO
+  // specifically, that gap is long enough for the match to already be over
+  // by the time it's posted. No meridiem shown is treated as already 24h.
+  function isLateNightMessageTimestamp(raw) {
+    if (!raw) return false;
+    const m = String(raw).match(/(\d{1,2}):(\d{2})\s*([AaPp]\.?[Mm]\.?)?/);
+    if (!m) return false;
+    let hour = parseInt(m[1], 10);
+    const meridiem = (m[3] || '').toLowerCase().replace(/\./g, '');
+    if (meridiem === 'pm' && hour < 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    return hour >= 21 || hour < 8;
+  }
+
   function filterMissingDataRows(picks, checkedIds) {
     const has = id => checkedIds.includes(id);
     return picks.filter(p => {
@@ -11847,6 +11869,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // human, nothing here is confirmed" meaning, just for a sport with no
       // automated source at all rather than a found-but-uncertain match.
       if (has('mdCheckSyncFlagged') && (p.schedule_sync_status === 'unmatched' || p.schedule_sync_status === 'not_supported')) return true;
+      // Direct request 2026-08-20: flag for a human, no auto-correction --
+      // "there's no auto way to do this." Tennis/KBO only, since those are
+      // the two sports confirmed prone to the owner's posting-delay crossing
+      // into the next real event day.
+      if (has('mdCheckLateNightRisk') && (sportName === 'Tennis' || sportName === 'KBO') && isLateNightMessageTimestamp(p.capper_message_timestamp)) return true;
       return false;
     });
   }
@@ -11885,6 +11912,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const checkNotScored = $('mdCheckNotScored').checked;
     const checkLegDateMismatch = $('mdCheckLegDateMismatch').checked;
     const checkSyncFlagged = $('mdCheckSyncFlagged').checked;
+    const checkLateNightRisk = $('mdCheckLateNightRisk').checked;
 
     // Only the CHECKED fields count toward "missing" -- unchecking one
     // means a pick missing only that specific thing won't show up at all.
@@ -11916,6 +11944,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // mismatch just above) -- schedule_sync_status is already a real
     // column on the row.
     if (checkSyncFlagged) conditions.push('schedule_sync_status.in.(unmatched,not_supported)');
+    // Same "candidate rows first, real narrowing happens client-side" idea
+    // as checkNotScored/checkLegDateMismatch above -- the actual hour parse
+    // and Tennis/KBO restriction happen in filterMissingDataRows, since a
+    // raw timestamp string can't be filtered server-side.
+    if (checkLateNightRisk) conditions.push('capper_message_timestamp.not.is.null');
 
     if (!conditions.length) {
       alert('Check at least one field to look for.');
@@ -11926,7 +11959,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,capper_message_timestamp,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -12945,6 +12978,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // same at-a-glance purpose -- but a handshake, deliberately never fire
     // (that's reserved for the capper-streak signal, a different thing).
     const consensusBadge = isHighConsensus ? `<span class="stamp" style="border-color:var(--stamp-red);color:var(--stamp-red);transform:none;margin-right:8px;">&#129309; Consensus Pick</span>` : '';
+    // Direct request 2026-08-20: the channel owner batches and posts picks
+    // himself, typically between 11am-noon -- anything a Tennis/KBO capper
+    // sent late at night can end up posted for a match that's already over
+    // by the time it's published. Same underlying flag as Missing Data's
+    // "Late-night pick, verify event date" checkbox, surfaced here too so
+    // it's visible at the actual moment of publishing, not just during
+    // cleanup. Never auto-corrected -- there's no reliable way to do that,
+    // this is purely "a human should look before publishing this one."
+    const isLateNightRisk = p.sports && (p.sports.name === 'Tennis' || p.sports.name === 'KBO') && isLateNightMessageTimestamp(p.capper_message_timestamp);
+    const lateNightBadge = isLateNightRisk ? `<span class="stamp" style="border-color:var(--stamp-red);color:var(--stamp-red);transform:none;margin-right:8px;" title="Capper's own message timestamp was late-night/early-morning -- verify event_date before publishing">&#9888; Verify date</span>` : '';
     const actionHtml = opts.readOnly
       ? (p.is_published ? '<span style="color:var(--stamp-green);font-weight:bold;">Published</span>' : '<span style="color:var(--ink-soft);">Not published</span>')
       : (p.is_published
@@ -12958,6 +13001,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         ${opts.resultBadge || ''}
         ${hotPickBadge}
         ${consensusBadge}
+        ${lateNightBadge}
         <span class="pr-selection"><span class="pr-bettype-tag">${escapeHtml(betTypeName)}</span>${callText}${propBit}</span>
         <span class="pr-meta">Event: ${p.event_date} · ${escapeHtml(p.sports ? p.sports.name : '—')}</span>
         <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
@@ -13224,7 +13268,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // would never publish a leg by itself (it was never his standalone
       // call), so legs never become their own scored/publishable candidate.
       const includeParlaysAsCandidates = !!($('prIncludeParlays') && $('prIncludeParlays').checked);
-      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,first_scored_score,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
+      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,first_scored_score,capper_message_timestamp,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
       if (sportFilter) pendingQuery += `&sport_id=eq.${sportFilter}`;
       if (from) pendingQuery += `&event_date=gte.${from}`;
       if (to) pendingQuery += `&event_date=lte.${to}`;
@@ -15383,7 +15427,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 292; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 293; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
