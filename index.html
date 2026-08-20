@@ -286,6 +286,15 @@
   }
   .pr-leg-published { background: rgba(45,106,79,0.1); border-left: 3px solid var(--stamp-green); padding-left: 8px; }
   .pr-agreeing-name { font-weight: bold; min-width: 100px; }
+  .pr-consensus {
+    width: 100%; padding: 6px 12px; border-top: 1px dashed var(--field); background: #f7f4ea;
+    font-size: 11px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .pr-consensus-high { background: rgba(163,115,10,0.14); border-top: 1px solid var(--stamp-amber); }
+  .pr-consensus-tag {
+    font-size: 9px; font-weight: bold; letter-spacing: 0.05em; text-transform: uppercase;
+    background: var(--stamp-amber); color: #22281f; padding: 2px 7px; border-radius: 3px;
+  }
   .pr-duplicates {
     width: 100%; padding: 8px 12px; border-top: 1px dashed var(--field); background: #f7f4ea;
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px;
@@ -12522,6 +12531,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return { confPts, legBreakdown };
   }
 
+  // Deliberately separate from scoringConfig.confluenceCapCappers (which
+  // caps how much headcount can move the composite SCORE) -- this only
+  // controls when the always-visible consensus line below gets flagged
+  // "High consensus," independent of whatever the score does with that
+  // same agreement. Direct request: a big pile-on should always be visible
+  // for a manual look, even when the formula correctly declines to let it
+  // dominate the ranking on its own.
+  const HIGH_CONSENSUS_THRESHOLD = 6;
+
   // Scores any single entry (candidate OR leg) exactly the way a straight
   // candidate is scored in the main scoredStraight.map() below -- pulled
   // out here so a published LEG (see finalizeStraightScored's groups param
@@ -12771,6 +12789,32 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </div>`;
     }
 
+    // Direct request: "if 9 people agreed with Spurs even if they were
+    // parlay legs I should know that when I'm looking at the card... yeah
+    // I saw it a lot in the upload but it was all parlay driven." Split out
+    // from the (deduped) agreeingCappers list so raw headcount is always
+    // visible up front, regardless of what the score did with it --
+    // confluencePoints() deliberately caps how much headcount can move the
+    // SCORE (see its own comment), so a big number can look "buried" in the
+    // total alone without a separate, always-visible line for it. Never
+    // uses the fire emoji -- confirmed that's reserved for the Hot Pick
+    // capper-streak badge, a different signal entirely.
+    let consensusHtml = '';
+    if (!s.isParlayCandidate && s.agreeingCappers.length) {
+      const standaloneCount = s.agreeingCappers.filter(c => !c.isLeg).length + 1; // +1: this card's own pick is always the standalone/winning call
+      const legCount = s.agreeingCappers.filter(c => c.isLeg).length;
+      const totalCount = standaloneCount + legCount;
+      const isHighConsensus = totalCount >= HIGH_CONSENSUS_THRESHOLD;
+      const breakdown = legCount
+        ? `${standaloneCount} independently, ${legCount} via parlay leg${legCount === 1 ? '' : 's'}`
+        : `all called independently`;
+      consensusHtml = `
+      <div class="pr-consensus${isHighConsensus ? ' pr-consensus-high' : ''}">
+        &#128101; <strong>${totalCount}</strong> capper${totalCount === 1 ? '' : 's'} on this side — ${breakdown}
+        ${isHighConsensus ? '<span class="pr-consensus-tag">High consensus</span>' : ''}
+      </div>`;
+    }
+
     // Direct request: keep the ranked card itself capper-agnostic (the
     // score, not who submitted it, drives the publish decision) while still
     // making every other capper's identical call on this exact bet visible
@@ -12838,6 +12882,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <button type="button" class="ghost small pr-toggle-btn">Details &#9662;</button>
         <span class="pr-action">${actionHtml}</span>
       </div>
+      ${consensusHtml}
       ${duplicatesHtml}
       <div class="pr-details" style="display:none;">
         <div class="pr-body">
@@ -15194,7 +15239,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 284; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 285; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
