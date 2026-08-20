@@ -167,6 +167,379 @@
 //     "home", Australia "away") via a "<touring team> tour of <host
 //     team>" series-name heuristic, confirmed against the real series
 //     name "Australia tour of Pakistan 2026".
+// 11. CONFIRMED FIX, direct report immediately after shipping fix #10:
+//     Tennis picks got no sync note at all, and it turned out to be
+//     another version of the exact same silent-skip bug -- Tennis/Golf/
+//     MMA/Boxing (NO_HOME_AWAY_SPORTS) were being skipped ENTIRELY at the
+//     sport level before any pick was ever looked at, on the theory that
+//     "doesn't need home_away" meant "needs no processing here at all."
+//     Those are two different facts -- these sports still need
+//     game_start_time like anyone else, this function just has no data
+//     source for any of it. This branch also used to exclude Player Prop
+//     picks outright, which meant Tennis (almost entirely props) was
+//     getting close to zero real coverage even when it WAS reached. Now
+//     unified: any no-ESPN-mapping sport (Tennis/Golf/MMA/Boxing, KBO,
+//     CBA, Cricket, Euro Basketball, miscategorized entries) gets a real
+//     per-pick note for whatever it's ACTUALLY missing -- home_away only
+//     when the sport/bet-type needs one, game_start_time always -- rather
+//     than either silence or a note that doesn't match what's really gone.
+//     Parlay wrapper rows stay fully excluded, same as everywhere else.
+// 12. Tennis now has real schedule coverage -- direct concern, confirmed
+//     with real data: Tennis picks routinely arrive late at night for
+//     matches starting as early as 5-6am ET the next morning, and nobody
+//     reading the pick later (customer or reviewer) has any way to know
+//     that. ESPN's tennis/atp and tennis/wta endpoints expose individual
+//     match start times nested inside each tournament's draw (tournament
+//     -> Men's/Women's Singles/Doubles grouping -> match) -- structurally
+//     different from every other sport in this file, so Tennis gets its
+//     own dedicated matching path (like Soccer's, but not games/teams --
+//     players and matches). Handles singles and doubles together, since
+//     cappers call both and a lone player name can appear in BOTH a
+//     singles AND a doubles match the same day (disambiguated by
+//     preferring singles when that's the only thing that resolves it
+//     cleanly). Surname-only picks ("Cobolli" instead of "Flavio
+//     Cobolli") are matched the same way team bare-location names are --
+//     only when unique across everyone playing that day. Verified
+//     end-to-end against real June 1 2026 data and real picks in this
+//     system before shipping, including a genuine bug caught in that
+//     process: a Grand Slam's combined draw appears in BOTH the atp and
+//     wta feeds with its full schedule each time, which silently
+//     double-counted every match until deduped by match id.
+// 13. CONFIRMED FIX, direct request: "what are we doing with the ones on
+//     the wrong date... I had a scenario that will come up where someone
+//     put in World Cup picks 2 weeks out." Confirmed directly against
+//     ESPN's real API before building this: querying a tournament's own
+//     feed on a date BEFORE it starts returns either a totally EMPTY event
+//     list (soccer/fifa.world queried 2 weeks before the World Cup's real
+//     June 11 start), or a completely DIFFERENT, unrelated tournament that
+//     happens to be active that day instead (tennis/atp queried 3 weeks
+//     before the French Open's real May 17 start returned the Madrid Open
+//     instead) -- so a wrong event_date can't be fixed by just re-querying
+//     ESPN with a slightly different guessed date; the query date has to
+//     come from a REAL tournament window. Scoped to exactly the sports the
+//     project owner named as actually having this problem (Tennis, Soccer
+//     -- Golf/KBO/MMA don't have real ESPN coverage built yet at all, see
+//     the "unsupported sport" branch above) -- every other sport keeps
+//     strict same-day matching only, per direct confirmation these sports
+//     "should never experience this issue outside of playoffs."
+//     getCandidateQueryDates() below consults the real tournaments table
+//     (already populated and kept current via the "Bulk refresh
+//     tournaments" tool in Setup) for anything whose own start_date/
+//     end_date falls within a 30-day buffer of the pick's stated
+//     event_date, and adds each one's own MIDPOINT date as an extra query
+//     date. Deliberately the midpoint, not start_date -- also confirmed
+//     directly while building this: our own tournaments table's start_date
+//     for French Open (2026-05-17) doesn't line up exactly with when
+//     ESPN's own feed actually starts returning it (2026-05-18) -- a tight
+//     boundary date is fragile to exactly this kind of one-day mismatch,
+//     but a mid-tournament date isn't, and still works: querying ATP with
+//     2026-05-27 (well inside the window) still returns Roland Garros's
+//     FULL 633-match draw, including Round 1 matches from 2026-05-18,
+//     since ESPN returns a tournament's whole schedule regardless of which
+//     date within its active window was queried (same behavior CONFIRMED
+//     FIX #12 already relies on).
+//     Deliberately does NOT try to match tournament NAMES between our
+//     table and ESPN's own naming (confirmed they can differ -- our table
+//     says "French Open", ESPN calls it "Roland Garros") -- it just trusts
+//     that querying a date within a real tournament's real window pulls
+//     back whatever's actually relevant then. When a match is found on a
+//     date different from the pick's own event_date, game_start_time still
+//     gets set to the real value (so no second run is ever needed just
+//     because the date was off), but schedule_sync_status stays 'matched'
+//     WITH a note flagging the discrepancy -- a deliberate, one-time
+//     exception to the usual "matched means note is null" rule, since the
+//     whole point of this fix is to surface a wrong event_date instead of
+//     silently correcting around it. event_date itself is never rewritten.
+//     CONFIRMED REAL BUG, found immediately after shipping the above,
+//     direct report with real production output: widening the Tennis pool
+//     to span tournament windows (removing the same-day filter) broke two
+//     things that used to safely assume "a player appears at most once per
+//     day" -- (1) surname-uniqueness counted raw match OCCURRENCES, so a
+//     player who advanced through multiple rounds inflated her OWN
+//     surname's count above 1 and got silently excluded from surname-only
+//     lookup even though she's the only real person with that name in the
+//     whole pool (confirmed real failures: Andreeva, Zverev, Fonseca,
+//     Mensik, Kostyuk, Svitolina, Cirstea, Krueger, Pellegrino -- every one
+//     had a correct "did you mean" suggestion, proving they WERE in the
+//     pool, just unreachable by surname); (2) single/multi-token
+//     resolution required an exact count of 1 candidate, so a player or
+//     pair with more than one real match in the widened pool (different
+//     rounds) was wrongly treated as ambiguous (confirmed: "Casper Ruud",
+//     "Marta Kostyuk"). Fixed by (1) counting DISTINCT normalized full
+//     names per surname instead of raw occurrences, and (2) a
+//     closestTennisMatch() tiebreaker that picks whichever of a resolved
+//     player's/pair's real matches falls closest to the pick's own
+//     event_date -- safe because every candidate reaching that tiebreaker
+//     is already guaranteed (by construction) to belong to the same single
+//     real player or pairing, so it's picking WHICH of their known real
+//     dates was meant, not guessing between different possible people.
+//     Verified directly against real ESPN data for the exact real failing
+//     picks from the production run that surfaced this: 10 of 11 single-
+//     name cases now resolve correctly (Zverev, Fonseca, Mensik, Kostyuk,
+//     Svitolina, Cirstea, Krueger, Pellegrino, Casper Ruud, Marta Kostyuk),
+//     plus the real doubles case (Bolelli/Vavassori over Nouza/
+//     Oberleitner). The one that still correctly stays unmatched --
+//     "Andreeva" -- is NOT a bug: confirmed there are genuinely TWO real
+//     players with that surname in the pool (Mirra Andreeva and her
+//     real-life sister Erika Andreeva), so declining to guess between them
+//     is the right call, not a regression.
+// 14. CONFIRMED FIX, direct request: "we do need a source for KBO as during
+//     the KBO season I see a dozen or so picks nightly." ESPN has no KBO
+//     coverage at all (confirmed directly against ESPN's own baseball-
+//     leagues listing API -- MLB, college ball, several winter leagues,
+//     but no KBO). Naver Sports (a major Korean portal) runs a real, live
+//     KBO schedule through its own internal API -- confirmed directly:
+//     pulling real 2025 dates returned real completed games with real
+//     start times, scores, and team codes; pulling 6 spread-out dates
+//     surfaced exactly the league's real 10 team codes, no more.
+//     KBO_TEAM_NAMES maps each code to the English name real cappers in
+//     this system actually use (confirmed against real KBO picks already
+//     in the picks table). Naver's own start times are local KST with no
+//     timezone suffix -- confirmed by pattern-matching real KBO start
+//     times (18:30, 14:00) against known real weekday-evening/Sunday-day
+//     KBO start conventions -- converted to UTC the same way ESPN's own
+//     e.date is used everywhere else in this file. Real KBO picks in this
+//     system's own picks table were checked before scoping this build --
+//     all 32 found are team-level bets (Moneyline, Spread, Over/Under,
+//     and their "First 5" variants), zero Player Props -- so this only
+//     builds team-level matching for now; Naver's basic schedule endpoint
+//     has no player/roster data anyway, so prop support would need a
+//     separate source, not yet built. Once fetched, KBO games are
+//     reshaped into the same shape ESPN's own events use so the EXISTING
+//     team-matching pipeline (gameEntries/findMatchingGames/candidateGames)
+//     runs completely unchanged -- no new matching logic, just a different
+//     game-source step, same pattern Soccer already established.
+//     Also queries the day before and after targetDate (not just
+//     targetDate itself, see CONFIRMED FIX #13's date-mismatch-note
+//     pattern, extended here) -- direct concern: KBO games are played in
+//     Korea (KST, 13-14 hours ahead of US Eastern), so a pick entered late
+//     evening ET can genuinely correspond to a game whose real Korean
+//     calendar date is already the next day. Not tournament-table-driven
+//     like Fix #13 -- KBO is a continuous league season, not a bracketed
+//     event, so there's nothing there to look up; a simple +/-1-day window
+//     covers the real failure mode described.
+// 15. CONFIRMED FIX, direct request right after the Tennis surname fix
+//     above shipped: "I can see that all the tournament fields for these
+//     players are blank but I have no automated way of putting them in...
+//     not something I want to update manually given the number of tennis
+//     picks called on a daily basis." Confirmed against the real picks
+//     table: event_name (the free-text field behind the Event/Tournament
+//     dropdown in the pick-entry form, e.g. "French Open") is otherwise
+//     only ever set by whoever enters the pick. A successful Tennis or
+//     Soccer match already tells us the REAL tournament/competition name,
+//     straight from ESPN -- Tennis carries it as tournament.name on each
+//     match (confirmed real: "Roland Garros"); Soccer's competition name
+//     lives at the top of each slug's own response
+//     (result.value.leagues[0].name, e.g. "FIFA World Cup") rather than
+//     per-event, confirmed directly, so it's stashed onto each event as
+//     it's fetched. Both now write it back to event_name on a successful
+//     match, but ONLY when the pick's own event_name is currently blank --
+//     never overwriting a value someone already entered. KBO is
+//     deliberately NOT included -- it's a continuous league season, not
+//     treated as an "event" the way Tennis/Soccer/Golf are, so event_name
+//     isn't a meaningful concept for a KBO pick (same reasoning CONFIRMED
+//     FIX #14 already used to skip tournament-table widening for it).
+// 16. CONFIRMED FIX, direct request: "the next step which is WNBA. It is
+//     big enough we should be able to find somewhere to resolve the start
+//     time as those failed for the WNBA player props." Confirmed directly
+//     against BALLDONTLIE's own real docs (wnba.balldontlie.io) before
+//     building this: their WNBA API mirrors their NBA API exactly -- same
+//     GET /wnba/v1/games (dates[]/team_ids[]) and GET /wnba/v1/players
+//     (team_ids[]) shape, both confirmed free-tier. The existing NBA prop-
+//     lookup logic (fetch today's games, then each team's roster, build a
+//     player-name -> {team, start time} map) is now shared between NBA and
+//     WNBA via a single bdlSportPath variable -- no new matching logic,
+//     just a different sport segment in the same URLs, same pattern
+//     already used for KBO reusing the team-matching pipeline. NOTE: not
+//     independently confirmed against a real authenticated response (no
+//     BALLDONTLIE_API_KEY available to test with directly) -- balldontlie's
+//     own docs state paid-tier PURCHASES don't carry across sports, but
+//     the account-level API key credential itself is expected to be the
+//     same one already configured for NBA, since both are free-tier
+//     endpoints under the same account. If that assumption is wrong,
+//     propLookupStatus will surface it clearly as a real, specific
+//     games_fetch_failed status (e.g. 401) on the next run rather than
+//     failing silently -- worth confirming against the first real result.
+// 17. CONFIRMED FIX, direct report: "that did not resolve it and I have
+//     some tennis ones that are still not resolving." A real pick,
+//     "Sorana Cirstea/Andreeva," stayed unmatched even though a SEPARATE
+//     pick for just "Sorana Cirstea" alone had already resolved correctly
+//     to her real match against Mirra Andreeva in the SAME run. Root
+//     cause: "Andreeva" alone is genuinely ambiguous (two real players,
+//     sisters Mirra and Erika Andreeva, both in the pool), so it's
+//     deliberately excluded from the safe surname-only lookup -- correct
+//     for a LONE bare name, where nothing else can disambiguate it. But
+//     for a multi-name pick, the OTHER named player (Cirstea) can do
+//     exactly that disambiguating, since she only ever played one of the
+//     two real Andreevas -- the strict single-token-only lookup never even
+//     attempted this intersection, bailing out as soon as any token
+//     resolved to zero safe candidates. tennisSurnameAllCandidates (every
+//     player sharing a surname, not just a uniquely-safe one) is used
+//     ONLY as a multi-token fallback, when a token's safe lookup comes
+//     back empty and there's a second name available to disambiguate with
+//     -- a lone ambiguous surname by itself still correctly stays
+//     unresolved. Verified directly against real data: "Sorana Cirstea/
+//     Andreeva" now correctly resolves; "Andreeva" alone still correctly
+//     stays ambiguous. A separate real case checked the same day,
+//     "Fonseca/Bolelli," was confirmed to be a genuine data issue rather
+//     than a bug -- Fonseca only plays singles (Pavlovic, Prizmic,
+//     Djokovic, Casper Ruud, Mensik) and Bolelli only plays doubles
+//     (always paired with Vavassori), so they never actually meet;
+//     correctly stays flagged for manual review.
+// 18. CONFIRMED FIX, direct report same day: "Harris Lloyd played on June 2
+//     in Birmingham" -- confirmed directly against real ESPN data that no
+//     such match exists at Birmingham, but a REAL ATP player, "Lloyd
+//     Harris," played Roland Garros on 2026-05-18 and 2026-05-20 -- first
+//     and last name swapped, not a spelling typo. Neither existing
+//     suggestion check (full-string Levenshtein, last-word-only) ever gets
+//     close to a swapped name, since reversing two whole words changes the
+//     character sequence far more than a normal typo would. A genuine
+//     two-word reversal is a specific, well-defined transformation (not a
+//     fuzzy guess), so it's registered directly as an extra lookup key --
+//     not just a suggestion -- but ONLY when unambiguous: exactly one real
+//     two-word name in the pool reverses to a given key, AND that key
+//     doesn't collide with any OTHER real player's actual forward name
+//     already in the lookup. Same safety bar already used for bare-surname
+//     matching (CONFIRMED FIX #12), applied here to a reversed name
+//     instead of a partial one. Verified directly against real data:
+//     "Harris Lloyd" now resolves to Lloyd Harris's real match, and the
+//     reversed key was confirmed to have exactly one real source with no
+//     collision before shipping.
+//     Same report also caught a misleading note: an NBA prop
+//     (propLookupStatus 'built_but_empty' -- a genuinely EMPTY but
+//     successful response, not a fetch error) used to say "try running the
+//     backfill again," which is actively wrong when the real cause is a
+//     wrong event_date -- confirmed directly: "the NBA prop was entered 2
+//     days early as the NBA final did not start until the 3rd." Split the
+//     note wording three ways: no data source at all (unchanged), a
+//     genuinely empty-but-valid response (now explains the likely wrong-
+//     date cause instead of implying a retry would help), and an actual
+//     transient/config failure (unchanged, retry wording still applies).
+// 19. CONFIRMED FIX, root cause found via the project owner's own real
+//     BALLDONTLIE API key: their free tier allows only 5 requests PER
+//     MINUTE (confirmed directly -- a real 429 hit after two quick
+//     sequential test requests). The PARALLEL fetch pattern this used to
+//     fire (2 games requests, then one MORE per team playing) blew
+//     through that limit every run, silently dropping most player-fetch
+//     requests. Rebuilt to stay within the real limit -- see the isTennis
+//     branch's own comment history and the NBA/WNBA prop-lookup section
+//     for the full story (later superseded by Fix #20's ESPN swap, which
+//     removed the rate limit problem at the source instead of just
+//     working around it).
+// 20. CONFIRMED FIX: replaced the entire BALLDONTLIE-based NBA/WNBA prop
+//     lookup with ESPN's own team roster endpoint instead -- confirmed
+//     directly, no rate limit at all (8 rapid real requests, zero
+//     issues), unlike BALLDONTLIE's confirmed 5/minute ceiling. Reuses
+//     the `games` array already fetched for team-sport matching (no
+//     second fetch needed). See the isNba/isWnba prop-lookup section's
+//     own comment for the full story, including the honest caveat that
+//     ESPN's roster data is current-only, not historically date-anchored
+//     (same real limitation BALLDONTLIE's data effectively had too).
+// 21. CONFIRMED FIX: added TEAM_NAME_ALIASES, a curated table for cases
+//     where a capper's common/colloquial team name diverges from ESPN's
+//     own branding -- real case: "Wisconsin" called for University of
+//     Wisconsin-Milwaukee, but ESPN's own team data is just "Milwaukee,"
+//     no "Wisconsin" substring anywhere. See TEAM_NAME_ALIASES' own
+//     comment above for the full story and verification detail.
+// 22. CONFIRMED FIX: added `ncaahockey: 'hockey/mens-college-hockey'` to
+//     ESPN_SPORT_MAP ahead of fall college sports season -- confirmed
+//     directly against ESPN's real API (12 real games found in a live
+//     test) before adding. Does nothing until a matching "NCAA Hockey"
+//     row exists in the sports table (SQL given directly in chat).
+// 23. CONFIRMED FIX, direct follow-up: "I would think all women's sports
+//     should get covered... if ESPN has it listed separately we should
+//     account for it ahead of time." Added college softball, women's
+//     college basketball/hockey/volleyball/lacrosse to ESPN_SPORT_MAP --
+//     all confirmed real, working ESPN endpoints. See ESPN_SPORT_MAP's
+//     own comment for the full list and verification detail. Same as
+//     Fix #22, none of these do anything until a matching sports table
+//     row exists.
+// 24. CONFIRMED REAL BUG, found testing the widened-window fix on real
+//     data: closestTennisMatch's plain closest-absolute-distance
+//     tiebreak had no principled way to prefer a later match over an
+//     earlier one when both were equidistant from the pick's event_date
+//     -- real case: "Zverev" (event_date 2026-06-01) has real matches on
+//     BOTH 2026-05-31 and 2026-06-02, exactly one day apart either way.
+//     Direct clarification: "it should always assume that the game that
+//     is submitted is for the same day or later. We may have a capper
+//     either send an update to his picks from the night before and keep
+//     them in the image but that would be a rare situation." Now prefers
+//     any same-day-or-later candidate over an earlier one regardless of
+//     raw distance, only falling back to the full candidate set when
+//     NOTHING same-day-or-later exists for that player/pairing anywhere
+//     in the widened window. Verified directly against real data:
+//     "Zverev" (event_date 2026-06-01) now resolves to the 2026-06-02
+//     match instead of 2026-05-31.
+// 25. CONFIRMED FIX, direct follow-up same day: "Even if it can't validate
+//     the date though it should still populate a tournament so we don't
+//     have to go inputting information multiple times." A single-token
+//     pick whose only real problem is genuine ambiguity between two-or-
+//     more REAL players sharing a surname (not a typo) often still has
+//     enough information to safely fill in event_name: if EVERY real
+//     candidate for that surname happens to be playing the SAME
+//     tournament, that fact doesn't depend on which specific one was
+//     meant. Verified directly against real data both ways: several real
+//     ambiguous surnames (Sanchez, Harris, Silva, Smith, Paul, Cerundolo,
+//     Kichenok, Cash -- each 2 real players) all share exactly one real
+//     tournament (Roland Garros) and would correctly get event_name
+//     filled in; "Andreeva" and "Jones" (real ambiguous surnames spanning
+//     TWO different real tournaments each) correctly decline to guess.
+// 26. CONFIRMED FIX, direct follow-up same day, real production report:
+//     "Svjada/Cobolli" still showed as unresolved even after Fix #25 --
+//     but this isn't the ambiguous-surname case Fix #25 covers, it's a
+//     plain typo ("Svjada" for real ATP player "Zachary Svajda") in a
+//     TWO-name pick. Confirmed directly against real ESPN data: Zachary
+//     Svajda actually played Flavio Cobolli at Roland Garros on exactly
+//     this pick's own event_date (2026-06-01) -- fully resolvable, not
+//     just a tournament guess, except the code already computed the
+//     correct "did you mean" suggestion for its note and then never
+//     tried matching with it. Now: when a multi-token pick has one name
+//     still unresolved AND at least one OTHER name on the same pick
+//     already resolved normally, the missing name's spelling suggestion
+//     is tried too -- but ONLY kept if it produces a real shared match
+//     with the already-confirmed name (the same match-intersection check
+//     already used for two confirmed names), which is independent
+//     evidence the correction was right, not a blind guess off edit-
+//     distance alone. Deliberately NOT attempted for single-token picks
+//     or when every name on a pick is missing -- there's no second name
+//     to cross-check against there, same reasoning as Fix #25's scoping.
+//     Verified directly against real data, all 5 cases behaving exactly
+//     as intended: (1) the real "Svjada/Cobolli" case now fully resolves
+//     to the real match, tournament, and start time; (2) a lone
+//     single-token typo correctly still declines (no cross-check
+//     available); (3) both names typo'd on the same pick correctly still
+//     declines (no confirmed anchor); (4) a known-good pair with no typo
+//     is unaffected, no regression; (5) the known real "Fonseca/Bolelli"
+//     data-error case still correctly fails rather than forcing a match.
+// 27. CONFIRMED FIX, direct request: "We could very well pick up a source
+//     that calls Cricket or Chinese Basketball or European sports so we
+//     should resolve those as there must be an API or source out there
+//     to pick these up." Real Cricket schedule coverage added via
+//     CricketData.org (api.cricapi.com, free tier, 100 hits/day, real
+//     key confirmed directly). Chinese Basketball (CBA) explicitly
+//     parked -- real data exists via TheSportsDB (confirmed directly
+//     against real match data), but reliable production use needs a
+//     $9/month Patreon key, not worth it yet for the single real pick
+//     seen so far. Structured as its own top-level branch (see the
+//     isCricket branch's own comment for the full architecture --
+//     why it can't reuse the generic MLB/NBA/KBO/ESPN pipeline, the
+//     series-search query strategy that stays within the tight rate
+//     limit, and the same-day-or-later tiebreak it needed, same
+//     reasoning as Fix #24). Verified directly against the real key and
+//     real data behind this session's own two Cricket picks: "Pakistan"
+//     and "Austrailia" (a typo for "Australia") both correctly resolve
+//     to the real June 2, 2026 Pakistan vs Australia ODI (the closest
+//     same-day-or-later match in the real 3-match series spanning May
+//     30-June 4, none of which fall exactly on the picks' June 1
+//     event_date) -- including the typo resolving via the same cross-
+//     confirmed spelling-correction approach as Fix #26 (the correctly-
+//     spelled "Pakistan" pick's own series search surfaces the real
+//     Australia matches too, so "Austrailia" -> "Australia" only gets
+//     trusted once it's confirmed against that real shared match pool,
+//     not a blind guess), and both correctly get home_away set (Pakistan
+//     "home", Australia "away") via a "<touring team> tour of <host
+//     team>" series-name heuristic, confirmed against the real series
+//     name "Australia tour of Pakistan 2026".
 // 28. LIKELY FIX, NOT independently re-confirmed (this run comes from
 //     inside Supabase's own Edge Function runtime, which can't be tested
 //     directly the way everything else in this file was) -- direct real-
