@@ -208,8 +208,30 @@
   .stamp.loss { color: var(--stamp-red); }
   .stamp.push { color: var(--stamp-gray); }
   .stamp.pending { color: var(--stamp-amber); }
+  /* Direct request: a rotated text word was hard to tell apart at a glance
+     across several stacked parlay legs. Same win/loss/push/pending colors,
+     but as a plain dot -- solid fill once it's graded, hollow (border only)
+     while still pending -- reads left-to-right without stopping to parse
+     rotated text per leg. Scoped to the .win/.loss/.push/.pending modifiers
+     only, so this never touches the base .stamp look used elsewhere for
+     Hot Pick / Consensus Pick / Verify date flags. */
+  .stamp.win, .stamp.loss, .stamp.push, .stamp.pending {
+    width: 12px;
+    height: 12px;
+    padding: 0;
+    border-radius: 50%;
+    border-width: 2px;
+    font-size: 0;
+    line-height: 0;
+    overflow: hidden;
+    text-indent: -9999px;
+    transform: none;
+    vertical-align: middle;
+    background: currentColor;
+  }
+  .stamp.pending { background: transparent; }
 
-  .grade-btns { display: flex; gap: 4px; }
+  .grade-btns { display: flex; gap: 4px; align-items: center; }
   .grade-btns button.win { border-color: var(--stamp-green); color: var(--stamp-green); background: transparent; }
   .grade-btns button.loss { border-color: var(--stamp-red); color: var(--stamp-red); background: transparent; }
   .grade-btns button.push { border-color: var(--stamp-gray); color: var(--stamp-gray); background: transparent; }
@@ -5757,7 +5779,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
           // of which game belongs to which parlay. This is the visually
           // obvious place to do it.
           const gradeHtml = leg.result === 'pending'
-            ? `<span class="grade-btns" style="display:inline-flex;vertical-align:middle;">
+            ? `<span class="grade-btns" style="display:inline-flex;align-items:center;gap:4px;vertical-align:middle;">
+                 <span class="stamp pending"></span>
                  <button class="mini win" data-leg-grade="${leg.id}" data-result="win">Win</button>
                  <button class="mini loss" data-leg-grade="${leg.id}" data-result="loss">Loss</button>
                  <button class="mini push" data-leg-grade="${leg.id}" data-result="push">Push</button>
@@ -5952,6 +5975,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
       const grading = p.result === 'pending'
         ? `<div class="grade-btns">
+             <span class="stamp pending"></span>
              <button class="small win" data-id="${p.id}" data-result="win">Win</button>
              <button class="small loss" data-id="${p.id}" data-result="loss">Loss</button>
              <button class="small push" data-id="${p.id}" data-result="push">Push</button>
@@ -6647,6 +6671,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
   .filter-panel .btn-clear { background: transparent; border: 1px solid #b9b09a; }
   .stamp { display: inline-block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 20px; border: 1.5px solid currentColor; transform: rotate(-2deg); }
   .stamp.win { color: #2d6a4f; } .stamp.loss { color: #8a2f3a; } .stamp.push { color: #6b6456; } .stamp.pending { color: #a3730a; }
+  .stamp.win, .stamp.loss, .stamp.push, .stamp.pending { width: 12px; height: 12px; padding: 0; border-radius: 50%; border-width: 2px; font-size: 0; line-height: 0; overflow: hidden; text-indent: -9999px; transform: none; vertical-align: middle; background: currentColor; }
+  .stamp.pending { background: transparent; }
   .mini { font-family: inherit; font-size: 10px; padding: 4px 8px; border-radius: 2px; cursor: pointer; margin: 2px 2px 2px 0; border: 1.5px solid #234d35; background: transparent; color: #234d35; }
   .mini.win { border-color: #2d6a4f; color: #2d6a4f; }
   .mini.loss { border-color: #8a2f3a; color: #8a2f3a; }
@@ -7302,12 +7328,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             // to tell what was actually being graded without a full edit.
             const propBit = (leg.prop_player || leg.prop_stat) ? (' — ' + escLocal(leg.prop_player || '') + ' ' + escLocal(leg.prop_stat || '')).trim() : '';
             const gradeHtml = leg.result === 'pending'
-              ? '<span class="grade-btns" style="display:inline-flex;vertical-align:middle;">' +
+              ? '<span class="grade-btns" style="display:inline-flex;align-items:center;gap:4px;vertical-align:middle;">' +
+                  '<span class="stamp pending"></span>' +
                   '<button class="mini win" data-leg-grade="' + leg.id + '" data-result="win">Win</button>' +
                   '<button class="mini loss" data-leg-grade="' + leg.id + '" data-result="loss">Loss</button>' +
                   '<button class="mini push" data-leg-grade="' + leg.id + '" data-result="push">Push</button>' +
                 '</span>'
-              : '<span class="stamp ' + leg.result + '">' + leg.result + '</span>';
+              : '<span class="stamp ' + leg.result + '"></span>';
             const link = linkByLegId[leg.id] || {};
             const linkTier = link.pick_tier;
             const tierSelectHtml = '<select class="leg-tier-select" data-parlay-id="' + parlayId + '" data-leg-id="' + leg.id + '" style="font-family:inherit;font-size:10px;padding:1px 2px;margin-left:6px;">' +
@@ -9944,6 +9971,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   .empty-state { font-style: italic; color: #55584d; }
   .stamp { display: inline-block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 20px; border: 1.5px solid currentColor; transform: rotate(-2deg); }
   .stamp.win { color: #2d6a4f; } .stamp.loss { color: #8a2f3a; } .stamp.push { color: #6b6456; } .stamp.pending { color: #a3730a; }
+  .stamp.win, .stamp.loss, .stamp.push, .stamp.pending { width: 12px; height: 12px; padding: 0; border-radius: 50%; border-width: 2px; font-size: 0; line-height: 0; overflow: hidden; text-indent: -9999px; transform: none; vertical-align: middle; background: currentColor; }
+  .stamp.pending { background: transparent; }
 </style>
 </head><body>
   <h1>Consensus Picks</h1>
@@ -13892,10 +13921,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         p.opening_odds !== null && p.opening_odds !== undefined ? `Open ${p.opening_odds > 0 ? '+' : ''}${p.opening_odds}` : null,
         p.closing_odds !== null && p.closing_odds !== undefined ? `Close ${p.closing_odds > 0 ? '+' : ''}${p.closing_odds}` : null
       ].filter(Boolean).join(' / ') || '—';
-      const resultBadge = p.result === 'pending' ? '<span style="color:var(--ink-soft);">Pending</span>'
-        : p.result === 'win' ? '<span style="color:var(--stamp-green);font-weight:bold;">Win</span>'
-        : p.result === 'loss' ? '<span style="color:var(--stamp-red);font-weight:bold;">Loss</span>'
-        : '<span style="color:var(--ink-soft);">Push</span>';
+      const resultBadge = stampHtml(p.result);
       // CONFIRMED REAL GAP, direct report: a Player Prop row showed only
       // "Under (6)" with no way to tell which player or stat it was even
       // about -- prop_player/prop_stat weren't in the query at all. Same
@@ -14015,8 +14041,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const bd = p.published_score_breakdown || {};
       const resultStamp = p.result === 'win' ? '<span class="stamp win">Win</span>'
         : p.result === 'loss' ? '<span class="stamp loss">Loss</span>'
-        : p.result === 'push' ? '<span class="stamp pending">Push</span>'
-        : '<span style="color:var(--ink-soft);">Pending</span>';
+        : p.result === 'push' ? '<span class="stamp push">Push</span>'
+        : '<span class="stamp pending"></span>';
       return `<tr>
         <td>${p.event_date}</td>
         <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
@@ -14038,8 +14064,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const untrackedRows = untracked.map(p => {
       const resultStamp = p.result === 'win' ? '<span class="stamp win">Win</span>'
         : p.result === 'loss' ? '<span class="stamp loss">Loss</span>'
-        : p.result === 'push' ? '<span class="stamp pending">Push</span>'
-        : '<span style="color:var(--ink-soft);">Pending</span>';
+        : p.result === 'push' ? '<span class="stamp push">Push</span>'
+        : '<span class="stamp pending"></span>';
       return `<tr>
         <td>${p.event_date}</td>
         <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
@@ -14585,7 +14611,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     if (result === 'win') return '<span class="stamp win">Win</span>';
     if (result === 'loss') return '<span class="stamp loss">Loss</span>';
     if (result === 'push') return '<span class="stamp push">Push</span>';
-    return '<span style="color:var(--ink-soft);font-weight:bold;">Pending</span>';
+    return '<span class="stamp pending"></span>';
   }
 
   // Renders using the EXACT same publishRankCardHtml the live Publish
@@ -15582,7 +15608,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 296; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 297; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
