@@ -102,6 +102,28 @@ function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
 }
 
+// CONFIRMED FIX, ported from validate-nba-player-txt/validate-wnba-player-txt
+// (same real-world failure, same real fix): a bare fetch() to ESPN sends no
+// User-Agent header at all, which is a known trigger for an API's bot-
+// protection/WAF to hard-reset the connection instead of responding
+// normally, even though the identical request works fine from anywhere
+// that sends a real browser-style User-Agent. Applied proactively here
+// (not from a confirmed failure of THIS specific function yet) -- the
+// underlying cause is about how Deno's Edge Function runtime talks to
+// ESPN, not anything specific to grading.
+async function espnFetch(url: string, attempts = 2): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CoreBettingSolutions-ScheduleSync/1.0)' } });
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 // Our own sports.name (normalized) -> ESPN's {sport}/{league} URL segment.
 // Confirmed directly against ESPN's real API before shipping this.
 const ESPN_SPORT_MAP: Record<string, string> = {
@@ -369,7 +391,7 @@ Deno.serve(async (req) => {
       if (eventId in cache) return cache[eventId];
       await new Promise(resolve => setTimeout(resolve, 250));
       try {
-        const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${eventId}`);
+        const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${eventId}`);
         cache[eventId] = res.ok ? (await res.json()).boxscore || null : null;
       } catch {
         cache[eventId] = null;
@@ -498,7 +520,7 @@ Deno.serve(async (req) => {
         // No published rate limit on this endpoint (it's unofficial), but
         // a modest pause between sports is just good citizenship.
         await sleep(500);
-        const eventsRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${espnDate}`);
+        const eventsRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${espnDate}`);
         if (!eventsRes.ok) {
           overall.sports_processed.push({ sport: ourSport.name, error: `ESPN request failed (${eventsRes.status})` });
           continue;
