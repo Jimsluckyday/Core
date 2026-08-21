@@ -499,9 +499,25 @@ Deno.serve(async (req) => {
         box.players.forEach((teamBlock: any) => {
           (teamBlock.statistics || []).forEach((sg: any, sgIdx: number) => {
             (sg.athletes || []).forEach((a: any) => {
-              const displayNorm = normalize((a.athlete && a.athlete.displayName) || '');
+              const rawDisplayName = (a.athlete && a.athlete.displayName) || '';
+              const displayNorm = normalize(rawDisplayName);
               const shortNorm = normalize((a.athlete && a.athlete.shortName) || '');
-              if (displayNorm === playerNorm || (shortNorm && shortNorm === playerNorm)) {
+              // CONFIRMED REAL GAP, direct report 2026-08-21: a capper who
+              // writes just the surname ("Ohtani", no first name/initial)
+              // never matched displayName ("Shohei Ohtani") or ESPN's own
+              // shortName ("S. Ohtani") -- both are exact-string compares,
+              // and neither equals a bare surname. Extracted from the RAW
+              // display name (normalize() strips spaces, so a surname can
+              // only be split out BEFORE normalizing, not after). Same
+              // "check everywhere, only accept a UNIQUE match" discipline
+              // already used for team matching elsewhere in this file --
+              // the existing "matched more than one box score row" guard
+              // below already catches a same-day collision between two
+              // different players sharing a surname (e.g. two Garcias),
+              // this only adds the extra way IN to that same safety net.
+              const nameTokens = rawDisplayName.trim().split(/\s+/);
+              const surnameNorm = nameTokens.length ? normalize(nameTokens[nameTokens.length - 1]) : '';
+              if (displayNorm === playerNorm || (shortNorm && shortNorm === playerNorm) || (surnameNorm && surnameNorm === playerNorm)) {
                 foundInAnyGame = true;
                 if (!completed) { foundInNotFinalGame = true; return; }
                 allMatches.push({
