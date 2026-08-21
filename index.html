@@ -8514,11 +8514,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             });
           }
         } else if (isItemArray && FAILURE_KEYS.has(key)) {
+          // CONFIRMED REAL BUG, direct report 2026-08-21: Aberg (a Golf
+          // pick, landed in the top-level "unsupported" array) showed up
+          // with no sport and no detail at all. That array's shape is
+          // {id, player, sport} PER ITEM, not one shared sport for the
+          // whole array the way every other failure array here works --
+          // the sport was being read once from the PARENT node (which has
+          // none at that point in the object) instead of from each item.
+          // it.sport as the first choice (falls back to the inherited
+          // node/context sport for every other shape) fixes this without
+          // needing a special case for this one array.
           failureCount += val.length;
-          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, label: itemLabel(it), reason: it.reason || '' })) });
+          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '' })) });
         } else if (isItemArray && PENDING_KEYS.has(key)) {
           pendingCount += val.length;
-          pendingGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, label: itemLabel(it), reason: it.reason || '' })) });
+          pendingGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '' })) });
         } else {
           val.forEach(n => walk(n, sport));
         }
@@ -8547,14 +8557,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const ids = [];
     groups.forEach(g => g.items.forEach(it => { if (it.id) ids.push(it.id); }));
     const uniqueIds = [...new Set(ids)];
-    if (!uniqueIds.length) return;
+    if (!uniqueIds.length) return null;
     try {
       const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,cappers(name)`);
       const nameById = {};
       rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; });
       groups.forEach(g => g.items.forEach(it => { it.capperName = it.id ? (nameById[it.id] || null) : null; }));
+      return null;
     } catch (e) {
+      // CONFIRMED REAL GAP, direct report 2026-08-21: "still back to no
+      // capper name" -- this was silently caught (console.warn only), so
+      // if the lookup itself was ever actually failing, there was no way
+      // to tell that apart from "every one of these picks genuinely has no
+      // capper." Returns the error message instead of swallowing it, so
+      // the caller can show it directly rather than guess in the dark.
       console.warn('Could not enrich automation results with capper names:', e.message);
+      return e.message;
     }
   }
 
@@ -8584,7 +8602,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const shortReason = truncateReason(it.reason, 70);
         html += `<tr>
           <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><span style="display:inline-block;background:var(--field);color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(capperText)}</span></td>
-          <td style="padding:3px 8px 3px 0;white-space:nowrap;color:var(--ink-soft);vertical-align:top;">${g.sport ? escapeHtml(g.sport) : ''}</td>
+          <td style="padding:3px 8px 3px 0;white-space:nowrap;color:var(--ink-soft);vertical-align:top;">${(it.sport || g.sport) ? escapeHtml(it.sport || g.sport) : ''}</td>
           <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
           <td style="padding:3px 0;color:var(--ink-soft);vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
         </tr>`;
@@ -8595,13 +8613,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   async function automationResultSummaryHtml(label, data) {
     const s = summarizeAutomationResult(data);
-    await enrichAutomationGroupsWithCapperNames([...s.dateMismatchGroups, ...s.failureGroups, ...s.pendingGroups]);
+    const enrichError = await enrichAutomationGroupsWithCapperNames([...s.dateMismatchGroups, ...s.failureGroups, ...s.pendingGroups]);
     let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
     html += `<div style="font-size:13px;margin-bottom:10px;">
       <strong>${s.totalChecked}</strong> checked &middot;
       <span style="color:var(--stamp-green);font-weight:bold;">${s.successCount} updated</span> &middot;
       <span style="color:var(--stamp-red);font-weight:bold;">${s.failureCount} failed</span>${s.dateMismatchCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.dateMismatchCount} on a different day</span>` : ''}${s.pendingCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.pendingCount} not final yet</span>` : ''}
     </div>`;
+    if (enrichError) {
+      html += `<div style="font-size:11px;color:var(--stamp-red);margin-bottom:8px;">&#9888; Could not load capper names: ${escapeHtml(enrichError)}</div>`;
+    }
     if (s.dateMismatchGroups.length) {
       // Shown FIRST, ahead of failures -- these already wrote a real
       // game_start_time and would otherwise look like a clean success,
@@ -16137,7 +16158,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 309; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 310; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
