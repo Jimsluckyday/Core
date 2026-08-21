@@ -8597,18 +8597,35 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   function automationGroupListHtml(groups) {
+    // Direct request 2026-08-21: "25 on one page all for the same capper"
+    // with the name repeated on every single line made it hard to see
+    // where one capper's block ends and the next begins. Flattened across
+    // every sport-group first (sport already travels with each item, see
+    // summarizeAutomationResult) so sorting by capper works across sports
+    // too, not just within one. Sorted by capper name, then the colored
+    // tag itself is only drawn on the FIRST row of each capper's
+    // consecutive block -- every row still shows, nothing collapsed or
+    // hidden behind a click, the name just isn't redrawn 25 times in a
+    // row once it's already established which block you're reading.
+    const allItems = [];
+    groups.forEach(g => g.items.forEach(it => allItems.push(Object.assign({}, it, { sport: it.sport || g.sport }))));
+    allItems.sort((a, b) => (a.capperName || '').localeCompare(b.capperName || ''));
+
     let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px;">';
-    groups.forEach(g => {
-      g.items.forEach(it => {
-        const capperText = it.capperName || '—';
-        const shortReason = truncateReason(it.reason, 70);
-        html += `<tr>
-          <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><span style="display:inline-block;background:#234d35;color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(capperText)}</span></td>
-          <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${(it.sport || g.sport) ? escapeHtml(it.sport || g.sport) : ''}</td>
-          <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
-          <td style="padding:3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
-        </tr>`;
-      });
+    let lastCapper;
+    allItems.forEach(it => {
+      const showCapper = it.capperName !== lastCapper;
+      lastCapper = it.capperName;
+      const capperCellHtml = showCapper
+        ? `<span style="display:inline-block;background:#234d35;color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(it.capperName || '—')}</span>`
+        : '';
+      const shortReason = truncateReason(it.reason, 70);
+      html += `<tr>
+        <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;">${capperCellHtml}</td>
+        <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
+        <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
+        <td style="padding:3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
+      </tr>`;
     });
     return html + '</table>';
   }
@@ -16173,7 +16190,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 313; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 314; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
