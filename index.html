@@ -7066,11 +7066,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // readable summary logic lives in exactly one place -- falls back to the
   // old raw-JSON rendering only if the opener is on an older version that
   // doesn't have it yet.
-  function renderPopAutomationResult(label, data) {
+  async function renderPopAutomationResult(label, data) {
     const op = opener();
     const wrap = document.getElementById('popAutomationResultsWrap');
     if (op && typeof op.automationResultSummaryHtml === 'function') {
-      wrap.innerHTML = op.automationResultSummaryHtml(label, data);
+      wrap.innerHTML = await op.automationResultSummaryHtml(label, data);
       return;
     }
     wrap.innerHTML =
@@ -8487,10 +8487,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           successCount += val.length;
         } else if (isItemArray && FAILURE_KEYS.has(key)) {
           failureCount += val.length;
-          failureGroups.push({ sport: sport || '', items: val.map(it => ({ label: itemLabel(it), reason: it.reason || '' })) });
+          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, label: itemLabel(it), reason: it.reason || '' })) });
         } else if (isItemArray && PENDING_KEYS.has(key)) {
           pendingCount += val.length;
-          pendingGroups.push({ sport: sport || '', items: val.map(it => ({ label: itemLabel(it), reason: it.reason || '' })) });
+          pendingGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, label: itemLabel(it), reason: it.reason || '' })) });
         } else {
           val.forEach(n => walk(n, sport));
         }
@@ -8502,18 +8502,45 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
   window.summarizeAutomationResult = summarizeAutomationResult;
 
+  // Direct follow-up, 2026-08-21: "yes I can see that McLanahan wasn't
+  // found... but without any idea which capper gave me that information I
+  // would have little idea on where to start looking." A failure/pending
+  // item only ever carried a player name or selection text -- exactly
+  // enough to explain WHAT went wrong, nothing about WHO to go ask or
+  // which original message to re-check. One batched lookup (every id
+  // across every group, in a single request) attaches the capper's name
+  // to each item before rendering -- best-effort: if this lookup fails for
+  // any reason, the summary still renders correctly, just without names.
+  async function enrichAutomationGroupsWithCapperNames(groups) {
+    const ids = [];
+    groups.forEach(g => g.items.forEach(it => { if (it.id) ids.push(it.id); }));
+    const uniqueIds = [...new Set(ids)];
+    if (!uniqueIds.length) return;
+    try {
+      const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,cappers(name)`);
+      const nameById = {};
+      rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; });
+      groups.forEach(g => g.items.forEach(it => { it.capperName = it.id ? (nameById[it.id] || null) : null; }));
+    } catch (e) {
+      console.warn('Could not enrich automation results with capper names:', e.message);
+    }
+  }
+
   function automationGroupListHtml(groups) {
     let html = '<ul style="margin:0 0 10px 18px;padding:0;font-size:12px;">';
     groups.forEach(g => {
       g.items.forEach(it => {
-        html += `<li style="margin-bottom:4px;">${g.sport ? `<strong>${escapeHtml(g.sport)}</strong> — ` : ''}${escapeHtml(it.label)}${it.reason ? `: <span style="color:var(--ink-soft);">${escapeHtml(it.reason)}</span>` : ''}</li>`;
+        const capperBit = it.capperName ? `<strong>${escapeHtml(it.capperName)}</strong> — ` : '';
+        const sportBit = g.sport ? `<span style="color:var(--ink-soft);">[${escapeHtml(g.sport)}]</span> ` : '';
+        html += `<li style="margin-bottom:4px;">${capperBit}${sportBit}${escapeHtml(it.label)}${it.reason ? `: <span style="color:var(--ink-soft);">${escapeHtml(it.reason)}</span>` : ''}</li>`;
       });
     });
     return html + '</ul>';
   }
 
-  function automationResultSummaryHtml(label, data) {
+  async function automationResultSummaryHtml(label, data) {
     const s = summarizeAutomationResult(data);
+    await enrichAutomationGroupsWithCapperNames([...s.failureGroups, ...s.pendingGroups]);
     let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
     html += `<div style="font-size:13px;margin-bottom:10px;">
       <strong>${s.totalChecked}</strong> checked &middot;
@@ -8533,8 +8560,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
   window.automationResultSummaryHtml = automationResultSummaryHtml;
 
-  function renderAutomationResult(label, data) {
-    $('automationResultsWrap').innerHTML = automationResultSummaryHtml(label, data);
+  async function renderAutomationResult(label, data) {
+    $('automationResultsWrap').innerHTML = await automationResultSummaryHtml(label, data);
   }
 
   function renderOldSyncResult(label, data) {
@@ -16045,7 +16072,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 305; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 306; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
