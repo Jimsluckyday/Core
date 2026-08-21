@@ -8557,26 +8557,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const ids = [];
     groups.forEach(g => g.items.forEach(it => { if (it.id) ids.push(it.id); }));
     const uniqueIds = [...new Set(ids)];
-    // TEMPORARY DIAGNOSTIC, 2026-08-21 -- direct report: no capper name
-    // showing, no error either. Logging every step so a stuck run is
-    // actually visible in the console instead of a silent dead end.
-    console.log('[capper enrich] ids to look up:', uniqueIds);
-    if (!uniqueIds.length) { console.log('[capper enrich] no ids -- nothing to look up.'); return null; }
+    if (!uniqueIds.length) return null;
     try {
       const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,cappers(name)`);
-      console.log('[capper enrich] rows returned:', rows);
       const nameById = {};
       rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; });
       groups.forEach(g => g.items.forEach(it => { it.capperName = it.id ? (nameById[it.id] || null) : null; }));
-      console.log('[capper enrich] groups after enrichment:', JSON.parse(JSON.stringify(groups)));
       return null;
     } catch (e) {
-      // CONFIRMED REAL GAP, direct report 2026-08-21: "still back to no
-      // capper name" -- this was silently caught (console.warn only), so
-      // if the lookup itself was ever actually failing, there was no way
-      // to tell that apart from "every one of these picks genuinely has no
-      // capper." Returns the error message instead of swallowing it, so
-      // the caller can show it directly rather than guess in the dark.
+      // Direct report 2026-08-21: "still back to no capper name," which
+      // led to a long live-debugging session (console logging proved the
+      // data was correct at every step) before finding the real cause --
+      // NOT this lookup, but a CSS custom property (var(--field)) that
+      // doesn't exist in the pop-out document this HTML also renders in.
+      // See automationGroupListHtml's own comment for the full story.
+      // This catch/return-the-error path is kept regardless, in case the
+      // lookup itself genuinely fails for some other reason later.
       console.warn('Could not enrich automation results with capper names:', e.message);
       return e.message;
     }
@@ -8607,10 +8603,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const capperText = it.capperName || '—';
         const shortReason = truncateReason(it.reason, 70);
         html += `<tr>
-          <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><span style="display:inline-block;background:var(--field);color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(capperText)}</span></td>
-          <td style="padding:3px 8px 3px 0;white-space:nowrap;color:var(--ink-soft);vertical-align:top;">${(it.sport || g.sport) ? escapeHtml(it.sport || g.sport) : ''}</td>
+          <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><span style="display:inline-block;background:#234d35;color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(capperText)}</span></td>
+          <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${(it.sport || g.sport) ? escapeHtml(it.sport || g.sport) : ''}</td>
           <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
-          <td style="padding:3px 0;color:var(--ink-soft);vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
+          <td style="padding:3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
         </tr>`;
       });
     });
@@ -8623,11 +8619,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
     html += `<div style="font-size:13px;margin-bottom:10px;">
       <strong>${s.totalChecked}</strong> checked &middot;
-      <span style="color:var(--stamp-green);font-weight:bold;">${s.successCount} updated</span> &middot;
-      <span style="color:var(--stamp-red);font-weight:bold;">${s.failureCount} failed</span>${s.dateMismatchCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.dateMismatchCount} on a different day</span>` : ''}${s.pendingCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.pendingCount} not final yet</span>` : ''}
+      <span style="color:#2d6a4f;font-weight:bold;">${s.successCount} updated</span> &middot;
+      <span style="color:#8a2f3a;font-weight:bold;">${s.failureCount} failed</span>${s.dateMismatchCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${s.dateMismatchCount} on a different day</span>` : ''}${s.pendingCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${s.pendingCount} not final yet</span>` : ''}
     </div>`;
     if (enrichError) {
-      html += `<div style="font-size:11px;color:var(--stamp-red);margin-bottom:8px;">&#9888; Could not load capper names: ${escapeHtml(enrichError)}</div>`;
+      html += `<div style="font-size:11px;color:#8a2f3a;margin-bottom:8px;">&#9888; Could not load capper names: ${escapeHtml(enrichError)}</div>`;
     }
     if (s.dateMismatchGroups.length) {
       // Shown FIRST, ahead of failures -- these already wrote a real
@@ -8636,7 +8632,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // today's work until this gets fixed by hand. Catching this early
       // is the whole point -- these are the ones that most need to move
       // out of "today's" queue.
-      html += `<div style="font-size:12px;margin-bottom:6px;padding:6px 8px;background:var(--stamp-amber-bg,rgba(163,115,10,0.08));border-left:3px solid var(--stamp-amber);"><strong style="color:var(--stamp-amber);">Belongs to a different day -- move these out of today's batch:</strong></div>`;
+      // CONFIRMED REAL BUG, direct report 2026-08-21, root cause of the
+      // whole "no capper name" mystery: this function's output gets
+      // inserted into TWO different documents -- the main tab's own DOM,
+      // AND the completely separate "All Picks" pop-out document (a
+      // fresh document.write()'d page with its own hardcoded-hex-color
+      // <style>, no CSS custom properties defined at all). Every
+      // var(--xxx) here silently resolved to nothing in the pop-out --
+      // for the capper tag specifically that meant a transparent
+      // background under cream text on a cream page: correct DOM, correct
+      // data (verified directly via console logging), completely
+      // invisible. Every color in this function is now a literal hex
+      // value instead, so the output renders identically regardless of
+      // which of the two documents it lands in.
+      html += `<div style="font-size:12px;margin-bottom:6px;padding:6px 8px;background:rgba(163,115,10,0.08);border-left:3px solid #a3730a;"><strong style="color:#a3730a;">Belongs to a different day -- move these out of today's batch:</strong></div>`;
       html += automationGroupListHtml(s.dateMismatchGroups);
     }
     if (s.failureGroups.length) {
@@ -8647,7 +8656,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       html += '<div style="font-size:12px;margin-bottom:6px;"><strong>Still waiting on:</strong></div>';
       html += automationGroupListHtml(s.pendingGroups);
     }
-    html += `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;color:var(--ink-soft);">View raw JSON</summary><pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid var(--field);padding:10px;border-radius:2px;max-height:400px;overflow:auto;margin-top:6px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+    html += `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;color:#55584d;">View raw JSON</summary><pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid #234d35;padding:10px;border-radius:2px;max-height:400px;overflow:auto;margin-top:6px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
     return html;
   }
   window.automationResultSummaryHtml = automationResultSummaryHtml;
@@ -16164,7 +16173,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 311; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 312; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
