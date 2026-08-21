@@ -8464,9 +8464,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const FAILURE_KEYS = new Set(['unmatched', 'unresolved', 'ambiguous', 'unsupported_bet_type', 'unsupported']);
     const PENDING_KEYS = new Set(['not_final_yet', 'pending']);
 
-    let successCount = 0, failureCount = 0, pendingCount = 0;
+    let successCount = 0, failureCount = 0, pendingCount = 0, dateMismatchCount = 0;
     const failureGroups = [];
     const pendingGroups = [];
+    const dateMismatchGroups = [];
+    const runDate = data && data.date;
 
     function itemLabel(item) {
       return item.player || item.prop_player || item.selection || item.id || '(unknown)';
@@ -8484,7 +8486,33 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         }
         const isItemArray = val.length && val[0] && typeof val[0] === 'object' && ('id' in val[0]);
         if (isItemArray && SUCCESS_KEYS.has(key)) {
-          successCount += val.length;
+          // Direct report 2026-08-21: a "matched" item can still need real
+          // attention -- date_corrected (set by schedule-sync-backfill's
+          // Tennis/Soccer/Cricket/ESPN matching, see its own dateDifferNote
+          // comment) means the real match/game is on a DIFFERENT calendar
+          // day than this pick's stored event_date. game_start_time gets
+          // set to the real time either way, but event_date itself is
+          // deliberately left for a human to fix -- folding this into the
+          // plain success count hid it completely, even though "today's
+          // queue" is driven by event_date, not game_start_time, so a pick
+          // like this silently keeps counting as today's work until
+          // event_date itself gets corrected. Split out instead of counted
+          // as a clean success.
+          const mismatched = val.filter(it => it.date_corrected);
+          successCount += val.length - mismatched.length;
+          if (mismatched.length) {
+            dateMismatchCount += mismatched.length;
+            dateMismatchGroups.push({
+              sport: sport || '',
+              items: mismatched.map(it => {
+                const realDate = (it.start_time || '').slice(0, 10) || '(unknown date)';
+                return {
+                  id: it.id, label: itemLabel(it),
+                  reason: `real match is on ${realDate}${runDate ? `, event_date is still ${runDate}` : ''}${it.matchup ? ` — ${it.matchup}` : ''}`
+                };
+              })
+            });
+          }
         } else if (isItemArray && FAILURE_KEYS.has(key)) {
           failureCount += val.length;
           failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, label: itemLabel(it), reason: it.reason || '' })) });
@@ -8498,7 +8526,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     walk(data, null);
 
-    return { totalChecked: successCount + failureCount + pendingCount, successCount, failureCount, pendingCount, failureGroups, pendingGroups };
+    return {
+      totalChecked: successCount + failureCount + pendingCount + dateMismatchCount,
+      successCount, failureCount, pendingCount, dateMismatchCount,
+      failureGroups, pendingGroups, dateMismatchGroups
+    };
   }
   window.summarizeAutomationResult = summarizeAutomationResult;
 
@@ -8549,13 +8581,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   async function automationResultSummaryHtml(label, data) {
     const s = summarizeAutomationResult(data);
-    await enrichAutomationGroupsWithCapperNames([...s.failureGroups, ...s.pendingGroups]);
+    await enrichAutomationGroupsWithCapperNames([...s.dateMismatchGroups, ...s.failureGroups, ...s.pendingGroups]);
     let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
     html += `<div style="font-size:13px;margin-bottom:10px;">
       <strong>${s.totalChecked}</strong> checked &middot;
       <span style="color:var(--stamp-green);font-weight:bold;">${s.successCount} updated</span> &middot;
-      <span style="color:var(--stamp-red);font-weight:bold;">${s.failureCount} failed</span>${s.pendingCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.pendingCount} not final yet</span>` : ''}
+      <span style="color:var(--stamp-red);font-weight:bold;">${s.failureCount} failed</span>${s.dateMismatchCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.dateMismatchCount} on a different day</span>` : ''}${s.pendingCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.pendingCount} not final yet</span>` : ''}
     </div>`;
+    if (s.dateMismatchGroups.length) {
+      // Shown FIRST, ahead of failures -- these already wrote a real
+      // game_start_time and would otherwise look like a clean success,
+      // but event_date is still wrong, so the pick keeps miscounting as
+      // today's work until this gets fixed by hand. Catching this early
+      // is the whole point -- these are the ones that most need to move
+      // out of "today's" queue.
+      html += `<div style="font-size:12px;margin-bottom:6px;padding:6px 8px;background:var(--stamp-amber-bg,rgba(163,115,10,0.08));border-left:3px solid var(--stamp-amber);"><strong style="color:var(--stamp-amber);">Belongs to a different day -- move these out of today's batch:</strong></div>`;
+      html += automationGroupListHtml(s.dateMismatchGroups);
+    }
     if (s.failureGroups.length) {
       html += '<div style="font-size:12px;margin-bottom:6px;"><strong>What failed:</strong></div>';
       html += automationGroupListHtml(s.failureGroups);
@@ -16081,7 +16123,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 307; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 308; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
