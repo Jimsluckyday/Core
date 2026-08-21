@@ -7060,8 +7060,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     });
   })();
 
+  // Reuses the main tab's own automationResultSummaryHtml (exposed via
+  // window.summarizeAutomationResult/automationResultSummaryHtml, same
+  // window.opener pattern already used for window.rest elsewhere) so the
+  // readable summary logic lives in exactly one place -- falls back to the
+  // old raw-JSON rendering only if the opener is on an older version that
+  // doesn't have it yet.
   function renderPopAutomationResult(label, data) {
-    document.getElementById('popAutomationResultsWrap').innerHTML =
+    const op = opener();
+    const wrap = document.getElementById('popAutomationResultsWrap');
+    if (op && typeof op.automationResultSummaryHtml === 'function') {
+      wrap.innerHTML = op.automationResultSummaryHtml(label, data);
+      return;
+    }
+    wrap.innerHTML =
       '<div style="font-size:11px;font-weight:bold;color:#234d35;margin-bottom:4px;">' + label + '</div>' +
       '<pre style="white-space:pre-wrap;font-size:10px;background:#fff;border:1px solid #22281f;padding:8px;border-radius:2px;max-height:300px;overflow:auto;">' +
       JSON.stringify(data, null, 2).replace(/</g, '&lt;') + '</pre>';
@@ -8432,10 +8444,97 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('toggleAutomationBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
 
+  // Direct request 2026-08-21: a raw JSON dump after running one of the 4
+  // automation tools (Teams/Tournaments, Pick Info, Results, Golf Results)
+  // told the user nothing at a glance -- how many picks got checked, how
+  // many actually updated, which ones failed and why. All 4 Edge Functions
+  // already share the same underlying shape (an array of "id"-keyed
+  // objects per outcome, under a small set of recurring key names --
+  // matched/resolved/graded for success, unmatched/unresolved/ambiguous/
+  // unsupported(_bet_type) for failure, pending/not_final_yet for "try
+  // again later"), just nested differently per tool (Teams/Tournaments in
+  // particular wraps a full second copy of this same shape once per sport
+  // for its Tennis/Soccer tournament lookups). Rather than hand-write 4
+  // separate parsers, this walks the WHOLE response recursively and
+  // classifies any array it finds under one of those known key names --
+  // stays correct even if a function's nesting shifts slightly later,
+  // since it isn't hardcoded to one specific path through the object.
+  function summarizeAutomationResult(data) {
+    const SUCCESS_KEYS = new Set(['matched', 'resolved', 'graded']);
+    const FAILURE_KEYS = new Set(['unmatched', 'unresolved', 'ambiguous', 'unsupported_bet_type', 'unsupported']);
+    const PENDING_KEYS = new Set(['not_final_yet', 'pending']);
+
+    let successCount = 0, failureCount = 0, pendingCount = 0;
+    const failureGroups = [];
+    const pendingGroups = [];
+
+    function itemLabel(item) {
+      return item.player || item.prop_player || item.selection || item.id || '(unknown)';
+    }
+
+    function walk(node, sportCtx) {
+      if (Array.isArray(node)) { node.forEach(n => walk(n, sportCtx)); return; }
+      if (!node || typeof node !== 'object') return;
+      const sport = node.sport || sportCtx;
+      Object.keys(node).forEach(key => {
+        const val = node[key];
+        if (!Array.isArray(val)) {
+          if (val && typeof val === 'object') walk(val, sport);
+          return;
+        }
+        const isItemArray = val.length && val[0] && typeof val[0] === 'object' && ('id' in val[0]);
+        if (isItemArray && SUCCESS_KEYS.has(key)) {
+          successCount += val.length;
+        } else if (isItemArray && FAILURE_KEYS.has(key)) {
+          failureCount += val.length;
+          failureGroups.push({ sport: sport || '', items: val.map(it => ({ label: itemLabel(it), reason: it.reason || '' })) });
+        } else if (isItemArray && PENDING_KEYS.has(key)) {
+          pendingCount += val.length;
+          pendingGroups.push({ sport: sport || '', items: val.map(it => ({ label: itemLabel(it), reason: it.reason || '' })) });
+        } else {
+          val.forEach(n => walk(n, sport));
+        }
+      });
+    }
+    walk(data, null);
+
+    return { totalChecked: successCount + failureCount + pendingCount, successCount, failureCount, pendingCount, failureGroups, pendingGroups };
+  }
+  window.summarizeAutomationResult = summarizeAutomationResult;
+
+  function automationGroupListHtml(groups) {
+    let html = '<ul style="margin:0 0 10px 18px;padding:0;font-size:12px;">';
+    groups.forEach(g => {
+      g.items.forEach(it => {
+        html += `<li style="margin-bottom:4px;">${g.sport ? `<strong>${escapeHtml(g.sport)}</strong> — ` : ''}${escapeHtml(it.label)}${it.reason ? `: <span style="color:var(--ink-soft);">${escapeHtml(it.reason)}</span>` : ''}</li>`;
+      });
+    });
+    return html + '</ul>';
+  }
+
+  function automationResultSummaryHtml(label, data) {
+    const s = summarizeAutomationResult(data);
+    let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
+    html += `<div style="font-size:13px;margin-bottom:10px;">
+      <strong>${s.totalChecked}</strong> checked &middot;
+      <span style="color:var(--stamp-green);font-weight:bold;">${s.successCount} updated</span> &middot;
+      <span style="color:var(--stamp-red);font-weight:bold;">${s.failureCount} failed</span>${s.pendingCount ? ` &middot; <span style="color:var(--stamp-amber);font-weight:bold;">${s.pendingCount} not final yet</span>` : ''}
+    </div>`;
+    if (s.failureGroups.length) {
+      html += '<div style="font-size:12px;margin-bottom:6px;"><strong>What failed:</strong></div>';
+      html += automationGroupListHtml(s.failureGroups);
+    }
+    if (s.pendingGroups.length) {
+      html += '<div style="font-size:12px;margin-bottom:6px;"><strong>Still waiting on:</strong></div>';
+      html += automationGroupListHtml(s.pendingGroups);
+    }
+    html += `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;color:var(--ink-soft);">View raw JSON</summary><pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid var(--field);padding:10px;border-radius:2px;max-height:400px;overflow:auto;margin-top:6px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
+    return html;
+  }
+  window.automationResultSummaryHtml = automationResultSummaryHtml;
+
   function renderAutomationResult(label, data) {
-    $('automationResultsWrap').innerHTML = `
-      <div class="msg ok" style="margin-bottom:6px;"><strong>${escapeHtml(label)}</strong></div>
-      <pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid var(--field);padding:10px;border-radius:2px;max-height:400px;overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+    $('automationResultsWrap').innerHTML = automationResultSummaryHtml(label, data);
   }
 
   function renderOldSyncResult(label, data) {
@@ -15946,7 +16045,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 304; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 305; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
