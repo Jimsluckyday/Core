@@ -8557,12 +8557,18 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const ids = [];
     groups.forEach(g => g.items.forEach(it => { if (it.id) ids.push(it.id); }));
     const uniqueIds = [...new Set(ids)];
-    if (!uniqueIds.length) return null;
+    // TEMPORARY DIAGNOSTIC, 2026-08-21 -- direct report: no capper name
+    // showing, no error either. Logging every step so a stuck run is
+    // actually visible in the console instead of a silent dead end.
+    console.log('[capper enrich] ids to look up:', uniqueIds);
+    if (!uniqueIds.length) { console.log('[capper enrich] no ids -- nothing to look up.'); return null; }
     try {
       const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,cappers(name)`);
+      console.log('[capper enrich] rows returned:', rows);
       const nameById = {};
       rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; });
       groups.forEach(g => g.items.forEach(it => { it.capperName = it.id ? (nameById[it.id] || null) : null; }));
+      console.log('[capper enrich] groups after enrichment:', JSON.parse(JSON.stringify(groups)));
       return null;
     } catch (e) {
       // CONFIRMED REAL GAP, direct report 2026-08-21: "still back to no
@@ -16158,7 +16164,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 310; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 311; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
