@@ -8558,25 +8558,39 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   }
 
+  // CONFIRMED REAL GAP, direct report 2026-08-21: "this is way too messy to
+  // read... I don't need all this info, it needs to be clearer so I don't
+  // get a paragraph per failure." The prior bullet-list version ran the
+  // capper tag, sport, pick label, and the Edge Function's own full
+  // sentence-length reason text all together on one line -- at small font
+  // size with a long reason wrapping across 2-3 lines, the capper tag at
+  // the very start effectively got buried under the wall of text below it,
+  // reading as "no capper name" even when it was technically there. A real
+  // table gives every piece of information its own fixed column instead --
+  // the reason text gets truncated to a short, scannable phrase with the
+  // full original text available on hover (title attribute) rather than
+  // dumped inline.
+  function truncateReason(reason, maxLen) {
+    if (!reason) return '';
+    const clean = reason.replace(/\s+/g, ' ').trim();
+    return clean.length > maxLen ? clean.slice(0, maxLen - 1).trim() + '…' : clean;
+  }
+
   function automationGroupListHtml(groups) {
-    let html = '<ul style="margin:0 0 10px 18px;padding:0;list-style:none;font-size:12px;">';
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px;">';
     groups.forEach(g => {
       g.items.forEach(it => {
-        // CONFIRMED REAL GAP, direct report 2026-08-21: the capper name WAS
-        // there (bold text before the sport tag), but "I still can't see
-        // what capper gave me the wrong information" -- bold at 12px in a
-        // monospace font barely differs in weight from regular text, so it
-        // read as part of the sentence rather than a distinct label. Solid
-        // colored tag instead of relying on font-weight -- unmistakable
-        // regardless of font/size.
-        const capperBit = it.capperName
-          ? `<span style="display:inline-block;background:var(--field);color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;margin-right:6px;">${escapeHtml(it.capperName)}</span>`
-          : '';
-        const sportBit = g.sport ? `<span style="color:var(--ink-soft);">[${escapeHtml(g.sport)}]</span> ` : '';
-        html += `<li style="margin-bottom:5px;">${capperBit}${sportBit}${escapeHtml(it.label)}${it.reason ? `: <span style="color:var(--ink-soft);">${escapeHtml(it.reason)}</span>` : ''}</li>`;
+        const capperText = it.capperName || '—';
+        const shortReason = truncateReason(it.reason, 70);
+        html += `<tr>
+          <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><span style="display:inline-block;background:var(--field);color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(capperText)}</span></td>
+          <td style="padding:3px 8px 3px 0;white-space:nowrap;color:var(--ink-soft);vertical-align:top;">${g.sport ? escapeHtml(g.sport) : ''}</td>
+          <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
+          <td style="padding:3px 0;color:var(--ink-soft);vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
+        </tr>`;
       });
     });
-    return html + '</ul>';
+    return html + '</table>';
   }
 
   async function automationResultSummaryHtml(label, data) {
@@ -16123,7 +16137,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 308; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 309; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
