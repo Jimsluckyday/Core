@@ -3968,7 +3968,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
   function updateMatchupFields() {
     const bt = currentBetType();
-    const usesMatchup = bt ? bt.uses_matchup_fields : false;
+    // CONFIRMED REAL GAP, direct report 2026-08-21: Team 1/Team 2 pulls from
+    // the real `teams` reference table (see populateMatchupTeamDropdowns
+    // above), which only has rows for actual team sports -- an individual
+    // sport with zero rows there (MMA/Boxing fighters aren't "teams") got
+    // two empty, unusable dropdowns and no way to enter a Total pick at
+    // all, since the free-text Selection field was unconditionally hidden
+    // whenever the bet type's uses_matchup_fields flag was on, regardless
+    // of whether this specific sport actually has any teams to pick from.
+    // Falls back to the normal free-text Selection field whenever the
+    // currently selected sport has no teams on file, for ANY bet type that
+    // would otherwise show Team 1/Team 2 -- not an MMA-specific special
+    // case, so this self-corrects for any other individual sport later too.
+    const sportId = $('pickSport').value;
+    const sportHasTeams = sportId ? teams.some(t => String(t.sport_id) === String(sportId)) : true;
+    const usesMatchup = bt ? (bt.uses_matchup_fields && sportHasTeams) : false;
     $('matchupRow').style.display = usesMatchup ? 'flex' : 'none';
     if (usesMatchup) {
       // Takes priority over the generic Selection field the same way the
@@ -4003,7 +4017,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
       $('lineHelpText').style.display = 'none';
     }
   }
-  $('pickSport').addEventListener('change', populateMatchupTeamDropdowns);
+  // Was populateMatchupTeamDropdowns alone -- that only refills the Team
+  // 1/Team 2 OPTIONS for whichever field is already showing, it never
+  // re-decides whether matchupRow vs. the free-text Selection field should
+  // be showing at all. Missed the case where a sport gets changed (not the
+  // bet type) while a matchup-style bet type like Total is already
+  // selected -- e.g. switching from MLB to MMA left Team 1/Team 2 visible
+  // and empty instead of falling back to free text, since only a bet-type
+  // change re-ran the sportHasTeams check above. updateMatchupFields()
+  // covers both: it re-evaluates the fallback AND still repopulates the
+  // dropdowns via its own call to populateMatchupTeamDropdowns when needed.
+  $('pickSport').addEventListener('change', updateMatchupFields);
 
   // CONFIRMED REAL BUG, direct report: "it asks me for a line and I don't
   // see an option to make the selection Rory McIlroy." Golf Round Matchup/
@@ -15894,7 +15918,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 301; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 302; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
