@@ -7221,7 +7221,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           // Tennis/Soccer are handled separately below via schedule-sync-
           // backfill (they don't use prop_team at all -- individual/no-
           // team sports), so they're not real "unsupported" gaps here.
-          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)' });
+          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)', reason: `No automated team/tournament lookup exists for ${sportName || 'this sport'} -- needs manual entry.` });
         }
       }
       for (const norm of Object.keys(bySportNorm)) {
@@ -8867,7 +8867,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         if (FUNCTION_BY_SPORT[norm]) {
           (bySportNorm[norm] = bySportNorm[norm] || []).push(p);
         } else if (norm !== 'tennis' && norm !== 'soccer') {
-          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)' });
+          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)', reason: `No automated team/tournament lookup exists for ${sportName || 'this sport'} -- needs manual entry.` });
         }
       }
       for (const norm of Object.keys(bySportNorm)) {
@@ -16173,7 +16173,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 312; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 313; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
