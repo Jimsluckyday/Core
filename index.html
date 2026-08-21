@@ -4374,6 +4374,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!legIds.length) return;
     const legs = await rest(`picks?select=id,opening_odds&id=in.(${legIds.join(',')})`);
 
+    // Direct request: with 5-7 parlays from one capper on the same day, a
+    // generic "4-Leg Parlay" label gives no way to tell which one is which
+    // while manually building them, or which local number (1-10, picked
+    // from the "Part of a parlay?" dropdown) is already in use vs free.
+    // parlay_local_number is already stored on the summary row itself (see
+    // linkLegToParlay above) -- this just surfaces it into the label
+    // instead of leaving it invisible after the fact.
+    const [summaryRow] = await rest(`picks?select=parlay_local_number&id=eq.${summaryId}`);
+    const localNumber = summaryRow ? summaryRow.parlay_local_number : null;
+    const parlayLabel = localNumber ? `Parlay #${localNumber} - ` : '';
+
     // Same odds-collapsing rule as the pipeline: if EVERY leg has odds
     // entered and they're all identical, that's the combined parlay price
     // copy-pasted onto each leg, not each leg's own separate price -- move
@@ -4384,7 +4395,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const allHaveOdds = oddsValues.length === legs.length && legs.length > 0;
     const allSame = allHaveOdds && oddsValues.every(v => v === oddsValues[0]);
 
-    const patch = { selection: `${legs.length}-Leg Parlay` };
+    const patch = { selection: `${parlayLabel}${legs.length} Leg${legs.length === 1 ? '' : 's'}` };
     if (allSame) {
       patch.opening_odds = oddsValues[0];
       for (const leg of legs) {
@@ -4397,6 +4408,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
     }
     await rest(`picks?id=eq.${summaryId}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
+  // Exposed for the "All Picks" pop-out's own leg-delete handler (calls
+  // back via window.opener, same pattern already used for window.rest
+  // above) -- without this, deleting a leg from that pop-out view would
+  // leave the "Parlay #N - X Legs" label showing a stale leg count.
+  window.refreshParlaySummary = refreshParlaySummary;
 
   // Finds (or creates) the combined Parlay row for this capper's local
   // parlay number on this date, links the given leg to it, then refreshes
@@ -5971,6 +5987,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
           const li = dbtn.closest('li');
           deletePickWithConfirm(legId, summary, dbtn, async () => {
             if (li) li.remove();
+            // The "Parlay #N - X Legs" label now shows a real leg count, not
+            // just a generic placeholder -- leaving it stale after removing
+            // a leg would actively mislead instead of just looking odd.
+            await refreshParlaySummary(parlayId);
+            await refreshPicksList();
           });
         });
       });
@@ -7553,6 +7574,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
               await op4.rest('picks?id=eq.' + legId, { method: 'DELETE' });
               const li = dbtn.closest('li');
               if (li) li.remove();
+              if (typeof op4.refreshParlaySummary === 'function') await op4.refreshParlaySummary(parlayId);
             } catch (e) {
               alert('Could not delete: ' + e.message);
               dbtn.disabled = false;
@@ -15536,7 +15558,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           capper_id: template.capper_id,
           sport_id: template.sport_id,
           bet_type_id: parlayBetType.id,
-          selection: `${members.length}-Leg Parlay`,
+          selection: `Parlay #${number} - ${members.length} Leg${members.length === 1 ? '' : 's'}`,
           line: null,
           home_away: null,
           opening_odds: allSame ? oddsValues[0] : null,
@@ -15924,7 +15946,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 303; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 304; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
