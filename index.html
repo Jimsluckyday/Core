@@ -1690,6 +1690,45 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- CAPPER TRENDS -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Capper trends <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public yet</span>
+        <button class="ghost small" id="toggleCapperTrendsBtn">Show tool</button>
+      </p>
+      <div id="capperTrendsPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Period</label>
+            <select id="capperTrendsGranularity">
+              <option value="week">Week</option>
+              <option value="month" selected>Month</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Periods to show</label>
+            <input id="capperTrendsPeriods" type="number" min="2" max="24" value="6" />
+          </div>
+          <div class="field">
+            <label>Min. graded picks per period to count</label>
+            <input id="capperTrendsMinPicks" type="number" min="1" value="3" />
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="capperTrendsSport"><option value="">All sports</option></select>
+          </div>
+        </div>
+        <div class="row">
+          <div style="align-self:flex-end;">
+            <button id="runCapperTrendsBtn">Run (new tab)</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Shows each capper's win % across their last several weeks or months side by side, so a bad recent period can be read against their own history instead of in isolation -- "4-9 this month" reads completely differently next to "58% over the last year" than it does alone. "Trend" is the most recent qualifying period's win % minus that capper's all-time win % from everything BEFORE that period (same sport filter applied to both, if one is set) -- positive means recently better than their own history, negative means recently worse. Sort by clicking any column header. A period only counts toward the sequence, and toward the most recent Trend calculation, once it clears the minimum picks threshold -- a capper who only made 1 pick in a slow month won't produce a misleading 0% or 100% for that month. The Trend figure is marked "within normal range" when the capper's own baseline win % still falls inside the recent period's Wilson confidence interval -- same math as Notable Statistics -- meaning the swing is plausibly just normal variance for that sample size, not a real shift. Filter by sport when a season starts or ends (e.g. Basketball tipping off while Baseball wraps up) so cappers who are simply inactive in the other sport right now don't clutter the list.
+        </div>
+      </div>
+    </div>
+
     <!-- CAPPER STREAKS -->
     <div class="stub" data-tab="reports">
       <p class="stub-title">
@@ -2942,6 +2981,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     caSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     caSportSel.value = keepCaSport;
+
+    const ctSportSel = $('capperTrendsSport');
+    const keepCtSport = ctSportSel.value;
+    ctSportSel.innerHTML = '<option value="">All sports</option>' +
+      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    ctSportSel.value = keepCtSport;
 
     const dupSportSel = $('dupSport');
     const keepDupSport = dupSportSel.value;
@@ -10428,6 +10473,194 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   });
 
+  // ---------- Capper trends ----------
+  $('toggleCapperTrendsBtn').addEventListener('click', () => {
+    const panel = $('capperTrendsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleCapperTrendsBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+  });
+
+  // ISO week (Monday-start, per the standard ISO-8601 definition) -- not the
+  // US convention of Sunday-start weeks, since ISO weeks are unambiguous
+  // year over year (always exactly 52 or 53 full weeks) where a plain
+  // "days since epoch / 7" bucketing would drift out of alignment with real
+  // calendar weeks over time.
+  function capperTrendsIsoWeekKey(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    const day = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
+    d.setUTCDate(d.getUTCDate() - day + 3); // shift to this week's Thursday
+    const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+    const fdDay = (firstThursday.getUTCDay() + 6) % 7;
+    firstThursday.setUTCDate(firstThursday.getUTCDate() - fdDay + 3);
+    const weekNum = 1 + Math.round((d - firstThursday) / (7 * 86400000));
+    return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+  }
+
+  function capperTrendsPeriodKey(eventDate, granularity) {
+    if (!eventDate) return null;
+    return granularity === 'week' ? capperTrendsIsoWeekKey(eventDate) : eventDate.slice(0, 7);
+  }
+
+  const CAPPER_TRENDS_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function capperTrendsPeriodLabel(key, granularity) {
+    if (granularity === 'week') {
+      const [y, w] = key.split('-W');
+      return `Wk ${w} '${y.slice(2)}`;
+    }
+    const [y, m] = key.split('-');
+    return `${CAPPER_TRENDS_MONTH_NAMES[Number(m) - 1]} '${y.slice(2)}`;
+  }
+
+  // Per capper: buckets every graded pick into a period, keeps only periods
+  // that clear the minimum-picks bar, then compares the most recent
+  // qualifying period against that capper's own ALL-TIME record from
+  // everything BEFORE that period (not just the periods shown) -- "Trend"
+  // answers "is she doing better or worse than her own history right now,"
+  // which a fixed-window comparison (e.g. this month vs last month alone)
+  // would answer less reliably for a capper with an uneven posting pace.
+  async function computeCapperTrends(granularity, periodsToShow, minPerPeriod, sportFilter) {
+    let query = 'picks?select=capper_id,sport_id,event_date,result,cappers(name)&is_parlay_leg=eq.false&result=in.(win,loss)';
+    if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+    const picks = await restAllPages(query);
+
+    const byCapper = {};
+    picks.forEach(p => {
+      const key = capperTrendsPeriodKey(p.event_date, granularity);
+      if (!key) return;
+      if (!byCapper[p.capper_id]) byCapper[p.capper_id] = { name: p.cappers ? p.cappers.name : '—', periods: {}, totalWins: 0, totalLosses: 0 };
+      const c = byCapper[p.capper_id];
+      if (!c.periods[key]) c.periods[key] = { wins: 0, losses: 0 };
+      if (p.result === 'win') { c.periods[key].wins++; c.totalWins++; }
+      else { c.periods[key].losses++; c.totalLosses++; }
+    });
+
+    const rows = [];
+    Object.values(byCapper).forEach(c => {
+      const qualifyingKeys = Object.keys(c.periods)
+        .filter(k => (c.periods[k].wins + c.periods[k].losses) >= minPerPeriod)
+        .sort(); // YYYY-MM and YYYY-Www both sort correctly as plain strings
+      if (!qualifyingKeys.length) return;
+      const shownKeys = qualifyingKeys.slice(-periodsToShow);
+      const periodsOut = shownKeys.map(k => {
+        const { wins, losses } = c.periods[k];
+        const n = wins + losses;
+        return { key: k, label: capperTrendsPeriodLabel(k, granularity), wins, losses, n, winPct: Math.round((1000 * wins) / n) / 10 };
+      });
+      const recent = periodsOut[periodsOut.length - 1];
+      const baselineWins = c.totalWins - c.periods[recent.key].wins;
+      const baselineLosses = c.totalLosses - c.periods[recent.key].losses;
+      const baselineN = baselineWins + baselineLosses;
+      let trendDelta = null, significant = null, baselineWinPct = null;
+      if (baselineN > 0) {
+        baselineWinPct = Math.round((1000 * baselineWins) / baselineN) / 10;
+        trendDelta = Math.round((recent.winPct - baselineWinPct) * 10) / 10;
+        const { lower, upper } = wilsonBounds(recent.wins, recent.losses);
+        significant = (baselineWinPct / 100) < lower || (baselineWinPct / 100) > upper;
+      }
+      rows.push({ capperName: c.name, periods: periodsOut, recent, baselineWins, baselineLosses, baselineN, baselineWinPct, trendDelta, significant });
+    });
+
+    rows.sort((a, b) => (b.trendDelta ?? -999) - (a.trendDelta ?? -999));
+    return rows;
+  }
+
+  function capperTrendsRowHtml(r) {
+    const periodsHtml = r.periods.map(p => `<span title="${p.wins}-${p.losses} (${p.n} picks)">${p.winPct}%</span>`).join(' &middot; ');
+    const trendText = r.trendDelta === null ? '—' : `${r.trendDelta > 0 ? '+' : ''}${r.trendDelta}`;
+    const trendColor = r.trendDelta === null ? '#55584d' : r.trendDelta > 0 ? '#2d6a4f' : r.trendDelta < 0 ? '#8a2f3a' : '#55584d';
+    const trendNote = r.trendDelta === null ? 'not enough picks before the most recent period to compare against' : (r.significant ? 'outside the normal range for this sample size -- plausibly a real shift' : 'within the normal range for this sample size -- plausibly just normal variance');
+    return `<tr>
+      <td data-value="${escapeHtml(r.capperName.toLowerCase())}">${escapeHtml(r.capperName)}</td>
+      <td data-value="${r.periods.length}">${periodsHtml}</td>
+      <td data-value="${r.baselineWinPct ?? -1}">${r.baselineN ? `${r.baselineWins}-${r.baselineLosses} (${r.baselineWinPct}%)` : '—'}</td>
+      <td data-value="${r.recent.winPct}">${r.recent.label}: ${r.recent.wins}-${r.recent.losses} (${r.recent.winPct}%)</td>
+      <td data-value="${r.trendDelta ?? -999}" style="color:${trendColor};font-weight:${r.significant ? 'bold' : 'normal'};" title="${trendNote}">${trendText}</td>
+    </tr>`;
+  }
+
+  function openCapperTrendsTab(rows, granularity, sportName, minPerPeriod, periodsToShow) {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    const bodyRows = rows.length ? rows.map(capperTrendsRowHtml).join('') : '<tr><td colspan="5">No cappers have enough graded picks yet to show a trend.</td></tr>';
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Capper Trends</title>
+<style>
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
+  .picks-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; cursor: pointer; user-select: none; }
+  .picks-table th:hover { color: #22281f; }
+  .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
+</style>
+</head><body>
+  <h1>Capper Trends <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
+  <div style="font-size:11px;color:#55584d;margin-bottom:14px;">
+    ${granularity === 'week' ? 'Weekly' : 'Monthly'} periods (click any column to sort) &middot; up to ${periodsToShow} shown &middot; min. ${minPerPeriod} graded picks per period to qualify &middot; ${escapeHtml(sportName)}
+  </div>
+  <table class="picks-table" id="trendsTable">
+    <thead><tr>
+      <th data-col="0" data-type="text">Capper</th>
+      <th data-col="1" data-type="num">Recent periods (oldest &rarr; newest)</th>
+      <th data-col="2" data-type="num">Baseline (before recent period)</th>
+      <th data-col="3" data-type="num">Most recent period</th>
+      <th data-col="4" data-type="num">Trend</th>
+    </tr></thead>
+    <tbody>${bodyRows}</tbody>
+  </table>
+  ${csvExportPopoutScript('capper-trends')}
+<script>
+(function() {
+  const table = document.getElementById('trendsTable');
+  const tbody = table.tBodies[0];
+  let sortCol = 4, sortDir = -1;
+  function applySort() {
+    const rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      const ca = a.children[sortCol], cb = b.children[sortCol];
+      if (!ca || !cb) return 0;
+      const type = table.querySelectorAll('th')[sortCol].getAttribute('data-type');
+      const av = ca.getAttribute('data-value'), bv = cb.getAttribute('data-value');
+      if (type === 'num') return (parseFloat(av) - parseFloat(bv)) * sortDir;
+      return av.localeCompare(bv) * sortDir;
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+  }
+  applySort();
+  Array.prototype.slice.call(table.querySelectorAll('th')).forEach(function(th) {
+    th.addEventListener('click', function() {
+      const col = Number(th.getAttribute('data-col'));
+      if (sortCol === col) { sortDir *= -1; } else { sortCol = col; sortDir = -1; }
+      applySort();
+    });
+  });
+})();
+<\/script>
+</body></html>`);
+    win.document.close();
+  }
+
+  $('runCapperTrendsBtn').addEventListener('click', async () => {
+    const granularity = $('capperTrendsGranularity').value;
+    const periodsToShow = Math.max(2, Number($('capperTrendsPeriods').value) || 6);
+    const minPerPeriod = Math.max(1, Number($('capperTrendsMinPicks').value) || 3);
+    const sportFilter = $('capperTrendsSport').value;
+    const sportName = sportFilter ? ($('capperTrendsSport').selectedOptions[0]?.textContent || '') : 'All sports';
+    const btn = $('runCapperTrendsBtn');
+    btn.disabled = true;
+    try {
+      const rows = await computeCapperTrends(granularity, periodsToShow, minPerPeriod, sportFilter);
+      openCapperTrendsTab(rows, granularity, sportName, minPerPeriod, periodsToShow);
+    } catch (e) {
+      alert('Could not calculate capper trends: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // ---------- Capper streaks (standalone — no need to open Leaderboard/Top-Bottom/Consensus) ----------
   $('toggleStreaksBtn').addEventListener('click', () => {
     const panel = $('streaksPanel');
@@ -15661,7 +15894,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 300; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 301; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
