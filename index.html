@@ -8527,12 +8527,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   function automationGroupListHtml(groups) {
-    let html = '<ul style="margin:0 0 10px 18px;padding:0;font-size:12px;">';
+    let html = '<ul style="margin:0 0 10px 18px;padding:0;list-style:none;font-size:12px;">';
     groups.forEach(g => {
       g.items.forEach(it => {
-        const capperBit = it.capperName ? `<strong>${escapeHtml(it.capperName)}</strong> — ` : '';
+        // CONFIRMED REAL GAP, direct report 2026-08-21: the capper name WAS
+        // there (bold text before the sport tag), but "I still can't see
+        // what capper gave me the wrong information" -- bold at 12px in a
+        // monospace font barely differs in weight from regular text, so it
+        // read as part of the sentence rather than a distinct label. Solid
+        // colored tag instead of relying on font-weight -- unmistakable
+        // regardless of font/size.
+        const capperBit = it.capperName
+          ? `<span style="display:inline-block;background:var(--field);color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;margin-right:6px;">${escapeHtml(it.capperName)}</span>`
+          : '';
         const sportBit = g.sport ? `<span style="color:var(--ink-soft);">[${escapeHtml(g.sport)}]</span> ` : '';
-        html += `<li style="margin-bottom:4px;">${capperBit}${sportBit}${escapeHtml(it.label)}${it.reason ? `: <span style="color:var(--ink-soft);">${escapeHtml(it.reason)}</span>` : ''}</li>`;
+        html += `<li style="margin-bottom:5px;">${capperBit}${sportBit}${escapeHtml(it.label)}${it.reason ? `: <span style="color:var(--ink-soft);">${escapeHtml(it.reason)}</span>` : ''}</li>`;
       });
     });
     return html + '</ul>';
@@ -16072,7 +16081,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 306; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 307; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
