@@ -1693,7 +1693,7 @@ Deno.serve(async (req) => {
         }
 
         const allPicks = await db(
-          `picks?select=id,selection,prop_player,prop_team,bet_type_id,event_name,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+          `picks?select=id,selection,prop_player,prop_team,bet_type_id,event_name,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
         );
         const picks = (allPicks || []).filter((p: any) => {
           const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
@@ -1776,7 +1776,48 @@ Deno.serve(async (req) => {
             if (matches.length === 1) matchedIsHome = matches[0].isHome;
           }
 
-          if (candidateGames.length === 1 && isAmbiguousSlash) {
+          // CONFIRMED REAL BUG, direct report 2026-08-21: "this is how we
+          // built draw no bets into the system... I'm confused about the
+          // error message." Draw No Bet (and anything else using
+          // admin.html's Team 1/Team 2 matchup form) stores its selection
+          // as "Team1/Team2" with Team 1 REQUIRED and Team 2 optional --
+          // the same structural convention already established for
+          // Over/Under (see populateMatchupTeamDropdowns' own comment in
+          // admin.html). For a side-picking bet type like Draw No Bet,
+          // Team 1 isn't incidental -- it's the actual side backed, same
+          // as a plain Moneyline selection. This branch was treating EVERY
+          // two-team slash selection as unresolvably ambiguous regardless
+          // of where it came from, when a pick entered through the
+          // structured form has real positional meaning a free-typed/
+          // transcribed selection doesn't. Only a slash selection that did
+          // NOT come from that structured form (bet type isn't flagged
+          // uses_matchup_fields) still gets treated as genuinely ambiguous.
+          const usesMatchupForm = !!(pick.bet_types && pick.bet_types.uses_matchup_fields);
+          if (candidateGames.length === 1 && isAmbiguousSlash && usesMatchupForm && slashMatchesA) {
+            const aInGame = slashMatchesA.find(m => m.game.event_id === candidateGames[0].event_id);
+            const updatePayload: Record<string, unknown> = {
+              game_start_time: candidateGames[0].start_time, schedule_sync_status: 'matched', schedule_sync_note: null
+            };
+            if (aInGame) updatePayload.home_away = aInGame.isHome ? 'home' : 'away';
+            // Same date-mismatch detection as the plain-match branch below
+            // -- a Draw No Bet pick can land on the wrong day exactly like
+            // any other Soccer pick, and this branch shouldn't silently
+            // skip that check just because it took a different path here.
+            let dnbDateCorrected = false;
+            if (isSoccer || isKBO) {
+              const matchedDateStr = (candidateGames[0].start_time || '').slice(0, 10);
+              if (matchedDateStr && matchedDateStr !== targetDate) {
+                dnbDateCorrected = true;
+                updatePayload.schedule_sync_note = `Found on ${matchedDateStr} -- this pick's event_date is currently ${targetDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`;
+              }
+            }
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
+            sportResult.matched.push({
+              id: pick.id, selection: pick.selection, start_time: candidateGames[0].start_time,
+              home_away: aInGame ? (aInGame.isHome ? 'home' : 'away') : null,
+              date_corrected: dnbDateCorrected
+            });
+          } else if (candidateGames.length === 1 && isAmbiguousSlash) {
             const note = `"${pick.selection}" matched a real game (${candidateGames[0].matchup}), but this is a ${betTypeName} pick with a two-team selection format -- can't tell which side was actually picked from the text alone. Needs manual entry of home/away.`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ game_start_time: candidateGames[0].start_time, schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
             sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
