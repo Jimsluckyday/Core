@@ -3966,23 +3966,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return /over\/under/i.test(name) || name.toLowerCase() === 'total';
   }
 
+  // CONFIRMED REAL GAP, direct report 2026-08-21: Team 1/Team 2 pulls from
+  // the real `teams` reference table (see populateMatchupTeamDropdowns
+  // above), which only has rows for actual team sports -- an individual
+  // sport with zero rows there (MMA/Boxing fighters aren't "teams") got
+  // two empty, unusable dropdowns and no way to enter a matchup-style pick
+  // (e.g. Total) at all, since the free-text Selection field was
+  // unconditionally hidden whenever the bet type's uses_matchup_fields flag
+  // was on, regardless of whether this specific sport actually has any
+  // teams to pick from. This check is shared by every place that decides
+  // matchup-dropdowns-vs-free-text -- display (updateMatchupFields), save
+  // (savePick), AND the edit-prefill warning below -- the first fix only
+  // covered display, which left savePick() still hard-requiring Team 1 and
+  // the edit-prefill still warning about "unregistered" fighters on every
+  // single MMA pick. Not an MMA-specific special case -- self-corrects for
+  // any other individual sport later too.
+  function sportHasTeamData(sportId) {
+    return sportId ? teams.some(t => String(t.sport_id) === String(sportId)) : true;
+  }
+
   function updateMatchupFields() {
     const bt = currentBetType();
-    // CONFIRMED REAL GAP, direct report 2026-08-21: Team 1/Team 2 pulls from
-    // the real `teams` reference table (see populateMatchupTeamDropdowns
-    // above), which only has rows for actual team sports -- an individual
-    // sport with zero rows there (MMA/Boxing fighters aren't "teams") got
-    // two empty, unusable dropdowns and no way to enter a Total pick at
-    // all, since the free-text Selection field was unconditionally hidden
-    // whenever the bet type's uses_matchup_fields flag was on, regardless
-    // of whether this specific sport actually has any teams to pick from.
-    // Falls back to the normal free-text Selection field whenever the
-    // currently selected sport has no teams on file, for ANY bet type that
-    // would otherwise show Team 1/Team 2 -- not an MMA-specific special
-    // case, so this self-corrects for any other individual sport later too.
     const sportId = $('pickSport').value;
-    const sportHasTeams = sportId ? teams.some(t => String(t.sport_id) === String(sportId)) : true;
-    const usesMatchup = bt ? (bt.uses_matchup_fields && sportHasTeams) : false;
+    const usesMatchup = bt ? (bt.uses_matchup_fields && sportHasTeamData(sportId)) : false;
     $('matchupRow').style.display = usesMatchup ? 'flex' : 'none';
     if (usesMatchup) {
       // Takes priority over the generic Selection field the same way the
@@ -4519,7 +4525,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const parlayNumberVal = $('pickParlayNumber').value; // '' = standalone, else '1'-'10'
 
     let selection, line;
-    if (bt && bt.uses_matchup_fields) {
+    if (bt && bt.uses_matchup_fields && sportHasTeamData(sport_id)) {
       // Team 1 required, Team 2 optional -- see updateMatchupFields' own
       // comment for why (Over/Under's own rules already allow naming just
       // one team). Line still comes from the normal Line field below,
@@ -4881,7 +4887,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // team (the allowed Team-2-optional case) goes entirely into Team 1.
     const matchupWarning = $('matchupTeamMismatchWarning');
     matchupWarning.style.display = 'none';
-    if (editBt && editBt.uses_matchup_fields) {
+    if (editBt && editBt.uses_matchup_fields && sportHasTeamData(p.sport_id)) {
       const editParts = (p.selection || '').split('/');
       const wantTeam1 = (editParts[0] || '').trim();
       const wantTeam2 = (editParts[1] || '').trim();
@@ -15918,7 +15924,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 302; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 303; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
