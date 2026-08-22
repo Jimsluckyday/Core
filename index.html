@@ -14267,11 +14267,46 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       : `<button type="button" class="publish-btn" data-id="${pickId}">Publish</button>`;
   }
 
+  // CONFIRMED REAL INCIDENT, direct report 2026-08-22: "A11 bets had the
+  // Cubs pick published... not realizing that Nicky Cashin also had the
+  // Cubs moneyline so it's posted twice on the same day's set of picks
+  // to our end users... on the off chance we select the same game twice
+  // is there a flag to at least warn us." Reuses the exact same "same
+  // bet" definition already established elsewhere in this file (Duplicate
+  // Pick Checker, Consensus report): event_date + sport_id + bet_type_id
+  // + selection + line, matched exactly -- not a new rule invented here.
+  // Checked only against picks that are ALREADY published (an unpublished
+  // duplicate sitting in the queue isn't customer-facing yet, so it isn't
+  // this specific danger), and excludes the pick actually being clicked
+  // so it never flags itself.
+  async function findOtherPublishedDuplicate(pick, excludeId) {
+    let query = `picks?select=id,cappers(name)&event_date=eq.${pick.event_date}&sport_id=eq.${pick.sport_id}&bet_type_id=eq.${pick.bet_type_id}&selection=eq.${encodeURIComponent(pick.selection)}&is_published=eq.true&id=neq.${excludeId}`;
+    query += (pick.line === null || pick.line === undefined) ? '&line=is.null' : `&line=eq.${pick.line}`;
+    try {
+      const rows = await rest(query);
+      return rows && rows[0] ? rows[0] : null;
+    } catch (e) {
+      // Fail OPEN, not closed -- a broken duplicate check must never
+      // silently block every publish going forward; it just means this
+      // one safety net didn't run this particular time.
+      console.warn('Could not check for an already-published duplicate:', e.message);
+      return null;
+    }
+  }
+
   function wireActionCell(cell, scoredEntry) {
     const publishBtn = cell.querySelector('.publish-btn');
     if (publishBtn) {
       publishBtn.addEventListener('click', async () => {
         const id = publishBtn.getAttribute('data-id');
+        if (scoredEntry && scoredEntry.pick) {
+          const dup = await findOtherPublishedDuplicate(scoredEntry.pick, id);
+          if (dup) {
+            const dupCapper = (dup.cappers && dup.cappers.name) || 'another capper';
+            const proceed = confirm(`This exact bet -- "${scoredEntry.pick.selection}" on ${scoredEntry.pick.event_date} -- is ALREADY published under ${dupCapper}. Publishing this one too means customers see the same pick twice in the same day's set.\n\nPublish anyway?`);
+            if (!proceed) return;
+          }
+        }
         publishBtn.disabled = true;
         publishBtn.textContent = 'Publishing...';
         try {
@@ -16669,7 +16704,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 328; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 329; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
