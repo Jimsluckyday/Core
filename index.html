@@ -3718,24 +3718,28 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
     function looksLikeHeader(line) {
       const delim = line.includes('\t') ? '\t' : ',';
-      const tokens = line.split(delim).map(t => t.trim().toLowerCase());
+      const tokens = splitCsvLine(line, delim).map(t => t.trim().toLowerCase());
       return tokens.includes('name') && tokens.includes('sport');
     }
     const headerRowIndex = allLines.findIndex(looksLikeHeader);
     if (headerRowIndex === -1) return { error: 'Missing required columns: name and/or sport.' };
     const lines = allLines.slice(headerRowIndex);
     const delimiter = lines[0].includes('\t') ? '\t' : ',';
-    const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+    const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
     const nameIdx = headers.indexOf('name');
     const sportIdx = headers.indexOf('sport');
     const startIdx = headers.indexOf('start_date');
     const endIdx = headers.indexOf('end_date');
     if (nameIdx === -1 || sportIdx === -1) return { error: 'Missing required columns: name and/or sport.' };
 
+    // Quote-aware split (see splitCsvLine, defined alongside
+    // parseCorrectionsCsv) -- a tournament name can genuinely contain a
+    // comma (e.g. "Wimbledon, The Championships"), same class of bug
+    // already confirmed and fixed for Grading Corrections' importer.
     const rows = [];
     const errors = [];
     for (let i = 1; i < lines.length; i++) {
-      const cells = lines[i].split(delimiter).map(c => c.trim());
+      const cells = splitCsvLine(lines[i], delimiter).map(c => c.trim());
       const name = cells[nameIdx];
       const sportName = cells[sportIdx];
       const start_date = startIdx !== -1 ? cells[startIdx] : '';
@@ -13561,6 +13565,48 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('toggleGradingCorrectionsBtn').textContent = showing ? 'Show tool' : 'Hide tool';
   });
 
+  // CONFIRMED REAL BUG, direct report 2026-08-22: the automation results'
+  // own "Export to CSV" button (see downloadCsv's csvField -- proper
+  // RFC4180 quoting, wraps any field containing a comma/quote/newline in
+  // "..." with internal quotes doubled) can export a reason/Issue column
+  // like `"...needs a real researched price, no safe default..."` --
+  // genuinely valid CSV, but the naive split(delimiter) this function
+  // used to use has zero awareness of quoting, so that one embedded comma
+  // silently shifted every column after it. A real, reproducible case:
+  // opening_odds/closing_odds values landed one column over and got
+  // rejected as "not a number" -- the exact export -> re-import round
+  // trip this tool's own button/help text recommends. Handles quoted
+  // fields (with "" as an escaped quote) for both comma and tab
+  // delimiters; a field containing a literal embedded newline is still
+  // not supported (would need parsing the whole file as one stream
+  // instead of splitting into lines first) -- not worth the extra
+  // complexity for a case that hasn't come up.
+  function splitCsvLine(line, delimiter) {
+    const cells = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') { cur += '"'; i++; }
+          else inQuotes = false;
+        } else {
+          cur += ch;
+        }
+      } else if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === delimiter) {
+        cells.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    cells.push(cur);
+    return cells;
+  }
+
   function parseCorrectionsCsv(text) {
     const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
     if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
@@ -13573,7 +13619,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // be graded and only need odds added).
     function looksLikeHeader(line) {
       const delim = line.includes('\t') ? '\t' : ',';
-      const tokens = line.split(delim).map(t => t.trim().toLowerCase());
+      const tokens = splitCsvLine(line, delim).map(t => t.trim().toLowerCase());
       return tokens.includes('id');
     }
     const headerRowIndex = allLines.findIndex(looksLikeHeader);
@@ -13586,7 +13632,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // so both "typed/pasted as CSV text" and "copied straight from cells"
     // work correctly.
     const delimiter = lines[0].includes('\t') ? '\t' : ',';
-    const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+    const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
     const idIdx = headers.indexOf('id');
     if (idIdx === -1) return { error: 'Missing required column: id.' };
     const resultIdx = headers.indexOf('result');
@@ -13603,12 +13649,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const rows = [];
     const errors = [];
     for (let i = 1; i < lines.length; i++) {
-      // Simple split -- good enough for these plain, quote-free fields;
-      // if a pasted event/tournament name ever contains the same character
-      // as the delimiter, wrap that field in quotes and this will need a
-      // fuller parser, but keeping it simple avoids over-building for a
-      // case that hasn't come up yet.
-      const cells = lines[i].split(delimiter).map(c => c.trim());
+      // Quote-aware split (see splitCsvLine above) -- handles a field
+      // like an Issue/reason column containing a comma, whether it came
+      // from this app's own CSV export or was typed/pasted by hand.
+      const cells = splitCsvLine(lines[i], delimiter).map(c => c.trim());
       const id = cells[idIdx];
       if (!id) { errors.push(`Row ${i + 1}: missing id.`); continue; }
 
@@ -16288,9 +16332,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const lines = text.split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim() !== '');
     if (lines.length < 2) return { headers: [], rows: [] };
     const delim = lines[0].includes('\t') ? '\t' : ',';
-    const headers = lines[0].split(delim).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+    const headers = splitCsvLine(lines[0], delim).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+    // Quote-aware split (see splitCsvLine, defined alongside
+    // parseCorrectionsCsv) -- a pick's selection/event name can genuinely
+    // contain a comma, same class of bug already confirmed and fixed for
+    // Grading Corrections' importer.
     const rows = lines.slice(1).map(line => {
-      const cells = line.split(delim).map(c => c.trim());
+      const cells = splitCsvLine(line, delim).map(c => c.trim());
       const obj = {};
       headers.forEach((h, i) => { obj[h] = cells[i] !== undefined ? cells[i] : ''; });
       return obj;
