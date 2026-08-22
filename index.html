@@ -8692,8 +8692,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const dismissBtnHtml = category
         ? `<button type="button" class="dismiss-automation-btn" data-pick-id="${it.id}" data-category="${escapeHtml(category)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;white-space:nowrap;">Mark resolved</button>`
         : '';
-      html += `<tr>
-        <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;">${capperCellHtml}</td>
+      html += `<tr data-capper-name="${escapeHtml(it.capperName || '')}">
+        <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;" class="automation-capper-cell">${capperCellHtml}</td>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
         <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
         <td style="padding:3px 8px 3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
@@ -8833,6 +8833,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
   window.dismissAutomationFlags = dismissAutomationFlags;
 
+  // CONFIRMED REAL BUG, direct report 2026-08-22: "if a single capper has
+  // multiple entries [and] I delete from the top I lose the name for the
+  // remaining." automationGroupListHtml only draws the capper tag on the
+  // FIRST row of each capper's consecutive block (v314, to avoid repeating
+  // a name 25 times) -- removing that specific row on dismiss took the
+  // only copy of the tag with it, leaving every row still below it from
+  // the same capper unlabeled. Rather than just delete the row, check
+  // whether it was the one carrying the tag, and if the next row belongs
+  // to the same capper (by the data-capper-name attribute set on every
+  // <tr>, not by comparing visible text -- '(unknown capper)' rows would
+  // otherwise all look identical), hand the tag down to it before removing.
+  function removeAutomationRow(row) {
+    if (!row) return;
+    const capperCell = row.querySelector('.automation-capper-cell');
+    const hadTag = capperCell && capperCell.innerHTML.trim() !== '';
+    const capperName = row.getAttribute('data-capper-name') || '';
+    const next = row.nextElementSibling;
+    row.remove();
+    if (!hadTag || !next) return;
+    if (next.getAttribute('data-capper-name') !== capperName) return;
+    const nextCell = next.querySelector('.automation-capper-cell');
+    if (nextCell && !nextCell.innerHTML.trim()) nextCell.innerHTML = capperCell.innerHTML;
+  }
+  window.removeAutomationRow = removeAutomationRow;
+
   // Delegated wiring for the "Mark resolved" buttons automationGroupListHtml
   // renders -- called after every (re)render in both this tab and the "All
   // Picks" pop-out (via op.wireDismissButtons(...), since the actual
@@ -8842,7 +8867,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     container.querySelectorAll('.dismiss-automation-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const row = btn.closest('tr');
-        dismissAutomationFlags(btn.dataset.pickId, [btn.dataset.category], btn, () => { if (row) row.remove(); });
+        dismissAutomationFlags(btn.dataset.pickId, [btn.dataset.category], btn, () => removeAutomationRow(row));
       });
     });
   }
@@ -16356,7 +16381,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 318; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 319; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
