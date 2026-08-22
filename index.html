@@ -1066,10 +1066,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <select id="autoSport"><option value="">All sports</option></select>
             </div>
             <div style="align-self:flex-end;">
-              <button id="autoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
+              <button id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
             </div>
             <div style="align-self:flex-end;">
-              <button id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
+              <button id="autoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
             </div>
             <div style="align-self:flex-end;">
               <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
@@ -1123,8 +1123,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  button name deliberately never lists Unit Size -- that's
                  transcriber/upload-only, never something any of these
                  automated tools can fill in; catching a bad or missing Unit
-                 Size is a Data Tools job, not this box's. -->
-            <strong>Find &amp; Update Teams / Tournaments</strong> looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it. Run this FIRST. <strong>Find &amp; Update Pick Info</strong> fills Start Time and Home/Away for every sport on that date, all at once (no odds) — never touches Prop Team or Tournament, that's exclusively the tool above. Meant for catching up an older date in one pass, not just recent ones. <strong>Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>Find &amp; Update Golf Results</strong> is separate from the button above — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.
+                 Size is a Data Tools job, not this box's.
+
+                 CONFIRMED direct request 2026-08-22: swapped Teams/
+                 Tournaments and Pick Info back to the OPPOSITE of the
+                 order fixed above on 2026-08-14. Direct reasoning: "I
+                 wouldn't need the teams/tournaments until the day I need
+                 to look at the pick... shouldn't we do these in reverse
+                 order on starting a new day of data?" -- confirmed against
+                 schedule-sync-backfill's own source (skipProps=true, which
+                 Pick Info always passes, only suppresses the prop_team/
+                 event_name WRITE -- the underlying match, game_start_time,
+                 and date_corrected detection all still run regardless, for
+                 every sport including Tennis/Soccer/Cricket). Teams/
+                 Tournaments only ever checks dates for Tennis/Soccer (plus
+                 player-roster lookups for 4 prop sports) -- it has zero
+                 visibility into KBO, CFL, NCAA Baseball, Cricket, or any
+                 other sport, so running it first (the 2026-08-14 order)
+                 left most date-crossing problems undetected until Pick
+                 Info ran anyway. Pick Info first catches every date
+                 problem across every sport in one pass, before spending
+                 any effort on prop/tournament lookups for a pick that
+                 might turn out to belong to a different day entirely. -->
+            Run these in this order. <strong>1. Find &amp; Update Pick Info</strong> — run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2 below. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after. <strong>2. Find &amp; Update Teams / Tournaments</strong> — run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it. <strong>3. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>4. Find &amp; Update Golf Results</strong> is separate from step 3 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -6825,8 +6846,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <div style="font-size:11px;color:#a3730a;font-weight:bold;margin-bottom:8px;">&#9888; Run these left to right, and check Missing Data first to confirm everything else is filled in before running Find &amp; Update Results last — grading writes real win/loss/push results that can't be automatically undone.</div>
     <label style="font-size:11px;margin-right:10px;">Date <input type="date" id="popAutoDate" style="font-family:inherit;font-size:11px;padding:4px 6px;" /></label>
     <label style="font-size:11px;margin-right:10px;">Sport (Teams/Tournaments &amp; Results) <select id="popAutoSport" style="font-family:inherit;font-size:11px;padding:4px 6px;"><option value="">All sports</option></select></label>
-    <button type="button" class="quick-filter-btn" id="popAutoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
+    <button type="button" class="quick-filter-btn" id="popAutoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeEspnBtn">Find &amp; Update Results</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeGolfBtn">Find &amp; Update Golf Results</button>
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
@@ -7171,7 +7192,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     if (!op) return;
     const date = document.getElementById('popAutoDate').value;
     if (!date) { alert('Pick a date first -- this will not run without one.'); return; }
-    if (!confirm('This will fill in Start Time and Home/Away for EVERY sport on ' + date + ' (no odds). Prop Team and Tournament are handled by "Find & Update Teams / Tournaments" instead -- run that first for the cleanest results.\\n\\nThis writes real changes to your data. Continue?')) return;
+    if (!confirm('This will fill in Start Time and Home/Away for EVERY sport on ' + date + ' (no odds), and is meant to run FIRST -- it also catches picks on the wrong calendar day. Prop Team and Tournament are handled separately by "Find & Update Teams / Tournaments" -- run that one AFTER this, once every pick\\'s date is confirmed correct.\\n\\nThis writes real changes to your data. Continue?')) return;
     const btn = document.getElementById('popAutoBackfillBtn');
     btn.disabled = true;
     document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Running pick-info backfill for every sport on this date...</div>';
@@ -9023,7 +9044,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   $('autoBackfillBtn').addEventListener('click', async () => {
     const date = $('autoDate').value;
     if (!date) { alert('Pick a date first — this will not run without one.'); return; }
-    if (!confirm(`This will fill in Start Time and Home/Away for EVERY sport on ${date} (no odds). Prop Team and Tournament are handled by "Find & Update Teams / Tournaments" instead -- run that first for the cleanest results.\n\nThis writes real changes to your data. Continue?`)) return;
+    if (!confirm(`This will fill in Start Time and Home/Away for EVERY sport on ${date} (no odds), and is meant to run FIRST -- it also catches picks on the wrong calendar day. Prop Team and Tournament are handled separately by "Find & Update Teams / Tournaments" -- run that one AFTER this, once every pick's date is confirmed correct.\n\nThis writes real changes to your data. Continue?`)) return;
     const btn = $('autoBackfillBtn');
     btn.disabled = true;
     btn.textContent = 'Updating...';
@@ -16381,7 +16402,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 319; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 320; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
