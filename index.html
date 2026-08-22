@@ -2109,6 +2109,37 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- BULK MARK PARLAY ODDS UNAVAILABLE -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Bulk mark parlay odds unavailable <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— parlays only, never guesses a price</span>
+        <button class="ghost small" id="toggleParlayOddsUnavailableBtn">Show tool</button>
+      </p>
+      <div id="parlayOddsUnavailablePanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          CONFIRMED direct request 2026-08-22: "if we don't have parlay odds from the cappers... should just put -110 which is not ideal as there's huge variance... we have no way of legitimately validating these on old data." A parlay's combined price compounds with every leg, so a flat default (the way Bulk-fill Standard Odds handles Spread/Totals) would look confidently precise while being wildly wrong -- an 11-leg parlay is nowhere near -110. This tool never guesses a number at all: it marks matching picks <strong>odds_unavailable</strong> instead, the same flag already used everywhere else in this system to mean "confirmed we can't get a real value for this" -- it drops them out of profit/value math and stops them re-appearing as "missing" in every future check, without ever presenting a fabricated price as if it were real. Scoped to parlays only (the parent parlay pick, or any of its individual legs) -- non-parlay picks missing odds are a different situation entirely and aren't touched here. Only ever considers a pick with BOTH opening AND closing odds blank -- if either side already has a real value, that's a Bulk-match Odds job instead, not this tool's.
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Sport</label>
+            <select id="pouSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field">
+            <label>From date</label>
+            <input id="pouFrom" type="date" />
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="pouTo" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="previewParlayOddsUnavailableBtn">Preview</button>
+          </div>
+        </div>
+        <div id="parlayOddsUnavailableWrap" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
     <!-- FLAGGED LINES (non-blocking, whenever you have spare time) -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -3113,6 +3144,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     omSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     omSportSel.value = keepOmSport;
+
+    const pouSportSel = $('pouSport');
+    const keepPouSport = pouSportSel.value;
+    pouSportSel.innerHTML = '<option value="">All sports</option>' +
+      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    pouSportSel.value = keepPouSport;
 
     const rqSportSel = $('rqSport');
     const keepRqSport = rqSportSel.value;
@@ -12670,6 +12707,90 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('previewOddsMatchBtn').addEventListener('click', previewOddsMatch);
 
+  // ---------- Bulk mark parlay odds unavailable ----------
+  // Direct request 2026-08-22, see this panel's own on-page explanation
+  // for the full reasoning -- short version: a parlay's combined price
+  // compounds with every leg, so a flat default the way Bulk-fill
+  // Standard Odds handles Spread/Totals would be confidently wrong, not
+  // just imprecise. Marks odds_unavailable instead of ever inventing a
+  // number.
+  $('toggleParlayOddsUnavailableBtn').addEventListener('click', () => {
+    const panel = $('parlayOddsUnavailablePanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleParlayOddsUnavailableBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+  });
+
+  async function previewParlayOddsUnavailable() {
+    const sportFilter = $('pouSport').value;
+    const from = $('pouFrom').value;
+    const to = $('pouTo').value;
+    const wrap = $('parlayOddsUnavailableWrap');
+
+    wrap.innerHTML = '<div class="empty-state">Finding parlay picks/legs missing both odds...</div>';
+
+    try {
+      // Scoped to parlays two ways at once, matching how this data
+      // actually shapes: the PARENT parlay pick carries bet_type
+      // "Parlay" itself, but each of ITS LEGS carries its own real bet
+      // type (e.g. "Team Total", "Moneyline") -- is_parlay_leg=true is
+      // what actually identifies a leg, not its own bet_type_id. Same
+      // exact-match-on-normalized-name lookup already used for excluding
+      // Moneyline in Bulk-fill Standard Odds above.
+      const parlayTypeIds = betTypes.filter(b => normalizeForMatch(b.name) === 'parlay').map(b => b.id);
+      const orParts = [];
+      if (parlayTypeIds.length) orParts.push(`bet_type_id.in.(${parlayTypeIds.join(',')})`);
+      orParts.push('is_parlay_leg.eq.true');
+      let query = `picks?select=id,event_date,selection,line,is_parlay_leg,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&opening_odds=is.null&closing_odds=is.null&odds_unavailable=eq.false&or=(${orParts.join(',')})`;
+      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+      if (from) query += `&event_date=gte.${from}`;
+      if (to) query += `&event_date=lte.${to}`;
+      query += '&order=event_date.desc';
+      const picks = await restAllPages(query);
+
+      if (!picks.length) {
+        wrap.innerHTML = '<div class="empty-state">Nothing matches these filters -- no parlay picks or legs are missing both odds.</div>';
+        return;
+      }
+
+      const rows = picks.map(p => `<tr>
+          <td>${p.event_date}</td>
+          <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
+          <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
+          <td>${escapeHtml(p.bet_types ? p.bet_types.name : '—')}</td>
+          <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
+          <td>${p.is_parlay_leg ? 'Leg' : 'Parlay'}</td>
+        </tr>`).join('');
+
+      wrap.innerHTML = `
+        <div style="font-size:12px;margin-bottom:10px;"><strong>${picks.length}</strong> pick${picks.length === 1 ? '' : 's'} would be marked odds_unavailable.</div>
+        <table class="picks-table" style="margin-bottom:14px;">
+          <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Parent/Leg</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <button class="btn-danger" id="confirmParlayOddsUnavailableBtn">Mark ${picks.length} pick${picks.length === 1 ? '' : 's'} odds unavailable</button>`;
+
+      $('confirmParlayOddsUnavailableBtn').addEventListener('click', async () => {
+        const btn = $('confirmParlayOddsUnavailableBtn');
+        if (!confirm(`This will mark ${picks.length} parlay pick(s)/leg(s) as odds_unavailable -- they'll drop out of profit/value math and stop showing as "missing odds" going forward, instead of ever getting a guessed price. Continue?`)) return;
+        btn.disabled = true;
+        btn.textContent = 'Applying...';
+        try {
+          await Promise.all(picks.map(p => rest(`picks?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ odds_unavailable: true }) })));
+          wrap.innerHTML = `<div class="msg ok">Marked ${picks.length} pick${picks.length === 1 ? '' : 's'} odds_unavailable.</div>`;
+          await refreshPicksList();
+        } catch (e) {
+          alert('Could not apply: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = `Mark ${picks.length} pick${picks.length === 1 ? '' : 's'} odds unavailable`;
+        }
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  }
+  $('previewParlayOddsUnavailableBtn').addEventListener('click', previewParlayOddsUnavailable);
+
   $('toggleFlaggedLinesBtn').addEventListener('click', () => {
     const panel = $('flaggedLinesPanel');
     const showing = panel.style.display !== 'none';
@@ -16789,7 +16910,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 332; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 333; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
