@@ -7433,9 +7433,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         if (p.closing_odds === null || p.closing_odds === undefined) which.push('closing');
         const item = {
           id: p.id, sport: p.sports ? p.sports.name : '', selection: p.selection,
-          reason: (isStraightMoneyline
-            ? betTypeName + ' -- needs a real researched price, no safe default for this market.'
-            : betTypeName + ' -- safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.') + ' Missing: ' + which.join(' & ') + '.'
+          reason: 'Missing ' + which.join(' & ') + ' -- ' + (isStraightMoneyline
+            ? betTypeName + ' needs a real researched price, no safe default for this market.'
+            : betTypeName + ' is safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.')
         };
         (isStraightMoneyline ? summary.needs_real_odds : summary.bulk_fillable).push(item);
       }
@@ -9278,9 +9278,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         if (p.closing_odds === null || p.closing_odds === undefined) which.push('closing');
         const item = {
           id: p.id, sport: p.sports ? p.sports.name : '', selection: p.selection,
-          reason: (isStraightMoneyline
-            ? `${betTypeName} -- needs a real researched price, no safe default for this market.`
-            : `${betTypeName} -- safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.`) + ` Missing: ${which.join(' & ')}.`
+          // CONFIRMED REAL BUG, direct report 2026-08-22: "these don't tell
+          // me much of anything... is it opening, closing, or both" -- the
+          // row-specific part (which side is missing) was tacked onto the
+          // END of a long sentence that's IDENTICAL on every row, so the
+          // table's 70-char truncation (truncateReason) cut it off before
+          // it ever got there. Leads with the actual variable now.
+          reason: `Missing ${which.join(' & ')} -- ` + (isStraightMoneyline
+            ? `${betTypeName} needs a real researched price, no safe default for this market.`
+            : `${betTypeName} is safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.`)
         };
         (isStraightMoneyline ? summary.needs_real_odds : summary.bulk_fillable).push(item);
       }
@@ -16546,7 +16552,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 322; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 323; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
