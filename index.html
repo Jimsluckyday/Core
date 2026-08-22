@@ -1053,9 +1053,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
             &#9888; Always double-check the date (and sport, where used) before clicking any button below — these write real, permanent changes to your data. Each one will ask you to confirm first, but the date field itself is never auto-filled for you.
           </div>
-          <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
-            &#9888; Run these left to right, and check Missing Data first to confirm everything else is filled in before running <strong>Find &amp; Update Results</strong> last — grading writes real win/loss/push results that can't be automatically undone.
-          </div>
           <div class="row">
             <div class="field">
               <label>Date</label>
@@ -1128,6 +1125,37 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  automated tools can fill in; catching a bad or missing Unit
                  Size is a Data Tools job, not this box's.
 
+                 CONFIRMED direct request 2026-08-22 (later same day):
+                 "that text below the buttons is way too small and so much
+                 information no one would ever read it... a clear and
+                 concise description on the steps without nearly as much
+                 extra descriptions." Replaced the single dense 10px
+                 paragraph below (every button's full explanation run
+                 together with no breaks) with a short, larger-type
+                 workflow summary always visible, plus a <details> element
+                 (closed by default) holding the old per-button detail for
+                 anyone who wants it -- native HTML disclosure, no extra
+                 JS, and not a separate pop-out window: this whole panel
+                 already lives inside the "All Picks" pop-out's own nested
+                 win.document.write(`...`) template literal
+                 elsewhere in this file (the exact region that broke
+                 production twice earlier today from a single stray
+                 backtick), so a THIRD nested window here was extra risk
+                 for no real benefit over a details/summary toggle already
+                 sitting in the right spot.
+
+                 Direct instruction on the workflow itself, folded into the
+                 summary below: the 3 checks (Pick Info, Teams/Tournaments,
+                 Find Missing Odds) get a day's picks to publish standard;
+                 from there it's the Publish tab, not another automation
+                 button. Results/Golf Results are a separate, NEXT-DAY
+                 pass, not part of getting today's picks live. Home/Away,
+                 Unit Size, and similar fields matter for internal
+                 analysis (Reports tab) but were explicitly called out as
+                 NOT required for either publishing or grading -- handle
+                 those whenever convenient via Data Tools, not as a
+                 blocker in this box.
+
                  CONFIRMED direct request 2026-08-22: swapped Teams/
                  Tournaments and Pick Info back to the OPPOSITE of the
                  order fixed above on 2026-08-14. Direct reasoning: "I
@@ -1148,7 +1176,25 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  problem across every sport in one pass, before spending
                  any effort on prop/tournament lookups for a pick that
                  might turn out to belong to a different day entirely. -->
-            Run these in this order. <strong>1. Find &amp; Update Pick Info</strong> — run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2 below. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after. <strong>2. Find &amp; Update Teams / Tournaments</strong> — run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it. <strong>3. Find Missing Odds</strong> — run this third, once matchups/tournaments are filled in. This never calls a live odds source (no paid odds API is wired in yet, same as the rest of this box being test data until one is) — it only finds and sorts picks still missing an opening or closing price on that date. Straight Moneyline picks (never period-qualified variants like "Moneyline First5", those move far less) come back separately, flagged as needing a real researched number — a flat default price is never safe for a market that can swing hundreds of points between a favorite and an underdog. Everything else is flagged as safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools instead of a one-by-one manual price. <strong>4. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>5. Find &amp; Update Golf Results</strong> is separate from step 4 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.
+            <p style="font-size:13px;color:var(--ink);margin:0 0 8px;line-height:1.5;">
+              Run the first three buttons, left to right, to get today's picks to publish standard: <strong>Pick Info</strong> (also catches wrong-day picks — fix those first), <strong>Teams / Tournaments</strong>, then <strong>Find Missing Odds</strong>. Once those are clean, go publish from the <strong>Publish tab</strong> — not another button here.
+            </p>
+            <p style="font-size:13px;color:var(--ink);margin:0 0 8px;line-height:1.5;">
+              Come back the <strong>next day</strong> and run <strong>Find &amp; Update Results</strong> / <strong>Golf Results</strong> to grade what published. That's a separate pass, not part of getting today's picks live.
+            </p>
+            <p style="font-size:13px;color:var(--ink);margin:0 0 10px;line-height:1.5;">
+              Home/Away, Unit Size, and similar fields are useful for internal analysis later (Reports tab) but aren't required to publish or to grade — clean those up whenever it's convenient, via Data Tools, not as a blocker here.
+            </p>
+            <details style="font-size:11px;color:var(--ink-soft);">
+              <summary style="cursor:pointer;font-weight:bold;">Exactly what each button does &amp; why this order &#9662;</summary>
+              <div style="margin-top:8px;">
+                <p style="margin:0 0 8px;"><strong>1. Find &amp; Update Pick Info</strong> — run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after.</p>
+                <p style="margin:0 0 8px;"><strong>2. Find &amp; Update Teams / Tournaments</strong> — run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it.</p>
+                <p style="margin:0 0 8px;"><strong>3. Find Missing Odds</strong> — run this third, once matchups/tournaments are filled in. Never calls a live odds source (no paid odds API is wired in yet, same as the rest of this box being test data until one is) — it only finds and sorts picks still missing an opening or closing price on that date. Straight Moneyline picks (never period-qualified variants like "Moneyline First5", those move far less) come back separately, flagged as needing a real researched number — a flat default price is never safe for a market that can swing hundreds of points between a favorite and an underdog. Everything else is flagged as safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools instead of a one-by-one manual price.</p>
+                <p style="margin:0 0 8px;"><strong>4. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all.</p>
+                <p style="margin:0;"><strong>5. Find &amp; Update Golf Results</strong> is separate from step 4 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.</p>
+              </div>
+            </details>
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -6846,7 +6892,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
   <div style="margin-bottom:14px;padding:10px;border:1px dashed #22281f;border-radius:3px;">
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#234d35;font-weight:bold;margin-bottom:8px;">Automation tools — fill in pick info &amp; find results without SQL</div>
     <div style="font-size:11px;color:#a3730a;font-weight:bold;margin-bottom:8px;">&#9888; Double-check the date (and sport, where used) before clicking — these write real, permanent changes. Each one will ask you to confirm first.</div>
-    <div style="font-size:11px;color:#a3730a;font-weight:bold;margin-bottom:8px;">&#9888; Run these left to right, and check Missing Data first to confirm everything else is filled in before running Find &amp; Update Results last — grading writes real win/loss/push results that can't be automatically undone.</div>
+    <div style="font-size:12px;color:#22281f;margin-bottom:8px;">Run the first 3 buttons left to right to reach publish standard, then publish from the Publish tab. Results / Golf Results are a separate next-day pass to grade what's already published.</div>
     <label style="font-size:11px;margin-right:10px;">Date <input type="date" id="popAutoDate" style="font-family:inherit;font-size:11px;padding:4px 6px;" /></label>
     <label style="font-size:11px;margin-right:10px;">Sport (Teams/Tournaments &amp; Results) <select id="popAutoSport" style="font-family:inherit;font-size:11px;padding:4px 6px;"><option value="">All sports</option></select></label>
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
@@ -16500,7 +16546,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 321; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 322; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
