@@ -7066,11 +7066,12 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // readable summary logic lives in exactly one place -- falls back to the
   // old raw-JSON rendering only if the opener is on an older version that
   // doesn't have it yet.
-  async function renderPopAutomationResult(label, data) {
+  async function renderPopAutomationResult(label, data, category) {
     const op = opener();
     const wrap = document.getElementById('popAutomationResultsWrap');
     if (op && typeof op.automationResultSummaryHtml === 'function') {
-      wrap.innerHTML = await op.automationResultSummaryHtml(label, data);
+      wrap.innerHTML = await op.automationResultSummaryHtml(label, data, category);
+      if (typeof op.wireDismissButtons === 'function') op.wireDismissButtons(wrap);
       return;
     }
     wrap.innerHTML =
@@ -7103,7 +7104,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           allResults.push({ sport: sp.name, error: e.message });
         }
       }
-      renderPopAutomationResult('Grading results (ESPN backfill) for ' + date, allResults);
+      renderPopAutomationResult('Grading results (ESPN backfill) for ' + date, allResults, 'results');
     } catch (e) {
       alert('Grading failed: ' + e.message);
     } finally {
@@ -7124,7 +7125,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Checking the PGA Tour leaderboard and grading...</div>';
     try {
       const data = await op.invokeEdgeFunction('grade-golf-picks', '?date=' + date);
-      renderPopAutomationResult('Golf grading results for ' + date, data);
+      renderPopAutomationResult('Golf grading results for ' + date, data, 'golf_results');
     } catch (e) {
       alert('Golf grading failed: ' + e.message);
     } finally {
@@ -7145,7 +7146,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // skipProps=true -- see CONFIRMED FIX #30 in schedule-sync-backfill.ts
       // and the matching comment on the main tab's autoBackfillBtn handler.
       const data = await op.invokeEdgeFunctionWithRetry('schedule-sync-backfill', '?date=' + date + '&skipProps=true');
-      renderPopAutomationResult('Pick info update for ' + date, data);
+      renderPopAutomationResult('Pick info update for ' + date, data, 'pick_info');
     } catch (e) {
       alert('Update failed: ' + e.message);
     } finally {
@@ -7293,7 +7294,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         }
       }
 
-      renderPopAutomationResult('Check Teams / Tournaments for ' + date + ' -- click Refresh above to see the updated rows', summary);
+      renderPopAutomationResult('Check Teams / Tournaments for ' + date + ' -- click Refresh above to see the updated rows', summary, 'teams_tournaments');
     } catch (e) {
       alert('Check Teams / Tournaments failed: ' + e.message);
     } finally {
@@ -8575,10 +8576,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const uniqueIds = [...new Set(ids)];
     if (!uniqueIds.length) return null;
     try {
-      const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,cappers(name)`);
+      const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,cappers(name),automation_dismissed_flags`);
       const nameById = {};
-      rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; });
-      groups.forEach(g => g.items.forEach(it => { it.capperName = it.id ? (nameById[it.id] || null) : null; }));
+      const dismissedById = {};
+      rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; dismissedById[r.id] = r.automation_dismissed_flags || []; });
+      groups.forEach(g => g.items.forEach(it => {
+        it.capperName = it.id ? (nameById[it.id] || null) : null;
+        it.dismissedFlags = it.id ? (dismissedById[it.id] || []) : [];
+      }));
       return null;
     } catch (e) {
       // Direct report 2026-08-21: "still back to no capper name," which
@@ -8612,7 +8617,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return clean.length > maxLen ? clean.slice(0, maxLen - 1).trim() + '…' : clean;
   }
 
-  function automationGroupListHtml(groups) {
+  function automationGroupListHtml(groups, category) {
     // Direct request 2026-08-21: "25 on one page all for the same capper"
     // with the name repeated on every single line made it hard to see
     // where one capper's block ends and the next begins. Flattened across
@@ -8636,29 +8641,77 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         ? `<span style="display:inline-block;background:#234d35;color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(it.capperName || '—')}</span>`
         : '';
       const shortReason = truncateReason(it.reason, 70);
+      // CONFIRMED REQUEST, direct feedback 2026-08-22: "how would I know
+      // that [a flag was a false positive] -- I had to dig through the
+      // data just to confirm... can we flag this as resolved so I don't
+      // have to look at it multiple times or at all if I corrected it
+      // before running this check." Each row gets a button that writes
+      // this pick's id + the current tool's category into
+      // automation_dismissed_flags (a text[] column on picks) -- future
+      // runs of ANY of the 4 automation tools filter out anything already
+      // dismissed for their own category before it ever reaches this
+      // table (see automationResultSummaryHtml below), so a reviewed item
+      // stays gone instead of resurfacing on every re-run. Inline styles,
+      // not a CSS class -- this HTML also renders inside the "All Picks"
+      // pop-out's own separate document, which doesn't share this tab's
+      // classes/stylesheet (the exact cross-document bug already fixed
+      // once for the capper tag above).
+      const dismissBtnHtml = category
+        ? `<button type="button" class="dismiss-automation-btn" data-pick-id="${it.id}" data-category="${escapeHtml(category)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;white-space:nowrap;">Mark resolved</button>`
+        : '';
       html += `<tr>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;">${capperCellHtml}</td>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
         <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
-        <td style="padding:3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
+        <td style="padding:3px 8px 3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
+        <td style="padding:3px 0;vertical-align:top;text-align:right;">${dismissBtnHtml}</td>
       </tr>`;
     });
     return html + '</table>';
   }
 
-  async function automationResultSummaryHtml(label, data) {
+  // CONFIRMED REQUEST, direct feedback 2026-08-22: "how would I know that
+  // [the KBO date flag was a false positive] -- I had to dig through the
+  // data just to confirm... can we flag this as resolved so I don't have
+  // to look at it multiple times." `category` identifies which of the 4
+  // automation tools this run is (teams_tournaments / pick_info / results
+  // / golf_results, see the 8 call sites) -- any item already dismissed
+  // for THIS SPECIFIC category (via the "Mark resolved" button, written to
+  // automation_dismissed_flags on the pick) is filtered out of the counts
+  // and tables below before they ever render, so a reviewed item stays
+  // gone on every future run instead of resurfacing every time. It still
+  // exists in "View raw JSON" below, unfiltered, since that's meant to be
+  // the literal, complete Edge Function response.
+  async function automationResultSummaryHtml(label, data, category) {
     const s = summarizeAutomationResult(data);
     const enrichError = await enrichAutomationGroupsWithCapperNames([...s.dateMismatchGroups, ...s.failureGroups, ...s.pendingGroups]);
+    let dismissedHiddenCount = 0;
+    function dropDismissed(groups) {
+      groups.forEach(g => {
+        const before = g.items.length;
+        if (category) g.items = g.items.filter(it => !(it.dismissedFlags || []).includes(category));
+        dismissedHiddenCount += before - g.items.length;
+      });
+    }
+    dropDismissed(s.dateMismatchGroups);
+    dropDismissed(s.failureGroups);
+    dropDismissed(s.pendingGroups);
+    const activeFailureCount = s.failureGroups.reduce((sum, g) => sum + g.items.length, 0);
+    const activePendingCount = s.pendingGroups.reduce((sum, g) => sum + g.items.length, 0);
+    const activeDateMismatchCount = s.dateMismatchGroups.reduce((sum, g) => sum + g.items.length, 0);
     let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
     html += `<div style="font-size:13px;margin-bottom:10px;">
       <strong>${s.totalChecked}</strong> checked &middot;
       <span style="color:#2d6a4f;font-weight:bold;">${s.successCount} updated</span> &middot;
-      <span style="color:#8a2f3a;font-weight:bold;">${s.failureCount} failed</span>${s.dateMismatchCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${s.dateMismatchCount} on a different day</span>` : ''}${s.pendingCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${s.pendingCount} not final yet</span>` : ''}
+      <span style="color:#8a2f3a;font-weight:bold;">${activeFailureCount} failed</span>${activeDateMismatchCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${activeDateMismatchCount} on a different day</span>` : ''}${activePendingCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${activePendingCount} not final yet</span>` : ''}
     </div>`;
+    if (dismissedHiddenCount) {
+      html += `<div style="font-size:11px;color:#55584d;margin-bottom:8px;">${dismissedHiddenCount} already marked resolved on a past run -- hidden from the list below (still visible in "View raw JSON").</div>`;
+    }
     if (enrichError) {
       html += `<div style="font-size:11px;color:#8a2f3a;margin-bottom:8px;">&#9888; Could not load capper names: ${escapeHtml(enrichError)}</div>`;
     }
-    if (s.dateMismatchGroups.length) {
+    if (activeDateMismatchCount) {
       // Shown FIRST, ahead of failures -- these already wrote a real
       // game_start_time and would otherwise look like a clean success,
       // but event_date is still wrong, so the pick keeps miscounting as
@@ -8679,24 +8732,65 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // value instead, so the output renders identically regardless of
       // which of the two documents it lands in.
       html += `<div style="font-size:12px;margin-bottom:6px;padding:6px 8px;background:rgba(163,115,10,0.08);border-left:3px solid #a3730a;"><strong style="color:#a3730a;">Belongs to a different day -- move these out of today's batch:</strong></div>`;
-      html += automationGroupListHtml(s.dateMismatchGroups);
+      html += automationGroupListHtml(s.dateMismatchGroups, category);
     }
-    if (s.failureGroups.length) {
+    if (activeFailureCount) {
       html += '<div style="font-size:12px;margin-bottom:6px;"><strong>What failed:</strong></div>';
-      html += automationGroupListHtml(s.failureGroups);
+      html += automationGroupListHtml(s.failureGroups, category);
     }
-    if (s.pendingGroups.length) {
+    if (activePendingCount) {
       html += '<div style="font-size:12px;margin-bottom:6px;"><strong>Still waiting on:</strong></div>';
-      html += automationGroupListHtml(s.pendingGroups);
+      html += automationGroupListHtml(s.pendingGroups, category);
     }
     html += `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;color:#55584d;">View raw JSON</summary><pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid #234d35;padding:10px;border-radius:2px;max-height:400px;overflow:auto;margin-top:6px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
     return html;
   }
   window.automationResultSummaryHtml = automationResultSummaryHtml;
 
-  async function renderAutomationResult(label, data) {
-    $('automationResultsWrap').innerHTML = await automationResultSummaryHtml(label, data);
+  async function renderAutomationResult(label, data, category) {
+    $('automationResultsWrap').innerHTML = await automationResultSummaryHtml(label, data, category);
+    wireDismissButtons($('automationResultsWrap'));
   }
+
+  // Writes this pick's id + the current tool's category into
+  // automation_dismissed_flags (a text[] column on picks) so future runs
+  // of that same tool stop flagging it -- see automationResultSummaryHtml
+  // above for where that gets read back and filtered. Re-fetches the
+  // current array fresh right before patching rather than trusting
+  // whatever was on screen, since this is a manual, occasional click and
+  // a stale read would just silently drop an unrelated dismissal from a
+  // different tool on the same pick.
+  async function dismissAutomationFlag(pickId, category, rowEl) {
+    const btn = rowEl ? rowEl.querySelector('.dismiss-automation-btn') : null;
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+    try {
+      const rows = await rest(`picks?id=eq.${pickId}&select=automation_dismissed_flags`);
+      const existing = (rows && rows[0] && rows[0].automation_dismissed_flags) || [];
+      if (!existing.includes(category)) {
+        await rest(`picks?id=eq.${pickId}`, { method: 'PATCH', body: JSON.stringify({ automation_dismissed_flags: [...existing, category] }) });
+      }
+      if (rowEl) rowEl.remove();
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Mark resolved'; }
+      alert('Could not mark this resolved: ' + e.message);
+    }
+  }
+  window.dismissAutomationFlag = dismissAutomationFlag;
+
+  // Delegated wiring for the "Mark resolved" buttons automationGroupListHtml
+  // renders -- called after every (re)render in both this tab and the "All
+  // Picks" pop-out (via op.wireDismissButtons(...), since the actual
+  // dismissAutomationFlag call needs this tab's authenticated rest()).
+  function wireDismissButtons(container) {
+    if (!container) return;
+    container.querySelectorAll('.dismiss-automation-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('tr');
+        dismissAutomationFlag(btn.dataset.pickId, btn.dataset.category, row);
+      });
+    });
+  }
+  window.wireDismissButtons = wireDismissButtons;
 
   function renderOldSyncResult(label, data) {
     $('oldSyncResultsWrap').innerHTML = `
@@ -8810,7 +8904,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           allResults.push({ sport: sp.name, error: e.message });
         }
       }
-      renderAutomationResult(`Grading results (ESPN backfill) for ${date}`, allResults);
+      renderAutomationResult(`Grading results (ESPN backfill) for ${date}`, allResults, 'results');
       await refreshPicksList();
     } catch (e) {
       alert('Grading failed: ' + e.message);
@@ -8835,7 +8929,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('automationResultsWrap').innerHTML = '<div class="empty-state">Checking the PGA Tour leaderboard and grading...</div>';
     try {
       const data = await invokeEdgeFunction('grade-golf-picks', `?date=${date}`);
-      renderAutomationResult(`Golf grading results for ${date}`, data);
+      renderAutomationResult(`Golf grading results for ${date}`, data, 'golf_results');
       await refreshPicksList();
     } catch (e) {
       alert('Golf grading failed: ' + e.message);
@@ -8862,7 +8956,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // and Tennis/Soccer/Cricket match internally (still needed for Start
       // Time on those picks -- there's no other source for it).
       const data = await invokeEdgeFunctionWithRetry('schedule-sync-backfill', `?date=${date}&skipProps=true`);
-      renderAutomationResult(`Pick info update for ${date}`, data);
+      renderAutomationResult(`Pick info update for ${date}`, data, 'pick_info');
       await refreshPicksList();
     } catch (e) {
       alert('Update failed: ' + e.message);
@@ -8944,7 +9038,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         }
       }
 
-      renderAutomationResult(`Teams / Tournaments check for ${date}`, summary);
+      renderAutomationResult(`Teams / Tournaments check for ${date}`, summary, 'teams_tournaments');
       await refreshPicksList();
     } catch (e) {
       alert('Find & Update Teams / Tournaments failed: ' + e.message);
@@ -16206,7 +16300,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 315; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 316; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
