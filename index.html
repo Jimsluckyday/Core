@@ -8867,10 +8867,26 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // items never show up in it either), with the FULL untruncated reason
     // text as its own column -- the table itself still truncates that to
     // 70 characters, but the export doesn't need to.
+    // CONFIRMED direct instruction 2026-08-22: "in the data tools we
+    // already have a grading corrections section built for these types
+    // of uploads... as long as we point it out when the file is done or
+    // it's explained somewhere." Grading Corrections already accepts an
+    // id column (required, matches strictly by pick id) plus
+    // opening_odds/closing_odds (both optional, and it already ignores
+    // any column name it doesn't recognize -- confirmed directly against
+    // parseCorrectionsCsv, ~line 13182) -- rather than building a
+    // separate import tool, this export now carries id + blank
+    // opening_odds/closing_odds columns alongside the readable ones, so
+    // filling those two in and pasting the SAME file into Data Tools ->
+    // Grading Corrections writes it straight back, matched by id, no
+    // reformatting. The pointer to that tool is both embedded in the
+    // file itself (prefixText, read by whoever/whatever opens it first)
+    // and shown right on this button so it's not buried in the file alone.
     const exportRows = [...s.dateMismatchGroups, ...s.failureGroups, ...s.pendingGroups]
-      .flatMap(g => g.items.map(it => [it.capperName || '', it.sport || '', it.label || '', it.reason || '']));
+      .flatMap(g => g.items.map(it => [it.id || '', it.capperName || '', it.sport || '', it.label || '', it.reason || '', '', '']));
     if (exportRows.length) {
-      html += `<button type="button" id="automationExportCsvBtn" data-export-json="${escapeHtml(JSON.stringify(exportRows))}" data-export-label="${escapeHtml(label)}" style="font-family:inherit;font-size:11px;padding:4px 10px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;margin-bottom:10px;">&#8681; Export these ${exportRows.length} to CSV</button>`;
+      html += `<button type="button" id="automationExportCsvBtn" data-export-json="${escapeHtml(JSON.stringify(exportRows))}" data-export-label="${escapeHtml(label)}" style="font-family:inherit;font-size:11px;padding:4px 10px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;margin-bottom:4px;">&#8681; Export these ${exportRows.length} to CSV</button>`;
+      html += `<div style="font-size:10.5px;color:#55584d;margin-bottom:10px;">Fill in the blank opening_odds/closing_odds columns, then paste this same file into <strong>Data Tools &rarr; Grading Corrections</strong> to write it back -- matched by id, extra columns are ignored.</div>`;
     }
     if (activeDateMismatchCount) {
       // Shown FIRST, ahead of failures -- these already wrote a real
@@ -9008,7 +9024,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const rows = JSON.parse(exportBtn.dataset.exportJson);
         const label = exportBtn.dataset.exportLabel || 'flagged picks';
         const safeName = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        downloadCsv(`${safeName || 'automation-export'}.csv`, ['Capper', 'Sport', 'Pick', 'Issue'], rows);
+        const prefixText = 'Fill in opening_odds and closing_odds for each row below (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Grading Corrections -- it matches strictly by id and writes opening_odds/closing_odds back onto these exact picks.';
+        downloadCsv(`${safeName || 'automation-export'}.csv`, ['id', 'Capper', 'Sport', 'Pick', 'Issue', 'opening_odds', 'closing_odds'], rows, prefixText);
       });
     }
   }
@@ -16581,7 +16598,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 324; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 325; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
