@@ -534,7 +534,7 @@ Deno.serve(async (req) => {
         return { grade: null, note: `No player named "${pick.prop_player}" found in any ${sportNorm.toUpperCase()} box score on this date -- check spelling, or needs manual grading.` };
       }
       if (allMatches.length === 0 && foundInNotFinalGame) {
-        return { grade: null, note: null, notFinal: true };
+        return { grade: null, note: 'Matched to a game today, but ESPN has not marked it final yet -- check back later.', notFinal: true };
       }
 
       let value: number | null = null;
@@ -810,9 +810,18 @@ Deno.serve(async (req) => {
             || (isPlayerProp && propsSupportedForThisSport);
 
           if (!supported) {
+            // CONFIRMED REAL GAP, direct report 2026-08-22: "the vast
+            // majority of the others seem to be parlays... nothing to
+            // explain why." Parlay picks land here EVERY run (a parlay
+            // isn't itself a single game with a score, so it can never be
+            // "supported" by this per-pick grader) -- that's expected, not
+            // a failure. This note was already computed and already
+            // written to grading_note in the DB, it just never made it
+            // into the returned JSON for admin.html's summary to show --
+            // reason: note fixes that without changing any grading logic.
             const note = `Bet type "${betTypeName}" is not supported by this grader -- needs manual grading.`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
-            sportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName });
+            sportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
             continue;
           }
 
@@ -820,12 +829,12 @@ Deno.serve(async (req) => {
             const propLabel = `${pick.prop_player || '?'} ${pick.prop_stat || '?'}`;
             const result = await gradePlayerProp(pick, sportNormForProps as 'mlb' | 'wnba' | 'nba', espnPath, games, boxscoreCache);
             if (result.notFinal) {
-              sportResult.not_final_yet.push({ id: pick.id, selection: propLabel });
+              sportResult.not_final_yet.push({ id: pick.id, selection: propLabel, reason: result.note });
               continue;
             }
             if (result.unsupported) {
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: result.note }) });
-              sportResult.unsupported_bet_type.push({ id: pick.id, selection: propLabel, bet_type: `Player Prop (${pick.prop_stat})` });
+              sportResult.unsupported_bet_type.push({ id: pick.id, selection: propLabel, bet_type: `Player Prop (${pick.prop_stat})`, reason: result.note });
               continue;
             }
             if (!result.grade) {
@@ -884,7 +893,16 @@ Deno.serve(async (req) => {
 
           const game = candidateGames[0];
           if (!game.score || game.score.event_status !== 'STATUS_FINAL') {
-            sportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: game.matchup });
+            // CONFIRMED REAL GAP, direct report 2026-08-22: "did it have an
+            // issue with the team name?" -- this branch only runs AFTER a
+            // real, unique game match already succeeded (candidateGames.length
+            // === 1, checked just above); it is never a name/matching
+            // problem, it means ESPN itself just isn't reporting this
+            // specific game's status as final yet. Spelling that out
+            // directly in the reason, instead of leaving it unexplained,
+            // is exactly the distinction a person can't otherwise tell
+            // apart from a real matching failure.
+            sportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: game.matchup, reason: `Matched to ${game.matchup}, but ESPN has not marked this game final yet -- not a name-matching issue, check back later or verify directly on ESPN.` });
             continue;
           }
 
@@ -994,7 +1012,7 @@ Deno.serve(async (req) => {
               parlayRollup.still_pending.push({ id: parlay.id, selection: parlay.selection, reason: 'one or more legs not final yet' });
             }
           } catch (legErr) {
-            parlayRollup.errors.push({ id: parlay.id, selection: parlay.selection, error: String(legErr) });
+            parlayRollup.errors.push({ id: parlay.id, selection: parlay.selection, reason: String(legErr) });
           }
         }
       }
