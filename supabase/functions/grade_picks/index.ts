@@ -76,6 +76,73 @@ Deno.serve(async (req) => {
       return text ? JSON.parse(text) : null;
     }
 
+    // Parlay auto-grading is date-scoped, not sport-scoped (a parlay's own
+    // sport_id reflects only its most prominent leg). The caller loops this
+    // function once per real sport for the per-sport grading work below, so
+    // this rollup runs as its own dedicated, single call (?parlaysOnly=true,
+    // no per-sport grading work at all) instead of once per sport --
+    // otherwise the same pending/graded parlays get redundantly reprocessed
+    // and reported once under every sport name in the loop.
+    if (url.searchParams.get('parlaysOnly') === 'true') {
+      const parlayRollup = { graded: [] as any[], still_pending: [] as any[], errors: [] as any[] };
+      try {
+        const parlayBetType = await db(`bet_types?select=id&name=eq.Parlay`);
+        const parlayBetTypeId = parlayBetType && parlayBetType[0] ? parlayBetType[0].id : null;
+        if (parlayBetTypeId) {
+          const pendingParlays = await db(
+            `picks?select=id,selection&bet_type_id=eq.${parlayBetTypeId}&event_date=eq.${targetDate}&result=eq.pending`
+          );
+          for (const parlay of (pendingParlays || [])) {
+            try {
+              const links = await db(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${parlay.id}`);
+              const legIds = (links || []).map((l: any) => l.leg_pick_id);
+              if (!legIds.length) continue;
+
+              const legs = await db(`picks?select=id,result,grading_status&id=in.(${legIds.join(',')})`);
+              const anyLoss = legs.some((l: any) => l.result === 'loss');
+              const anyAmbiguous = legs.some((l: any) => l.grading_status === 'ambiguous');
+              const allDecided = legs.every((l: any) => l.result === 'win' || l.result === 'loss' || l.result === 'push');
+              const allWinOrPush = legs.every((l: any) => l.result === 'win' || l.result === 'push');
+              const anyWin = legs.some((l: any) => l.result === 'win');
+
+              if (anyLoss) {
+                await db(`picks?id=eq.${parlay.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ result: 'loss', grading_status: 'graded', grading_note: null })
+                });
+                parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: 'loss' });
+              } else if (allDecided && allWinOrPush) {
+                const grade = anyWin ? 'win' : 'push';
+                await db(`picks?id=eq.${parlay.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null })
+                });
+                parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: grade });
+              } else if (anyAmbiguous) {
+                await db(`picks?id=eq.${parlay.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({
+                    grading_status: 'ambiguous',
+                    grading_note: 'At least one linked leg could not be confidently graded -- resolve that leg first.'
+                  })
+                });
+                parlayRollup.still_pending.push({ id: parlay.id, selection: parlay.selection, reason: 'a leg is ambiguous' });
+              } else {
+                parlayRollup.still_pending.push({ id: parlay.id, selection: parlay.selection, reason: 'one or more legs not final yet' });
+              }
+            } catch (legErr) {
+              parlayRollup.errors.push({ id: parlay.id, selection: parlay.selection, error: String(legErr) });
+            }
+          }
+        }
+      } catch (rollupErr) {
+        parlayRollup.errors.push({ error: String(rollupErr) });
+      }
+      return new Response(JSON.stringify({ date: targetDate, parlay_rollup: parlayRollup }, null, 2), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // Every sport YOU have set up -- not hardcoded to any one of them.
     // Narrowed to just one sport if ?sport= was given, which is also a
     // practical way to retry just the sport that failed on rate limits
@@ -320,77 +387,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ---- Parlay auto-grading rollup ----
-    // A parlay's own row is never checked against a score directly -- its
-    // result is entirely determined by its linked legs via parlay_legs.
-    // Run as one final pass AFTER every sport above has been graded, so as
-    // many of a parlay's legs as possible already have a real result by
-    // now, regardless of which sport(s) the legs themselves belong to (a
-    // parlay's own sport_id reflects only its most prominent leg, not
-    // necessarily every leg's sport).
-    const parlayRollup = {
-      graded: [] as any[], still_pending: [] as any[], errors: [] as any[]
-    };
-    try {
-      const parlayBetType = await db(`bet_types?select=id&name=eq.Parlay`);
-      const parlayBetTypeId = parlayBetType && parlayBetType[0] ? parlayBetType[0].id : null;
-      if (parlayBetTypeId) {
-        const pendingParlays = await db(
-          `picks?select=id,selection&bet_type_id=eq.${parlayBetTypeId}&event_date=eq.${targetDate}&result=eq.pending`
-        );
-        for (const parlay of (pendingParlays || [])) {
-          try {
-            const links = await db(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${parlay.id}`);
-            const legIds = (links || []).map((l: any) => l.leg_pick_id);
-            if (!legIds.length) continue; // no legs linked yet -- nothing to roll up
-
-            const legs = await db(`picks?select=id,result,grading_status&id=in.(${legIds.join(',')})`);
-            const anyLoss = legs.some((l: any) => l.result === 'loss');
-            const anyAmbiguous = legs.some((l: any) => l.grading_status === 'ambiguous');
-            const allDecided = legs.every((l: any) => l.result === 'win' || l.result === 'loss' || l.result === 'push');
-            const allWinOrPush = legs.every((l: any) => l.result === 'win' || l.result === 'push');
-            const anyWin = legs.some((l: any) => l.result === 'win');
-
-            if (anyLoss) {
-              // Dead the moment any leg loses -- doesn't matter if other
-              // legs are still pending.
-              await db(`picks?id=eq.${parlay.id}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ result: 'loss', grading_status: 'graded', grading_note: null })
-              });
-              parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: 'loss' });
-            } else if (allDecided && allWinOrPush) {
-              // Every leg is win or push and none are still undetermined.
-              // A push leg never causes a loss. All-push with zero real
-              // wins is graded as a push here too, rather than guessing a
-              // win with nothing that actually won.
-              const grade = anyWin ? 'win' : 'push';
-              await db(`picks?id=eq.${parlay.id}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null })
-              });
-              parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: grade });
-            } else if (anyAmbiguous) {
-              await db(`picks?id=eq.${parlay.id}`, {
-                method: 'PATCH',
-                body: JSON.stringify({
-                  grading_status: 'ambiguous',
-                  grading_note: 'At least one linked leg could not be confidently graded -- resolve that leg first.'
-                })
-              });
-              parlayRollup.still_pending.push({ id: parlay.id, selection: parlay.selection, reason: 'a leg is ambiguous' });
-            } else {
-              parlayRollup.still_pending.push({ id: parlay.id, selection: parlay.selection, reason: 'one or more legs not final yet' });
-            }
-          } catch (legErr) {
-            parlayRollup.errors.push({ id: parlay.id, selection: parlay.selection, error: String(legErr) });
-          }
-        }
-      }
-    } catch (rollupErr) {
-      parlayRollup.errors.push({ error: String(rollupErr) });
-    }
-    (overall as any).parlay_rollup = parlayRollup;
+    // Parlay rollup is handled by a dedicated ?parlaysOnly=true call (see
+    // above) instead of running here on every per-sport call.
 
     return new Response(JSON.stringify(overall, null, 2), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 

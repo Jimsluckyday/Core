@@ -7292,6 +7292,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           allResults.push({ sport: sp.name, error: e.message });
         }
       }
+      // Parlay rollup is date-scoped, not sport-scoped, so it runs as ONE
+      // dedicated call here instead of inside the per-sport loop above --
+      // otherwise the same pending/graded parlays get reported once under
+      // every sport name looped through (see grade_picks_espn_backfill's
+      // own comment above its ?parlaysOnly=true branch).
+      try {
+        const parlayData = await op.invokeEdgeFunction('grade_picks_espn_backfill', '?date=' + date + '&parlaysOnly=true');
+        allResults.push(parlayData);
+      } catch (e) {
+        allResults.push({ error: 'Parlay rollup failed: ' + e.message });
+      }
       renderPopAutomationResult('Grading results (ESPN backfill) for ' + date, allResults, 'results');
     } catch (e) {
       alert('Grading failed: ' + e.message);
@@ -9233,6 +9244,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           allResults.push({ sport: sp.name, error: e.message });
         }
       }
+      // Parlay rollup is date-scoped, not sport-scoped, so it runs as ONE
+      // dedicated call here instead of inside the per-sport loop above --
+      // otherwise the same pending/graded parlays get reported once under
+      // every sport name looped through (see grade_picks' own comment above
+      // its ?parlaysOnly=true branch).
+      try {
+        const parlayData = await invokeEdgeFunction('grade_picks', `?date=${date}&parlaysOnly=true`);
+        allResults.push(parlayData);
+      } catch (e) {
+        allResults.push({ error: 'Parlay rollup failed: ' + e.message });
+      }
       renderOldGradeResult(`Grading results for ${date}`, allResults);
       await refreshPicksList();
     } catch (e) {
@@ -9266,6 +9288,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         } catch (e) {
           allResults.push({ sport: sp.name, error: e.message });
         }
+      }
+      // Parlay rollup is date-scoped, not sport-scoped, so it runs as ONE
+      // dedicated call here instead of inside the per-sport loop above --
+      // otherwise the same pending/graded parlays get reported once under
+      // every sport name looped through (see grade_picks_espn_backfill's
+      // own comment above its ?parlaysOnly=true branch).
+      try {
+        const parlayData = await invokeEdgeFunction('grade_picks_espn_backfill', `?date=${date}&parlaysOnly=true`);
+        allResults.push(parlayData);
+      } catch (e) {
+        allResults.push({ error: 'Parlay rollup failed: ' + e.message });
       }
       renderAutomationResult(`Grading results (ESPN backfill) for ${date}`, allResults, 'results');
       await refreshPicksList();
