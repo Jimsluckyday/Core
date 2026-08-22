@@ -10,12 +10,22 @@
 // window going forward; this one is for the backlog specifically.
 //
 // Only sports with a real ESPN scoreboard mapping below are attempted --
-// anything else (Golf, Tennis, MMA, Cricket, KBO, CBA, Euro Basketball,
+// anything else (Golf, Tennis, Cricket, KBO, CBA, Euro Basketball,
 // Soccer, etc.) is safely skipped, same "not covered" pattern as
 // grade_picks already uses for TheRundown-uncovered sports -- either
 // because ESPN has no matching generic scoreboard endpoint, or because
 // it's not a team-vs-team sport this function's Moneyline/Spread/Total
 // logic could ever grade anyway.
+//
+// ADDED MMA (UFC) Moneyline grading, 2026-08-22, direct request: "every
+// piece we can automate is time saved from manual work." Straight
+// winner-take-all only (no rounds/method-of-victory grading) -- ESPN's
+// mma/ufc scoreboard slug returns a plain winner:true/false flag right
+// on each competitor, same STATUS_FINAL completion flag every other
+// sport already uses, so this reuses the exact same reliability
+// discipline, just a completely separate matching path (fighter name,
+// not team name -- see isMma below) since a bout has no home/away
+// concept and ESPN's competitor shape here is athlete, not team.
 //
 // CONFIRMED REAL BUG, fixed here (direct report): bet-type detection used
 // to be `const isTotal = pick.selection.includes('/')` -- inferring
@@ -137,6 +147,15 @@ const ESPN_SPORT_MAP: Record<string, string> = {
   ncaab: 'basketball/mens-college-basketball',
   ncaabaseball: 'baseball/college-baseball',
   cfl: 'football/cfl',
+  // ADDED 2026-08-22, direct request: "every piece we can automate is
+  // time saved... should be explored." Confirmed directly against ESPN's
+  // real API before shipping (same discipline as every other mapping
+  // here) -- mma/ufc is a real, working slug on the exact same free
+  // scoreboard endpoint already used for every other sport, no new
+  // vendor/key/cost. Straight Moneyline (winner take all) only for now --
+  // see the isMma branch below for why this needs its own matching path
+  // entirely separate from the team-vs-team logic every other sport uses.
+  mma: 'mma/ufc',
 };
 
 Deno.serve(async (req) => {
@@ -741,6 +760,61 @@ Deno.serve(async (req) => {
           return matches;
         }
 
+        // ---- MMA (UFC) fighter matching -- completely separate from the
+        // team-vs-team machinery above. A bout has two athletes, not a
+        // home/away team pair, and ESPN's own per-competitor `winner`
+        // boolean makes this simpler than every other sport here (no
+        // score math needed at all) -- but it means fighters need their
+        // own lookup keyed by NAME instead of reusing gameEntries/
+        // findMatchingGames, which are built entirely around c.team.
+        // Cappers write MMA picks as a bare surname (confirmed directly,
+        // real examples: "Nolan", "Chaves", "Chairez") far more often
+        // than a full name, so this registers BOTH the full display name
+        // AND the surname (last whitespace-separated token) as lookup
+        // keys -- each pointing at the same fighter entry. A genuine
+        // surname collision between two DIFFERENT fighters on the same
+        // card (rare, but real in a sport with many Brazilian/Portuguese
+        // surnames) is detected and flagged as ambiguous rather than
+        // silently resolved to whichever fighter registered first.
+        const isMma = normalize(ourSport.name) === 'mma';
+        type FighterEntry = { displayName: string; opponentName: string; matchup: string; completed: boolean; winner: boolean | null; ambiguous?: boolean };
+        const fighterLookup = new Map<string, FighterEntry>();
+        const fighterDisplayNames: string[] = [];
+        if (isMma) {
+          for (const e of games) {
+            const comp = e.competitions && e.competitions[0];
+            if (!comp) continue;
+            const competitors = comp.competitors || [];
+            if (competitors.length !== 2) continue; // safety: a real bout is exactly 2 fighters
+            const completed = !!(comp.status && comp.status.type && comp.status.type.completed);
+            const [a, b] = competitors;
+            const nameA = a.athlete && a.athlete.displayName;
+            const nameB = b.athlete && b.athlete.displayName;
+            if (!nameA || !nameB) continue;
+            const matchup = `${nameA} vs ${nameB}`;
+            const registerKey = (key: string, entry: FighterEntry) => {
+              const existing = fighterLookup.get(key);
+              if (existing && existing.displayName !== entry.displayName) {
+                fighterLookup.set(key, { ...existing, ambiguous: true });
+                return;
+              }
+              fighterLookup.set(key, entry);
+            };
+            const registerFighter = (name: string, opponent: string, winnerVal: any) => {
+              const entry: FighterEntry = {
+                displayName: name, opponentName: opponent, matchup, completed,
+                winner: typeof winnerVal === 'boolean' ? winnerVal : null
+              };
+              registerKey(normalize(name), entry);
+              const surname = name.trim().split(/\s+/).pop();
+              if (surname && normalize(surname) !== normalize(name)) registerKey(normalize(surname), entry);
+              fighterDisplayNames.push(name);
+            };
+            registerFighter(nameA, nameB, a.winner);
+            registerFighter(nameB, nameA, b.winner);
+          }
+        }
+
         const picks = await db(
           `picks?select=id,selection,line,bet_type_id,prop_player,prop_stat,bet_types(name)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending`
         );
@@ -844,6 +918,38 @@ Deno.serve(async (req) => {
             }
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: result.grade, grading_status: 'graded', grading_note: null }) });
             sportResult.graded.push({ id: pick.id, selection: propLabel, result: result.grade });
+            continue;
+          }
+
+          if (isMma && isMoneyline) {
+            const key = normalize(pick.selection);
+            const entry = fighterLookup.get(key);
+            if (!entry) {
+              const cardList = fighterDisplayNames.length ? ` Today's card: ${fighterDisplayNames.join(', ')}.` : '';
+              const note = `Could not find "${pick.selection}" on today's UFC card -- may be a name spelling issue, or this event isn't the one this pick means.${cardList}`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            if (entry.ambiguous) {
+              const note = `"${pick.selection}" matches more than one fighter's surname on today's card -- needs manual review to confirm which bout this pick actually means.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            if (!entry.completed) {
+              sportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: entry.matchup, reason: `Matched to ${entry.matchup}, but ESPN has not marked this fight final yet -- not a name-matching issue, check back later.` });
+              continue;
+            }
+            if (entry.winner === null) {
+              const note = `${entry.matchup} finished with no clear winner recorded (draw, no contest, or a data gap) -- needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const grade = entry.winner ? 'win' : 'loss';
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+            sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade });
             continue;
           }
 
