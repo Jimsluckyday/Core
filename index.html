@@ -8762,7 +8762,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // different tool on the same pick.
   async function dismissAutomationFlag(pickId, category, rowEl) {
     const btn = rowEl ? rowEl.querySelector('.dismiss-automation-btn') : null;
-    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Marking...'; btn.style.opacity = '0.6'; }
     try {
       const rows = await rest(`picks?id=eq.${pickId}&select=automation_dismissed_flags`);
       const existing = (rows && rows[0] && rows[0].automation_dismissed_flags) || [];
@@ -8771,8 +8771,26 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       }
       if (rowEl) rowEl.remove();
     } catch (e) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Mark resolved'; }
-      alert('Could not mark this resolved: ' + e.message);
+      // CONFIRMED REAL BUG, direct report 2026-08-22: "I clicked mark
+      // resolved but nothing happened... doesn't do anything to indicate
+      // it's taken my update." alert() shows a dialog on whatever window
+      // is running THIS code -- when this gets triggered from the "All
+      // Picks" pop-out's own button (via op.dismissAutomationFlag), this
+      // function still executes in the MAIN tab's realm (it's defined
+      // there, only invoked through window.opener), so the alert() was
+      // popping up on the tab the user wasn't even looking at -- the
+      // exact same cross-window trap that made console.log look broken
+      // earlier this session. Showing the failure directly on the button
+      // itself (a real DOM node in whichever document was actually
+      // clicked) works correctly regardless of which realm runs this.
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Failed -- retry?';
+        btn.style.opacity = '';
+        btn.style.borderColor = '#8a2f3a';
+        btn.style.color = '#8a2f3a';
+        btn.title = e.message;
+      }
     }
   }
   window.dismissAutomationFlag = dismissAutomationFlag;
@@ -16300,7 +16318,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 316; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 317; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
