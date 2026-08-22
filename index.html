@@ -1062,7 +1062,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <input id="autoDate" type="date" />
             </div>
             <div class="field">
-              <label>Sport (used by "Find &amp; Update Teams / Tournaments" and "Find &amp; Update Results" — Pick Info always covers every sport)</label>
+              <label>Sport (used by "Find &amp; Update Teams / Tournaments", "Find Missing Odds", and "Find &amp; Update Results" — Pick Info always covers every sport)</label>
               <select id="autoSport"><option value="">All sports</option></select>
             </div>
             <div style="align-self:flex-end;">
@@ -1070,6 +1070,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
             </div>
             <div style="align-self:flex-end;">
               <button id="autoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
+            </div>
+            <div style="align-self:flex-end;">
+              <button id="autoMissingOddsBtn">Find Missing Odds</button>
             </div>
             <div style="align-self:flex-end;">
               <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
@@ -1145,7 +1148,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  problem across every sport in one pass, before spending
                  any effort on prop/tournament lookups for a pick that
                  might turn out to belong to a different day entirely. -->
-            Run these in this order. <strong>1. Find &amp; Update Pick Info</strong> — run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2 below. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after. <strong>2. Find &amp; Update Teams / Tournaments</strong> — run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it. <strong>3. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>4. Find &amp; Update Golf Results</strong> is separate from step 3 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.
+            Run these in this order. <strong>1. Find &amp; Update Pick Info</strong> — run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2 below. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after. <strong>2. Find &amp; Update Teams / Tournaments</strong> — run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it. <strong>3. Find Missing Odds</strong> — run this third, once matchups/tournaments are filled in. This never calls a live odds source (no paid odds API is wired in yet, same as the rest of this box being test data until one is) — it only finds and sorts picks still missing an opening or closing price on that date. Straight Moneyline picks (never period-qualified variants like "Moneyline First5", those move far less) come back separately, flagged as needing a real researched number — a flat default price is never safe for a market that can swing hundreds of points between a favorite and an underdog. Everything else is flagged as safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools instead of a one-by-one manual price. <strong>4. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — Tennis, Soccer, Golf, MMA, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all. <strong>5. Find &amp; Update Golf Results</strong> is separate from step 4 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -6848,6 +6851,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     <label style="font-size:11px;margin-right:10px;">Sport (Teams/Tournaments &amp; Results) <select id="popAutoSport" style="font-family:inherit;font-size:11px;padding:4px 6px;"><option value="">All sports</option></select></label>
     <button type="button" class="quick-filter-btn" id="popAutoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
     <button type="button" class="quick-filter-btn" id="popAutoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
+    <button type="button" class="quick-filter-btn" id="popAutoMissingOddsBtn">Find Missing Odds</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeEspnBtn">Find &amp; Update Results</button>
     <button type="button" class="quick-filter-btn" id="popAutoGradeGolfBtn">Find &amp; Update Golf Results</button>
     <div id="popAutomationResultsWrap" style="margin-top:8px;"></div>
@@ -7351,6 +7355,47 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       renderPopAutomationResult('Check Teams / Tournaments for ' + date + ' -- click Refresh above to see the updated rows', summary, 'teams_tournaments');
     } catch (e) {
       alert('Check Teams / Tournaments failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Same tool as the main tab's popAutoMissingOddsBtn version of this
+  // button -- see that copy's own comment for the full reasoning (no live
+  // odds source wired in yet, only sorts what is missing into 'safe for a
+  // flat default price' vs 'straight Moneyline, needs a real number').
+  document.getElementById('popAutoMissingOddsBtn').addEventListener('click', async () => {
+    const op = opener();
+    if (!op) return;
+    const date = document.getElementById('popAutoDate').value;
+    if (!date) { alert('Pick a date first -- this will not run without one.'); return; }
+    const sportId = document.getElementById('popAutoSport').value;
+    const btn = document.getElementById('popAutoMissingOddsBtn');
+    btn.disabled = true;
+    document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Finding picks missing odds...</div>';
+    try {
+      let query = 'picks?select=id,selection,sport_id,sports(name),bet_type_id,bet_types(name),opening_odds,closing_odds,odds_unavailable&event_date=eq.' + date + '&result=eq.pending&is_parlay_leg=eq.false';
+      if (sportId) query += '&sport_id=eq.' + sportId;
+      const candidates = await op.restAllPages(query);
+      const missing = candidates.filter(function (p) { return !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined || p.closing_odds === null || p.closing_odds === undefined); });
+      const summary = { date: date, checked: candidates.length, bulk_fillable: [], needs_real_odds: [] };
+      for (const p of missing) {
+        const betTypeName = p.bet_types ? p.bet_types.name : '';
+        const isStraightMoneyline = op.normalizeForMatch(betTypeName) === 'moneyline';
+        const which = [];
+        if (p.opening_odds === null || p.opening_odds === undefined) which.push('opening');
+        if (p.closing_odds === null || p.closing_odds === undefined) which.push('closing');
+        const item = {
+          id: p.id, sport: p.sports ? p.sports.name : '', selection: p.selection,
+          reason: (isStraightMoneyline
+            ? betTypeName + ' -- needs a real researched price, no safe default for this market.'
+            : betTypeName + ' -- safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.') + ' Missing: ' + which.join(' & ') + '.'
+        };
+        (isStraightMoneyline ? summary.needs_real_odds : summary.bulk_fillable).push(item);
+      }
+      renderPopAutomationResult('Missing odds check for ' + date, summary, 'missing_odds');
+    } catch (e) {
+      alert('Find Missing Odds failed: ' + e.message);
     } finally {
       btn.disabled = false;
     }
@@ -8532,7 +8577,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // since it isn't hardcoded to one specific path through the object.
   function summarizeAutomationResult(data) {
     const SUCCESS_KEYS = new Set(['matched', 'resolved', 'graded']);
-    const FAILURE_KEYS = new Set(['unmatched', 'unresolved', 'ambiguous', 'unsupported_bet_type', 'unsupported']);
+    const FAILURE_KEYS = new Set(['unmatched', 'unresolved', 'ambiguous', 'unsupported_bet_type', 'unsupported', 'bulk_fillable', 'needs_real_odds']);
     const PENDING_KEYS = new Set(['not_final_yet', 'pending']);
 
     let successCount = 0, failureCount = 0, pendingCount = 0, dateMismatchCount = 0;
@@ -8806,7 +8851,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     wireDismissButtons($('automationResultsWrap'));
   }
 
-  const AUTOMATION_CATEGORIES = ['teams_tournaments', 'pick_info', 'results', 'golf_results'];
+  const AUTOMATION_CATEGORIES = ['teams_tournaments', 'pick_info', 'results', 'golf_results', 'missing_odds'];
 
   // Writes this pick's id + one or more category keys into
   // automation_dismissed_flags (a text[] column on picks) so future runs
@@ -9144,6 +9189,58 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       await refreshPicksList();
     } catch (e) {
       alert('Find & Update Teams / Tournaments failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // CONFIRMED REQUEST, direct feedback 2026-08-22: "we don't have a button
+  // to find odds on the pending page anymore due to our need for having a
+  // paid API... for testing though I need to get this data and would like
+  // to build this exactly how we would see this in a live environment."
+  // Deliberately NOT wired to any odds source -- there isn't one yet, same
+  // as the rest of this box being test/manual data until a paid API is
+  // actually integrated. This only finds and sorts what's missing, using
+  // the exact same "which bet types are safe for a flat default price"
+  // rule the real Bulk-fill Standard Odds tool already uses (Data Tools
+  // tab, ~line 12231): only a bet type whose name normalizes to EXACTLY
+  // "moneyline" is excluded -- "Moneyline First5"/other period-qualified
+  // variants move far less than the full-game line and are fine with a
+  // standard price, same as Spread/Totals/Props. Straight Moneyline picks
+  // come back in their own group instead, since there's no safe universal
+  // number for a market that can swing hundreds of points between a
+  // favorite and an underdog -- direct request: export those and find real
+  // odds for them by hand (or hand the export to Claude to research).
+  $('autoMissingOddsBtn').addEventListener('click', async () => {
+    const date = $('autoDate').value;
+    if (!date) { alert('Pick a date first — this will not run without one.'); return; }
+    const sportId = $('autoSport').value;
+    const btn = $('autoMissingOddsBtn');
+    btn.disabled = true;
+    $('automationResultsWrap').innerHTML = '<div class="empty-state">Finding picks missing odds...</div>';
+    try {
+      let query = `picks?select=id,selection,sport_id,sports(name),bet_type_id,bet_types(name),opening_odds,closing_odds,odds_unavailable&event_date=eq.${date}&result=eq.pending&is_parlay_leg=eq.false`;
+      if (sportId) query += `&sport_id=eq.${sportId}`;
+      const candidates = await restAllPages(query);
+      const missing = candidates.filter(p => !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined || p.closing_odds === null || p.closing_odds === undefined));
+      const summary = { date, checked: candidates.length, bulk_fillable: [], needs_real_odds: [] };
+      for (const p of missing) {
+        const betTypeName = p.bet_types ? p.bet_types.name : '';
+        const isStraightMoneyline = normalizeForMatch(betTypeName) === 'moneyline';
+        const which = [];
+        if (p.opening_odds === null || p.opening_odds === undefined) which.push('opening');
+        if (p.closing_odds === null || p.closing_odds === undefined) which.push('closing');
+        const item = {
+          id: p.id, sport: p.sports ? p.sports.name : '', selection: p.selection,
+          reason: (isStraightMoneyline
+            ? `${betTypeName} -- needs a real researched price, no safe default for this market.`
+            : `${betTypeName} -- safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.`) + ` Missing: ${which.join(' & ')}.`
+        };
+        (isStraightMoneyline ? summary.needs_real_odds : summary.bulk_fillable).push(item);
+      }
+      renderAutomationResult(`Missing odds check for ${date}`, summary, 'missing_odds');
+    } catch (e) {
+      alert('Find Missing Odds failed: ' + e.message);
     } finally {
       btn.disabled = false;
     }
@@ -15708,6 +15805,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return { rawName, suggestion };
   }
   function normalizeForMatch(s) { return (s || '').toLowerCase().trim().replace(/[^a-z0-9]/g, ''); }
+  window.normalizeForMatch = normalizeForMatch;
 
 
   // Checks whether an entered date for an individual-competitor sport
@@ -16402,7 +16500,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 320; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 321; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
