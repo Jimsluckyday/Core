@@ -8913,6 +8913,26 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         ? `<span style="display:inline-block;background:#234d35;color:#eae5d6;font-weight:bold;padding:1px 6px;border-radius:2px;">${escapeHtml(it.capperName || '—')}</span>`
         : '';
       const shortReason = truncateReason(it.reason, 70);
+      // Direct report 2026-08-22: "the note got cut off so I couldn't see
+      // what the issue was." The full reason was always available via the
+      // title="" hover tooltip, but that's not discoverable (nothing
+      // signals a truncated cell has more behind it) and doesn't work at
+      // all on a touchscreen. Deliberately NOT reverting to always
+      // showing the full text inline -- that's the exact "way too messy
+      // to read... a paragraph per failure" complaint that led to
+      // truncation in the first place (see this function's own comment
+      // above). A plain onclick (not the addEventListener delegation used
+      // for the Edit/Mark resolved buttons) works correctly here even
+      // though this HTML also renders inside the separate "All Picks"
+      // pop-out document -- it needs no reference back to this tab's own
+      // functions, just the browser's built-in alert().
+      const cleanReason = (it.reason || '').replace(/\s+/g, ' ').trim();
+      const reasonIsTruncated = cleanReason.length > 70;
+      const reasonCellStyle = 'padding:3px 8px 3px 0;color:#55584d;vertical-align:top;'
+        + (reasonIsTruncated ? 'cursor:pointer;text-decoration:underline dotted;' : '');
+      const reasonCellAttrs = reasonIsTruncated
+        ? `onclick="alert(this.getAttribute('data-full'))" data-full="${escapeHtml(cleanReason)}" title="Click to see the full note"`
+        : `title="${escapeHtml(cleanReason)}"`;
       // CONFIRMED REQUEST, direct feedback 2026-08-22: "how would I know
       // that [a flag was a false positive] -- I had to dig through the
       // data just to confirm... can we flag this as resolved so I don't
@@ -8950,7 +8970,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;" class="automation-capper-cell">${capperCellHtml}</td>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
         <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
-        <td style="padding:3px 8px 3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
+        <td style="${reasonCellStyle}" ${reasonCellAttrs}>${escapeHtml(shortReason)}</td>
         <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${editBtnHtml}${dismissBtnHtml}</td>
       </tr>`;
     });
