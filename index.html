@@ -14266,8 +14266,24 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             };
           }
           await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
-          cell.innerHTML = renderActionCell(id, true);
-          wireActionCell(cell, scoredEntry);
+          // CONFIRMED REAL BUG, direct report 2026-08-22: "I published 3
+          // [high-consensus picks] as they came in at the top in the
+          // separate window above the top ranked picks... nothing happened
+          // to the full ranked picks section even though I published 3 of
+          // those picks." A high-consensus pick's card renders TWICE at
+          // once (its normal ranked spot, plus the pinned callout above the
+          // list) sharing the same data-pick-id -- this used to update only
+          // the ONE .pr-action cell that was actually clicked (`cell`),
+          // leaving the OTHER copy showing a live "Publish" button for a
+          // pick that's already published. Same querySelectorAll-every-
+          // matching-copy fix wireCardActions already uses for wiring the
+          // click listeners in the first place (see its own comment) --
+          // this just needed to happen again on the RESULT of a click, not
+          // only at initial render.
+          document.querySelectorAll(`.pr-card[data-pick-id="${id}"] .pr-action`).forEach(c => {
+            c.innerHTML = renderActionCell(id, true);
+            wireActionCell(c, scoredEntry);
+          });
           // Auto-refresh right after publishing -- direct request: "I
           // don't think it's a good workflow to have to stop and re-rank
           // everything." Catches the common case (publishing a leg's
@@ -14289,8 +14305,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         unpublishBtn.disabled = true;
         try {
           await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_published: false }) });
-          cell.innerHTML = renderActionCell(id, false);
-          wireActionCell(cell, scoredEntry);
+          // Same both-copies fix as the publish handler above.
+          document.querySelectorAll(`.pr-card[data-pick-id="${id}"] .pr-action`).forEach(c => {
+            c.innerHTML = renderActionCell(id, false);
+            wireActionCell(c, scoredEntry);
+          });
           refreshPublishedLegFlags().catch(() => {});
         } catch (e) {
           alert('Could not unpublish: ' + e.message);
@@ -16598,7 +16617,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 325; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 326; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
