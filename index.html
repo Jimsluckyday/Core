@@ -15013,6 +15013,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const propBit = (p.prop_player || p.prop_stat)
         ? ` <span style="color:var(--ink-soft);">— ${escapeHtml(p.prop_player || '')}${p.prop_team ? ` (${escapeHtml(p.prop_team)})` : ''} ${escapeHtml(p.prop_stat || '')}</span>`
         : '';
+      // CONFIRMED REAL REQUEST, direct feedback 2026-08-22: "that was too
+      // hard to find [the edit-form Unpublish button, buried behind
+      // switching Pending Picks' Result filter to All picks]... there
+      // should be a better place to put this." This IS that better
+      // place -- the one tool already built specifically to find ANY
+      // published pick regardless of result, so the action to undo that
+      // belongs right where you're already looking, not three clicks and
+      // a filter change away in a different tab.
+      const unpublishBtnHtml = `<button type="button" class="ghost small ap-unpublish-btn" data-id="${p.id}" data-result="${p.result}" data-label="${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}" data-capper="${escapeHtml(p.cappers ? p.cappers.name : 'unknown capper')}" data-date="${p.event_date}">Unpublish</button>`;
       return `<tr>
         <td>${p.event_date}</td>
         <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
@@ -15022,6 +15031,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${oddsText}</td>
         <td>${resultBadge}${p.published_was_hot ? ' &#128293;' : ''}</td>
         <td>${p.published_score ?? '—'}</td>
+        <td>${unpublishBtnHtml}</td>
       </tr>`;
     }).join('');
 
@@ -15031,9 +15041,45 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </div>
       <button id="exportAllPublishedBtn" style="margin-bottom:10px;">&#8681; Export to CSV</button>
       <table class="picks-table">
-        <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Odds</th><th>Result</th><th>Score at publish</th></tr></thead>
+        <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Odds</th><th>Result</th><th>Score at publish</th><th></th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>`;
+
+    // CONFIRMED REAL REQUEST, direct feedback 2026-08-22, real incident:
+    // "A11 bets had the Cubs pick published... Nicky Cashin also had the
+    // Cubs moneyline... posted twice." "This isn't something we want to
+    // do unless something really bad happens to keep the integrity of
+    // what we post." Two deliberately different confirm() severities --
+    // unpublishing something still PENDING is a normal-ish correction
+    // (nobody's seen a final result attached to it yet); unpublishing
+    // something already GRADED means real customers may have already
+    // seen a real win/loss/push and it's coming down anyway -- that one
+    // gets the heavier, "are you SURE this is the exception, not routine
+    // cleanup" wording on purpose.
+    wrap.querySelectorAll('.ap-unpublish-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        const result = btn.getAttribute('data-result');
+        const label = btn.getAttribute('data-label');
+        const capper = btn.getAttribute('data-capper');
+        const date = btn.getAttribute('data-date');
+        const isGraded = result === 'win' || result === 'loss' || result === 'push';
+        const message = isGraded
+          ? `Unpublish "${label}" (${capper}, ${date}) -- ALREADY GRADED as ${result.toUpperCase()}?\n\nCustomers may have already seen this pick and its result. Taking down a graded pick should be rare -- a real integrity issue (like a duplicate posted by mistake), not routine cleanup. This does not undo the fact people may have already seen it.\n\nAre you sure this is that kind of exception?`
+          : `Unpublish "${label}" (${capper}, ${date})? It's still pending, but is currently live for customers to see.`;
+        if (!confirm(message)) return;
+        btn.disabled = true;
+        btn.textContent = 'Unpublishing...';
+        try {
+          await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_published: false }) });
+          btn.closest('tr').remove();
+        } catch (e) {
+          alert('Could not unpublish: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = 'Unpublish';
+        }
+      });
+    });
 
     $('exportAllPublishedBtn').addEventListener('click', () => {
       const cols = ['Date', 'Capper', 'Sport', 'Bet Type', 'Selection', 'Line', 'Player', 'Prop Team', 'Prop Stat', 'Tier', 'Opening Odds', 'Closing Odds', 'Result', 'Was Hot Pick', 'Score at Publish', 'Published At'];
@@ -16704,7 +16750,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 329; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 330; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
