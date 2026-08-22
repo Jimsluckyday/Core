@@ -1398,7 +1398,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          A consensus requires the exact same selection AND line (where applicable) — "Spurs -6" and "Spurs -6.5" are counted separately, on purpose. Uncheck the box above to see every qualifying consensus for deeper internal review — the default shows just the strongest one per day, which is the version worth showing end users later.
+          "From date" defaults to 30 days back so this doesn't turn into a wall of every day since launch — widen or clear it (or click <strong>All time</strong>) to search further back. A consensus requires the exact same selection AND line (where applicable) — "Spurs -6" and "Spurs -6.5" are counted separately, on purpose. Uncheck the box above to see every qualifying consensus for deeper internal review — the default shows just the strongest one per day, which is the version worth showing end users later.
         </div>
       </div>
     </div>
@@ -16606,6 +16606,18 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     if (mainAppInited) return;
     mainAppInited = true;
     $('pickDate').value = new Date().toISOString().slice(0, 10);
+    // CONFIRMED REQUEST, direct feedback 2026-08-22: "as the data grows...
+    // it just keeps adding days which will get rather messy once we get
+    // months of data in here... 1 month of data and the rest has to be
+    // searched for." Consensus Picks' own From/To fields already existed
+    // (and "All time" already existed as the explicit escape hatch to see
+    // everything) -- the only real gap was that leaving From blank meant
+    // "no limit" instead of a sane default. Pre-filling From with 30 days
+    // back (never touching To, so it always reaches through today/latest)
+    // means a fresh open of this panel is already scoped to a real,
+    // current-feeling window instead of the entire history table, while
+    // "All time" still clears this and searches everything on demand.
+    $('consensusFrom').value = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     updatePickTypeFields();
     await refreshCappers();
     await refreshSports();
@@ -16617,7 +16629,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 326; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 327; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
