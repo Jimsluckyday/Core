@@ -7222,17 +7222,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           // backfill (they don't use prop_team at all -- individual/no-
           // team sports), so they're not real "unsupported" gaps here.
           // CONFIRMED REAL BUG, direct report 2026-08-21, broke the whole
-          // page ("not connected", nothing loading): this exact line sits
-          // inside the "All Picks" pop-out's OWN giant template literal
-          // (built via win.document.write(`...`) further down in this same
-          // popout-generator function). A backtick-delimited template
-          // literal here PREMATURELY CLOSES that outer one the instant the
-          // parser reaches it, turning everything after it in the
-          // generator into code to be parsed instead of string content.
-          // String concatenation with single quotes instead -- the
-          // established safe pattern already used for the rest of this
-          // exact pop-out's own code (see e.g. the reason strings just
-          // above this one in the same function).
+          // page ('not connected', nothing loading): this exact line sits
+          // inside the 'All Picks' pop-out's OWN giant template literal
+          // (built via win.document.write(...) further down in this same
+          // popout-generator function). A template literal delimited by
+          // the backtick character here PREMATURELY CLOSES that outer one
+          // the instant the parser reaches it, turning everything after
+          // it in the generator into code to be parsed instead of string
+          // content -- and this applies just as much to a literal backtick
+          // typed inside a comment as inside real code, which is exactly
+          // what broke this the first time this got 'fixed'. String
+          // concatenation with single quotes instead -- the established
+          // safe pattern already used for the rest of this exact pop-out's
+          // own code (see e.g. the reason strings just above this one in
+          // the same function). Do not type the backtick character
+          // ANYWHERE in this region, comments included.
           summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)', reason: 'No automated team/tournament lookup exists for ' + (sportName || 'this sport') + ' -- needs manual entry.' });
         }
       }
@@ -8896,7 +8900,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         if (FUNCTION_BY_SPORT[norm]) {
           (bySportNorm[norm] = bySportNorm[norm] || []).push(p);
         } else if (norm !== 'tennis' && norm !== 'soccer') {
-          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)', reason: `No automated team/tournament lookup exists for ${sportName || 'this sport'} -- needs manual entry.` });
+          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)', reason: 'No automated team/tournament lookup exists for ' + (sportName || 'this sport') + ' -- needs manual entry.' });
         }
       }
       for (const norm of Object.keys(bySportNorm)) {
