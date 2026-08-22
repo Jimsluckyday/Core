@@ -12746,10 +12746,40 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
       query += '&order=event_date.desc';
-      const picks = await restAllPages(query);
+      const candidates = await restAllPages(query);
+
+      if (!candidates.length) {
+        wrap.innerHTML = '<div class="empty-state">Nothing matches these filters -- no parlay picks or legs are missing both odds.</div>';
+        return;
+      }
+
+      // CONFIRMED REAL BUG, direct report 2026-08-22, live screenshot: two
+      // genuinely standalone MMA Moneyline picks showed up here --
+      // is_parlay_leg was true on both, but neither was actually part of
+      // a parlay. Root cause: is_parlay_leg only ever gets SET (by
+      // linkLegToParlay, see its own comment) -- nothing resets it if the
+      // real link later goes away (parent parlay deleted, pick manually
+      // split back out), so it can go stale. Rather than trust the flag
+      // alone, cross-check every "Leg"-flagged candidate against the REAL
+      // parlay_legs join table -- only a pick with a genuine, currently-
+      // active link stays in this tool's results; a stale flag with no
+      // real parent gets excluded and surfaced separately instead of
+      // silently treated as a parlay.
+      const legIds = candidates.filter(p => p.is_parlay_leg).map(p => p.id);
+      let realLegIds = new Set();
+      if (legIds.length) {
+        const links = await restAllPages(`parlay_legs?select=leg_pick_id&leg_pick_id=in.(${legIds.join(',')})`);
+        realLegIds = new Set(links.map(l => l.leg_pick_id));
+      }
+      const orphaned = candidates.filter(p => p.is_parlay_leg && !realLegIds.has(p.id));
+      const picks = candidates.filter(p => !p.is_parlay_leg || realLegIds.has(p.id));
+
+      const orphanNote = orphaned.length
+        ? `<div style="font-size:11px;color:#a3730a;margin-bottom:8px;">&#9888; ${orphaned.length} pick${orphaned.length === 1 ? '' : 's'} excluded -- flagged is_parlay_leg but no real parlay link exists (a stale flag, not an actual parlay): ${orphaned.map(p => escapeHtml(p.selection)).join(', ')}. Not touched by this tool; needs its own fix (reset is_parlay_leg to false) separately.</div>`
+        : '';
 
       if (!picks.length) {
-        wrap.innerHTML = '<div class="empty-state">Nothing matches these filters -- no parlay picks or legs are missing both odds.</div>';
+        wrap.innerHTML = `${orphanNote}<div class="empty-state">Nothing left to mark -- no genuine parlay picks or legs are missing both odds.</div>`;
         return;
       }
 
@@ -12763,6 +12793,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         </tr>`).join('');
 
       wrap.innerHTML = `
+        ${orphanNote}
         <div style="font-size:12px;margin-bottom:10px;"><strong>${picks.length}</strong> pick${picks.length === 1 ? '' : 's'} would be marked odds_unavailable.</div>
         <table class="picks-table" style="margin-bottom:14px;">
           <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Parent/Leg</th></tr></thead>
@@ -16910,7 +16941,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 333; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 334; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
