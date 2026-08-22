@@ -8856,6 +8856,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     if (enrichError) {
       html += `<div style="font-size:11px;color:#8a2f3a;margin-bottom:8px;">&#9888; Could not load capper names: ${escapeHtml(enrichError)}</div>`;
     }
+    // CONFIRMED REAL BUG, direct report 2026-08-22, live screenshot: "I
+    // clicked export to csv so we could work through them and it gave me
+    // all the picks for the 6th which doesn't narrow down what we need to
+    // fix." That "Export to CSV" button (top of Pending Picks) exports
+    // whatever the PAGE'S OWN filters currently show -- it has no idea
+    // this automation run even happened, let alone which subset of that
+    // day's picks it flagged. This button exports EXACTLY the rows
+    // currently listed below (post dismiss-filtering, so already-resolved
+    // items never show up in it either), with the FULL untruncated reason
+    // text as its own column -- the table itself still truncates that to
+    // 70 characters, but the export doesn't need to.
+    const exportRows = [...s.dateMismatchGroups, ...s.failureGroups, ...s.pendingGroups]
+      .flatMap(g => g.items.map(it => [it.capperName || '', it.sport || '', it.label || '', it.reason || '']));
+    if (exportRows.length) {
+      html += `<button type="button" id="automationExportCsvBtn" data-export-json="${escapeHtml(JSON.stringify(exportRows))}" data-export-label="${escapeHtml(label)}" style="font-family:inherit;font-size:11px;padding:4px 10px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;margin-bottom:10px;">&#8681; Export these ${exportRows.length} to CSV</button>`;
+    }
     if (activeDateMismatchCount) {
       // Shown FIRST, ahead of failures -- these already wrote a real
       // game_start_time and would otherwise look like a clean success,
@@ -8982,6 +8998,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         dismissAutomationFlags(btn.dataset.pickId, [btn.dataset.category], btn, () => removeAutomationRow(row));
       });
     });
+    // Export-just-these-rows button (automationResultSummaryHtml above) --
+    // the row data is embedded on the button itself as JSON since this
+    // function only ever gets a DOM container to wire, not the original
+    // JS objects that built it.
+    const exportBtn = container.querySelector('#automationExportCsvBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        const rows = JSON.parse(exportBtn.dataset.exportJson);
+        const label = exportBtn.dataset.exportLabel || 'flagged picks';
+        const safeName = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        downloadCsv(`${safeName || 'automation-export'}.csv`, ['Capper', 'Sport', 'Pick', 'Issue'], rows);
+      });
+    }
   }
   window.wireDismissButtons = wireDismissButtons;
 
@@ -16552,7 +16581,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 323; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 324; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
