@@ -6676,15 +6676,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // there's no schedule-sync issue, since a pick is essentially never
       // stuck on BOTH at once -- prefixed so it's clear which system
       // flagged it, rather than reading as an unexplained schedule note.
-      // _legDateMismatch (set by the Missing Data "Parlay leg date mismatch"
-      // check, findMissingData()) is the lowest-priority fallback here --
-      // a pick is essentially never stuck on this AND a real schedule-sync
-      // or grading issue at once, and when it is, those are the more
+      // _legDateMismatch / _parlayLinkStatus (set by findMissingData(), see
+      // its own comment) are the lowest-priority fallbacks here -- a pick
+      // is essentially never stuck on one of these AND a real schedule-
+      // sync or grading issue at once, and when it is, those are the more
       // specific, more actionable facts to show first.
+      // CONFIRMED REAL GAP, direct report 2026-08-22: "how would I
+      // validate that these are actually parlays... without looking them
+      // up one by one." _parlayLinkStatus now shows a plain confirmation
+      // either way -- which real parlay a genuine leg belongs to, or a
+      // clear warning that a leg-flagged pick isn't actually linked to
+      // one (a real, confirmed case this same day) -- right in this same
+      // column, no separate lookup needed per row.
       const syncNoteCell = p.schedule_sync_note
         ? escapeHtml(p.schedule_sync_note)
         : (p.grading_note ? `Grading: ${escapeHtml(p.grading_note)}`
-          : (p._legDateMismatch ? `&#9888; This leg's own event date doesn't match its parlay's date (${escapeHtml(p._legParentEventDate)}) -- the parlay can't grade until they match.` : '—'));
+          : (p._legDateMismatch ? `&#9888; This leg's own event date doesn't match its parlay's date (${escapeHtml(p._legParentEventDate)}) -- the parlay can't grade until they match.`
+            : (p._parlayLinkStatus === 'orphaned' ? `&#9888; Flagged as a parlay leg, but no real parlay link exists -- likely a stale flag, not an actual parlay.`
+              : (p._parlayLinkStatus === 'linked' ? `&#10003; Real leg of: ${escapeHtml(p._legParentSelection || '(parlay)')}` : '—'))));
       // Player name is a live input for Prop picks, same reasoning and same
       // pattern as the Selection input above -- direct request: a misspelled
       // name (e.g. "Bo Bichettte") is one of the most common corrections
@@ -13352,28 +13361,56 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // synchronous -- it's re-run client-side every time a checkbox is
       // toggled inside the results pop-out) since it needs its own
       // parlay_legs + parent-picks round trip. Only ever runs against picks
-      // already fetched as candidates above (is_parlay_leg=true when this
-      // check is on), so this is bounded by however many legs matched the
-      // existing capper/sport/date/status filters, not the whole table.
-      if (checkLegDateMismatch) {
-        const legIds = picks.filter(p => p.is_parlay_leg).map(p => p.id);
-        if (legIds.length) {
-          const links = await restAllPages(`parlay_legs?select=leg_pick_id,parlay_pick_id&leg_pick_id=in.(${legIds.join(',')})`);
-          const parentIds = [...new Set(links.map(l => l.parlay_pick_id))];
-          if (parentIds.length) {
-            const parents = await restAllPages(`picks?select=id,event_date&id=in.(${parentIds.join(',')})`);
-            const parentDateById = {};
-            parents.forEach(pr => { parentDateById[pr.id] = pr.event_date; });
-            const parentIdByLeg = {};
-            links.forEach(l => { parentIdByLeg[l.leg_pick_id] = l.parlay_pick_id; });
-            picks.forEach(p => {
-              const parentId = parentIdByLeg[p.id];
-              const parentDate = parentId !== undefined ? parentDateById[parentId] : undefined;
-              p._legDateMismatch = !!(parentDate && parentDate !== p.event_date);
-              if (p._legDateMismatch) p._legParentEventDate = parentDate;
-            });
-          }
+      // already fetched as candidates above, so this is bounded by however
+      // many legs matched the existing capper/sport/date/status filters,
+      // not the whole table.
+      //
+      // CONFIRMED REAL GAP, direct report 2026-08-22: "the missing data
+      // tool showed me all legs and no parlays. How would I validate that
+      // these are actually parlays... without looking them up one by
+      // one." A leg's own opening_odds/closing_odds are ALWAYS null by
+      // design (see the Bulk mark parlay odds unavailable tool's own
+      // v335 comment) -- so an ordinary odds-focused Missing Data search
+      // naturally surfaces every leg in range, with no way to tell a
+      // genuine leg of a real parlay from a stale is_parlay_leg flag on a
+      // pick that isn't really part of one (a real, confirmed case this
+      // same day -- two orphaned legs found by direct SQL trace). This
+      // lookup used to only run when "Parlay leg date mismatch" was
+      // specifically checked -- now runs whenever ANY leg-flagged pick is
+      // present in the results at all, regardless of which checkbox
+      // brought it in, and always computes a plain linked/orphaned status
+      // (not just the date-mismatch case) so it's visible on every
+      // relevant search, not one narrow purpose-built one.
+      const legIdsForLinkCheck = picks.filter(p => p.is_parlay_leg).map(p => p.id);
+      if (legIdsForLinkCheck.length) {
+        const links = await restAllPages(`parlay_legs?select=leg_pick_id,parlay_pick_id&leg_pick_id=in.(${legIdsForLinkCheck.join(',')})`);
+        const parentIdByLeg = {};
+        links.forEach(l => { parentIdByLeg[l.leg_pick_id] = l.parlay_pick_id; });
+        const parentIds = [...new Set(links.map(l => l.parlay_pick_id))];
+        let parentById = {};
+        if (parentIds.length) {
+          const parents = await restAllPages(`picks?select=id,event_date,selection&id=in.(${parentIds.join(',')})`);
+          parents.forEach(pr => { parentById[pr.id] = pr; });
         }
+        picks.forEach(p => {
+          if (!p.is_parlay_leg) return;
+          const parentId = parentIdByLeg[p.id];
+          const parent = parentId !== undefined ? parentById[parentId] : undefined;
+          if (!parentId || !parent) {
+            // Covers BOTH real failure modes found this day: no
+            // parlay_legs row at all, or one that points at a parent
+            // pick that no longer exists -- either way, this leg isn't
+            // genuinely tied to a real parlay right now.
+            p._parlayLinkStatus = 'orphaned';
+          } else {
+            p._parlayLinkStatus = 'linked';
+            p._legParentSelection = parent.selection;
+            if (checkLegDateMismatch) {
+              p._legDateMismatch = !!(parent.event_date && parent.event_date !== p.event_date);
+              if (p._legDateMismatch) p._legParentEventDate = parent.event_date;
+            }
+          }
+        });
       }
 
       const checkedIds = MD_CHECKBOX_IDS.filter(id => $(id).checked);
@@ -16918,7 +16955,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 335; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 336; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
