@@ -5662,7 +5662,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // checkbox. Flagging it here would just be wrong on every single row.
   function missingFieldsSummary(p, sportName, betTypeName, isProp) {
     const missing = [];
-    if (!p.odds_unavailable) {
+    // Direct report 2026-08-22: a leg's own opening_odds/closing_odds are
+    // ALWAYS null by design -- only the PARENT parlay pick ever carries
+    // the real combined price (see the Bulk mark parlay odds unavailable
+    // tool's own v335 comment). Flagging a leg as "missing odds" was
+    // never a real gap, same "not a real gap" treatment as the
+    // is_parlay_leg exclusion already applied to Unit size just below.
+    if (!p.odds_unavailable && !p.is_parlay_leg) {
       if (p.opening_odds === null || p.opening_odds === undefined) missing.push('Opening odds');
       if (p.closing_odds === null || p.closing_odds === undefined) missing.push('Closing odds');
     }
@@ -13228,8 +13234,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const sportName = p.sports ? p.sports.name : '';
       const betTypeName = p.bet_types ? p.bet_types.name : '';
       const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
-      if (has('mdCheckClosing') && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
-      if (has('mdCheckOpening') && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+      // Direct report 2026-08-22: a leg's own opening_odds/closing_odds
+      // are ALWAYS null by design -- only the PARENT parlay pick ever
+      // carries the real combined price (see the Bulk mark parlay odds
+      // unavailable tool's own v335 comment). Flagging a leg as "missing
+      // odds" was never a real gap, same is_parlay_leg exclusion already
+      // used for Unit size just below.
+      if (has('mdCheckClosing') && !p.odds_unavailable && !p.is_parlay_leg && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+      if (has('mdCheckOpening') && !p.odds_unavailable && !p.is_parlay_leg && (p.opening_odds === null || p.opening_odds === undefined)) return true;
       if (has('mdCheckHomeAway') && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
       // CONFIRMED REAL BUG (found 2026-08-14), direct report: parlay legs
       // were showing up as individually-editable rows needing Unit size,
