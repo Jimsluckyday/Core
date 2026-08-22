@@ -112,6 +112,21 @@ function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
 }
 
+// Direct request 2026-08-22, following a real case (New York Yankees @
+// Boston Red Sox, 2026-06-06, confirmed postponed via ESPN's own
+// scoreboard): a postponed or canceled game will never become final on
+// its original event_date, so leaving it in "not final yet, check back
+// later" is actively misleading -- it will NEVER resolve that way,
+// unlike a genuinely in-progress or not-yet-started game. Standard
+// sportsbook convention for a game that doesn't complete is "no action"
+// -- void the bet, grade it push, don't hold it as pending or lose it as
+// a loss. Baseball postpones frequently (rainouts), so this is worth
+// handling automatically rather than something to notice by digging into
+// ESPN by hand each time.
+function isVoidGameStatus(statusName: string | null | undefined): boolean {
+  return statusName === 'STATUS_POSTPONED' || statusName === 'STATUS_CANCELED';
+}
+
 // CONFIRMED FIX, ported from validate-nba-player-txt/validate-wnba-player-txt
 // (same real-world failure, same real fix): a bare fetch() to ESPN sends no
 // User-Agent header at all, which is a known trigger for an API's bot-
@@ -604,9 +619,13 @@ Deno.serve(async (req) => {
       // games (rare, but real) must never be silently guessed.
       let foundInAnyGame = false;
       let foundInNotFinalGame = false;
+      let foundInVoidedGame = false;
       const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching'; displayName: string }[] = [];
       for (const g of games) {
         const completed = !!(g.status && g.status.type && g.status.type.completed);
+        // Same postponed/canceled distinction as the team-game grading
+        // path above -- see isVoidGameStatus's own comment.
+        const gStatusName: string | null = (g.status && g.status.type && g.status.type.name) || null;
         const box = await fetchBoxscore(espnPath, g.id, boxCache);
         if (!box || !box.players) continue;
         box.players.forEach((teamBlock: any) => {
@@ -632,7 +651,11 @@ Deno.serve(async (req) => {
               const surnameNorm = nameTokens.length ? normalize(nameTokens[nameTokens.length - 1]) : '';
               if (displayNorm === playerNorm || (shortNorm && shortNorm === playerNorm) || (surnameNorm && surnameNorm === playerNorm)) {
                 foundInAnyGame = true;
-                if (!completed) { foundInNotFinalGame = true; return; }
+                if (!completed) {
+                  if (isVoidGameStatus(gStatusName)) foundInVoidedGame = true;
+                  else foundInNotFinalGame = true;
+                  return;
+                }
                 allMatches.push({
                   stats: a.stats, keys: sg.keys, displayName: rawDisplayName,
                   group: (sportNorm === 'mlb' && sgIdx === 1) ? 'pitching' : 'batting'
@@ -645,6 +668,12 @@ Deno.serve(async (req) => {
 
       if (!foundInAnyGame) {
         return { grade: null, note: `No player named "${pick.prop_player}" found in any ${sportNorm.toUpperCase()} box score on this date -- check spelling, or needs manual grading.` };
+      }
+      // Same postponed/canceled push as the team-game grading path above
+      // -- see isVoidGameStatus's own comment. Checked before the plain
+      // not-final case since a voided game will never reach "final."
+      if (allMatches.length === 0 && foundInVoidedGame) {
+        return { grade: 'push', note: null };
       }
       if (allMatches.length === 0 && foundInNotFinalGame) {
         return { grade: null, note: 'Matched to a game today, but ESPN has not marked it final yet -- check back later.', notFinal: true };
@@ -816,6 +845,13 @@ Deno.serve(async (req) => {
           const homeV = variantsFor(home);
           const awayV = variantsFor(away);
           const completed = !!(e.status && e.status.type && e.status.type.completed);
+          // Raw ESPN status name (e.g. STATUS_POSTPONED, STATUS_CANCELED),
+          // kept separate from the synthesized STATUS_FINAL/NOT_FINAL
+          // event_status below -- that synthesized value only ever
+          // distinguishes done-vs-not-done, which collapses "genuinely
+          // in progress" and "postponed, will never finish on this date"
+          // into the same bucket. See isVoidGameStatus's own comment.
+          const rawStatusName: string | null = (e.status && e.status.type && e.status.type.name) || null;
           const matchup = (home && away) ? `${away.team.displayName} @ ${home.team.displayName}` : 'unknown matchup';
 
           // Reshaped to match grade_picks's own score object exactly
@@ -842,7 +878,8 @@ Deno.serve(async (req) => {
             event_id: e.id,
             variants: [homeV, awayV].filter(Boolean),
             matchup,
-            score
+            score,
+            statusName: rawStatusName
           };
         });
 
@@ -879,7 +916,7 @@ Deno.serve(async (req) => {
         // surnames) is detected and flagged as ambiguous rather than
         // silently resolved to whichever fighter registered first.
         const isMma = normalize(ourSport.name) === 'mma';
-        type FighterEntry = { displayName: string; opponentName: string; matchup: string; completed: boolean; winner: boolean | null; ambiguous?: boolean };
+        type FighterEntry = { displayName: string; opponentName: string; matchup: string; completed: boolean; voided: boolean; winner: boolean | null; ambiguous?: boolean };
         const fighterLookup = new Map<string, FighterEntry>();
         const fighterDisplayNames: string[] = [];
         if (isMma) {
@@ -908,6 +945,11 @@ Deno.serve(async (req) => {
               const competitors = comp.competitors || [];
               if (competitors.length !== 2) continue; // safety: a real bout is exactly 2 fighters
               const completed = !!(comp.status && comp.status.type && comp.status.type.completed);
+              // Same postponed/canceled push as the team-game grading
+              // path above -- see isVoidGameStatus's own comment. A
+              // pulled-out fighter/canceled bout is the MMA equivalent of
+              // a rained-out baseball game.
+              const compStatusName: string | null = (comp.status && comp.status.type && comp.status.type.name) || null;
               const [a, b] = competitors;
               const nameA = a.athlete && a.athlete.displayName;
               const nameB = b.athlete && b.athlete.displayName;
@@ -916,6 +958,7 @@ Deno.serve(async (req) => {
               const registerFighter = (name: string, opponent: string, winnerVal: any) => {
                 const entry: FighterEntry = {
                   displayName: name, opponentName: opponent, matchup, completed,
+                  voided: isVoidGameStatus(compStatusName),
                   winner: typeof winnerVal === 'boolean' ? winnerVal : null
                 };
                 registerKey(normalize(name), entry);
@@ -1053,6 +1096,11 @@ Deno.serve(async (req) => {
               continue;
             }
             if (!entry.completed) {
+              if (entry.voided) {
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: entry.matchup });
+                continue;
+              }
               sportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: entry.matchup, reason: `Matched to ${entry.matchup}, but ESPN has not marked this fight final yet -- not a name-matching issue, check back later.` });
               continue;
             }
@@ -1120,6 +1168,23 @@ Deno.serve(async (req) => {
 
           const game = candidateGames[0];
           if (!game.score || game.score.event_status !== 'STATUS_FINAL') {
+            // Direct report 2026-08-22 (real case: New York Yankees @
+            // Boston Red Sox, 2026-06-06, confirmed postponed via ESPN's
+            // own scoreboard): a postponed/canceled game will never
+            // become final on this event_date, so "check back later"
+            // (the ordinary not-final message below) is actively wrong
+            // here -- push it now, standard no-action sportsbook
+            // convention, instead of leaving it stuck pending forever or
+            // requiring someone to dig into ESPN by hand to notice.
+            // Applies uniformly here (before the bet-type-specific grade
+            // branches below) since a void game voids every bet type on
+            // it, not just Moneyline.
+            if (isVoidGameStatus(game.statusName)) {
+              const voidNote = `ESPN marked this game ${game.statusName === 'STATUS_POSTPONED' ? 'postponed' : 'canceled'} (${game.matchup}) -- graded push, no action, since it never completed on ${targetDate}.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+              sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: game.matchup, note: voidNote });
+              continue;
+            }
             // CONFIRMED REAL GAP, direct report 2026-08-22: "did it have an
             // issue with the team name?" -- this branch only runs AFTER a
             // real, unique game match already succeeded (candidateGames.length

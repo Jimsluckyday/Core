@@ -33,6 +33,21 @@ function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
 }
 
+// Direct request 2026-08-22, following a real case in grade_picks_espn_
+// backfill (New York Yankees @ Boston Red Sox, 2026-06-06, confirmed
+// postponed via ESPN's own scoreboard) -- same fix ported here for
+// consistency. A postponed or canceled game will never become final on
+// its original event_date, so leaving it in "not final yet" is actively
+// misleading. Standard sportsbook convention for a game that doesn't
+// complete is "no action" -- push it, don't hold it pending or lose it
+// as a loss. game.score.event_status here is TheRundown's own raw
+// status string (unlike the ESPN backfill version, which has to
+// synthesize STATUS_FINAL/NOT_FINAL from a completed boolean), so no
+// extra field is needed to check it.
+function isVoidGameStatus(statusName: string | null | undefined): boolean {
+  return statusName === 'STATUS_POSTPONED' || statusName === 'STATUS_CANCELED';
+}
+
 Deno.serve(async (req) => {
   // The browser sends a CORS preflight OPTIONS request before the real
   // POST -- it must get a quick, successful response with the CORS headers
@@ -355,6 +370,14 @@ Deno.serve(async (req) => {
 
           const game = candidateGames[0];
           if (!game.score || game.score.event_status !== 'STATUS_FINAL') {
+            // See isVoidGameStatus's own comment -- a postponed/canceled
+            // game voids every bet type on it, graded push instead of
+            // left stuck pending forever.
+            if (isVoidGameStatus(game.score && game.score.event_status)) {
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+              sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: game.matchup });
+              continue;
+            }
             sportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: game.matchup });
             continue;
           }
