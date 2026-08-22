@@ -8931,12 +8931,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const dismissBtnHtml = category
         ? `<button type="button" class="dismiss-automation-btn" data-pick-id="${it.id}" data-category="${escapeHtml(category)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;white-space:nowrap;">Mark resolved</button>`
         : '';
+      // Direct request 2026-08-22: "I can see some of these failures but
+      // it's going to take some work to find and resolve... instead of me
+      // having to go find a separate tool, run the date then find the
+      // capper then look for the specific one." Opens the exact pick this
+      // row is about in the same editable "All Picks" table already used
+      // everywhere else, no date/capper/sport filters to set up by hand
+      // first. For a Parlay leg specifically, opens the PARENT parlay
+      // instead (see openAutomationPickEditor) so the "▾ legs" toggle
+      // already built into that table -- direct request: "I would need to
+      // see all legs to see if it's one leg that wasn't resolved or the
+      // entire parlay" -- shows every leg together in context, not just
+      // the one that happened to be flagged.
+      const editBtnHtml = it.id
+        ? `<button type="button" class="edit-automation-btn" data-pick-id="${it.id}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;">Edit</button>`
+        : '';
       html += `<tr data-capper-name="${escapeHtml(it.capperName || '')}">
         <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;" class="automation-capper-cell">${capperCellHtml}</td>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
         <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
         <td style="padding:3px 8px 3px 0;color:#55584d;vertical-align:top;" title="${escapeHtml(it.reason || '')}">${escapeHtml(shortReason)}</td>
-        <td style="padding:3px 0;vertical-align:top;text-align:right;">${dismissBtnHtml}</td>
+        <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${editBtnHtml}${dismissBtnHtml}</td>
       </tr>`;
     });
     return html + '</table>';
@@ -9143,10 +9158,48 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
   window.removeAutomationRow = removeAutomationRow;
 
-  // Delegated wiring for the "Mark resolved" buttons automationGroupListHtml
-  // renders -- called after every (re)render in both this tab and the "All
-  // Picks" pop-out (via op.wireDismissButtons(...), since the actual
-  // dismissAutomationFlags call needs this tab's authenticated rest()).
+  // Same select list buildPicksFilterQuery uses for the "All Picks" table
+  // -- every field allPicksRowsToHtml reads, plus is_parlay_leg (needed
+  // here to detect a leg and redirect to its parent, see below).
+  const AUTOMATION_PICK_EDIT_SELECT = 'id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,grading_status,grading_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,is_parlay_leg,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)';
+
+  // Direct request 2026-08-22: "add a button to edit them or take me to
+  // where they are instead of me having to go find a separate tool, run
+  // the date then find the capper then look for the specific one." Opens
+  // the exact flagged pick in the same editable "All Picks" table used
+  // everywhere else -- no filters to set up first. A failing LEG on its
+  // own has no useful context, so this opens its PARENT parlay instead --
+  // direct request: "I would need to see all legs to see if it's one leg
+  // that wasn't resolved or the entire parlay" -- the "▾ legs" toggle
+  // already built into allPicksRowsToHtml then shows every leg together.
+  async function openAutomationPickEditor(pickId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Opening...'; }
+    try {
+      const rows = await rest(`picks?id=eq.${pickId}&select=${AUTOMATION_PICK_EDIT_SELECT}`);
+      let pick = rows && rows[0];
+      if (!pick) throw new Error('Pick not found -- it may have been deleted.');
+      if (pick.is_parlay_leg) {
+        const parentLinks = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${pickId}`);
+        const parentId = parentLinks && parentLinks[0] && parentLinks[0].parlay_pick_id;
+        if (parentId) {
+          const parentRows = await rest(`picks?id=eq.${parentId}&select=${AUTOMATION_PICK_EDIT_SELECT}`);
+          if (parentRows && parentRows[0]) pick = parentRows[0];
+        }
+      }
+      await openAllPicksTab([pick], `Editing: ${pick.cappers ? pick.cappers.name : 'unknown capper'} — ${pick.selection}`, undefined, undefined, false);
+    } catch (e) {
+      alert('Could not open this pick: ' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Edit'; }
+    }
+  }
+  window.openAutomationPickEditor = openAutomationPickEditor;
+
+  // Delegated wiring for the "Mark resolved"/"Edit" buttons
+  // automationGroupListHtml renders -- called after every (re)render in
+  // both this tab and the "All Picks" pop-out (via
+  // op.wireDismissButtons(...), since both dismissAutomationFlags and
+  // openAutomationPickEditor need this tab's authenticated rest()).
   function wireDismissButtons(container) {
     if (!container) return;
     container.querySelectorAll('.dismiss-automation-btn').forEach(btn => {
@@ -9154,6 +9207,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const row = btn.closest('tr');
         dismissAutomationFlags(btn.dataset.pickId, [btn.dataset.category], btn, () => removeAutomationRow(row));
       });
+    });
+    container.querySelectorAll('.edit-automation-btn').forEach(btn => {
+      btn.addEventListener('click', () => openAutomationPickEditor(btn.dataset.pickId, btn));
     });
     // Export-just-these-rows button (automationResultSummaryHtml above) --
     // the row data is embedded on the button itself as JSON since this
