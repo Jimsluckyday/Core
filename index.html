@@ -8623,13 +8623,25 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // since it isn't hardcoded to one specific path through the object.
   function summarizeAutomationResult(data) {
     const SUCCESS_KEYS = new Set(['matched', 'resolved', 'graded']);
-    const FAILURE_KEYS = new Set(['unmatched', 'unresolved', 'ambiguous', 'unsupported_bet_type', 'unsupported', 'bulk_fillable', 'needs_real_odds']);
-    const PENDING_KEYS = new Set(['not_final_yet', 'pending']);
+    // CONFIRMED REAL GAP, direct report 2026-08-22: "anything we can use
+    // to understand failures is needed... I also don't see KBO or MMA."
+    // still_pending/errors are grade_picks_espn_backfill's own parlay
+    // rollup keys (see its own comment, ~line 947) -- real data that was
+    // silently invisible here before, not because it wasn't being
+    // returned, but because these exact key names were never recognized.
+    const FAILURE_KEYS = new Set(['unmatched', 'unresolved', 'ambiguous', 'unsupported_bet_type', 'unsupported', 'bulk_fillable', 'needs_real_odds', 'errors']);
+    const PENDING_KEYS = new Set(['not_final_yet', 'pending', 'still_pending']);
 
     let successCount = 0, failureCount = 0, pendingCount = 0, dateMismatchCount = 0;
     const failureGroups = [];
     const pendingGroups = [];
     const dateMismatchGroups = [];
+    // sports_skipped (grade_picks_espn_backfill and schedule-sync-backfill
+    // both emit this: {sport, reason} per sport, no per-pick id at all --
+    // "KBO/MMA don't even show up" was this: real data, just never
+    // recognized by the generic id-based item-array handling below, so it
+    // needs its own explicit check rather than fitting the same pattern.
+    const skippedSports = [];
     const runDate = data && data.date;
 
     function itemLabel(item) {
@@ -8644,6 +8656,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const val = node[key];
         if (!Array.isArray(val)) {
           if (val && typeof val === 'object') walk(val, sport);
+          return;
+        }
+        if (key === 'sports_skipped') {
+          val.forEach(it => { if (it && it.sport) skippedSports.push({ sport: it.sport, reason: it.reason || '' }); });
           return;
         }
         const isItemArray = val.length && val[0] && typeof val[0] === 'object' && ('id' in val[0]);
@@ -8698,10 +8714,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     walk(data, null);
 
+    // Dedup by sport name -- schedule-sync-backfill/grade_picks_espn_backfill
+    // can report the same skipped sport more than once across whatever
+    // internal sub-calls produced this run's combined JSON.
+    const seenSkipped = new Set();
+    const uniqueSkippedSports = skippedSports.filter(s => {
+      if (seenSkipped.has(s.sport)) return false;
+      seenSkipped.add(s.sport);
+      return true;
+    });
+
     return {
       totalChecked: successCount + failureCount + pendingCount + dateMismatchCount,
       successCount, failureCount, pendingCount, dateMismatchCount,
-      failureGroups, pendingGroups, dateMismatchGroups
+      failureGroups, pendingGroups, dateMismatchGroups, skippedSports: uniqueSkippedSports
     };
   }
   window.summarizeAutomationResult = summarizeAutomationResult;
@@ -8855,6 +8881,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     if (enrichError) {
       html += `<div style="font-size:11px;color:#8a2f3a;margin-bottom:8px;">&#9888; Could not load capper names: ${escapeHtml(enrichError)}</div>`;
+    }
+    // CONFIRMED REAL GAP, direct report 2026-08-22: "I don't see KBO or
+    // MMA... those should have hit this showing not updated should it
+    // not?" They were never even attempted -- no ESPN scoreboard mapping
+    // exists for these sports in this specific tool -- and that fact WAS
+    // already coming back in the raw JSON (sports_skipped), just never
+    // surfaced here before now (see summarizeAutomationResult's own
+    // comment on skippedSports). One line, not a per-pick table -- there's
+    // nothing per-pick to show, the entire sport was never checked at all.
+    if (s.skippedSports.length) {
+      const bySameReason = {};
+      s.skippedSports.forEach(sk => { (bySameReason[sk.reason] = bySameReason[sk.reason] || []).push(sk.sport); });
+      const lines = Object.keys(bySameReason).map(reason => `${escapeHtml(bySameReason[reason].join(', '))}${reason ? ' — ' + escapeHtml(reason) : ''}`);
+      html += `<div style="font-size:11px;color:#55584d;margin-bottom:8px;">Not checked at all (no picks even looked at): ${lines.join('; ')}</div>`;
     }
     // CONFIRMED REAL BUG, direct report 2026-08-22, live screenshot: "I
     // clicked export to csv so we could work through them and it gave me
@@ -16629,7 +16669,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 327; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 328; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
