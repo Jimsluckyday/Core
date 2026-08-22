@@ -922,6 +922,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div class="checkbox-row">
           <span id="pickPublishedStatus" style="font-size:12px;color:var(--ink-soft);">Not published.</span>
           <button type="button" class="ghost small" id="unpublishFromEditBtn" style="display:none;margin-left:10px;">Unpublish this pick</button>
+          <button type="button" class="ghost small" id="clearAutomationFlagsBtn" style="display:none;margin-left:10px;" title="Stops this pick from showing up as a failure/pending item in Find & Update Teams/Tournaments, Pick Info, Results, and Golf Results -- for a pick you've already checked and confirmed is correct as-is, or fixed here and don't need to see flagged again.">Mark reviewed -- stop flagging in automation checks</button>
         </div>
       </div>
       <div style="font-size:10px;color:var(--ink-soft);margin-top:-8px;margin-bottom:10px;">
@@ -4824,6 +4825,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickRawUnitSize').value = '';
     $('pickPublishedStatus').textContent = 'Not published.';
     $('unpublishFromEditBtn').style.display = 'none';
+    $('clearAutomationFlagsBtn').style.display = 'none';
     $('pickGameStartTime').value = '';
     $('pickScheduleSyncNote').textContent = '';
     $('pickParlayNumber').value = '';
@@ -4847,6 +4849,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
     } finally {
       btn.disabled = false;
     }
+  });
+
+  // CONFIRMED REQUEST, direct feedback 2026-08-22: "is there a button in
+  // the add picks where we edit... so if we do see something we make a
+  // change that we can click it there to eliminate the clumsy workflow of
+  // having to jump back and forth between tabs." The 4 automation tools'
+  // own "Mark resolved" buttons (automationGroupListHtml above) only know
+  // which ONE category they belong to, since that's all the tool that
+  // flagged them was checking. This form has no reliable way to know
+  // which of the 4 categories currently apply to whichever pick is open
+  // (that's only ever known transiently, from the last time one of the 4
+  // tools was run) -- so rather than guess, or require a second query per
+  // edit just to find out, this clears all 4 at once. Safe either way:
+  // dismissing a category that was never actually flagged for this pick
+  // is a no-op the next time that tool runs.
+  $('clearAutomationFlagsBtn').addEventListener('click', () => {
+    const btn = $('clearAutomationFlagsBtn');
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+    dismissAutomationFlags(id, AUTOMATION_CATEGORIES, btn, () => {
+      btn.textContent = 'Marked reviewed.';
+      btn.disabled = true;
+    });
   });
 
   async function enterPickEditMode(id) {
@@ -4952,6 +4977,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
       $('pickPublishedStatus').textContent = 'Not published.';
       $('unpublishFromEditBtn').style.display = 'none';
     }
+    // Reset in case a previous edit left this in its "Marked reviewed."/
+    // "Failed -- retry?" state from a different pick.
+    $('clearAutomationFlagsBtn').style.display = 'inline-block';
+    $('clearAutomationFlagsBtn').setAttribute('data-id', p.id);
+    $('clearAutomationFlagsBtn').disabled = false;
+    $('clearAutomationFlagsBtn').textContent = 'Mark reviewed -- stop flagging in automation checks';
+    $('clearAutomationFlagsBtn').style.borderColor = '';
+    $('clearAutomationFlagsBtn').style.color = '';
     $('propPlayer').value = p.prop_player || '';
     // FIX, confirmed root cause: setting pickSport.value programmatically
     // above does NOT fire a native "change" event, which is the ONLY thing
@@ -8752,30 +8785,35 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     wireDismissButtons($('automationResultsWrap'));
   }
 
-  // Writes this pick's id + the current tool's category into
+  const AUTOMATION_CATEGORIES = ['teams_tournaments', 'pick_info', 'results', 'golf_results'];
+
+  // Writes this pick's id + one or more category keys into
   // automation_dismissed_flags (a text[] column on picks) so future runs
-  // of that same tool stop flagging it -- see automationResultSummaryHtml
+  // of those tools stop flagging it -- see automationResultSummaryHtml
   // above for where that gets read back and filtered. Re-fetches the
   // current array fresh right before patching rather than trusting
   // whatever was on screen, since this is a manual, occasional click and
   // a stale read would just silently drop an unrelated dismissal from a
-  // different tool on the same pick.
-  async function dismissAutomationFlag(pickId, category, rowEl) {
-    const btn = rowEl ? rowEl.querySelector('.dismiss-automation-btn') : null;
+  // different tool on the same pick. Takes the actual button element
+  // (not a container to search inside) plus an onSuccess callback, since
+  // the two places this gets called from need different things to happen
+  // afterward (remove a table row vs. clear/hide the edit form's own note).
+  async function dismissAutomationFlags(pickId, categories, btn, onSuccess) {
     if (btn) { btn.disabled = true; btn.textContent = 'Marking...'; btn.style.opacity = '0.6'; }
     try {
       const rows = await rest(`picks?id=eq.${pickId}&select=automation_dismissed_flags`);
       const existing = (rows && rows[0] && rows[0].automation_dismissed_flags) || [];
-      if (!existing.includes(category)) {
-        await rest(`picks?id=eq.${pickId}`, { method: 'PATCH', body: JSON.stringify({ automation_dismissed_flags: [...existing, category] }) });
+      const merged = [...new Set([...existing, ...categories])];
+      if (merged.length !== existing.length) {
+        await rest(`picks?id=eq.${pickId}`, { method: 'PATCH', body: JSON.stringify({ automation_dismissed_flags: merged }) });
       }
-      if (rowEl) rowEl.remove();
+      if (onSuccess) onSuccess();
     } catch (e) {
       // CONFIRMED REAL BUG, direct report 2026-08-22: "I clicked mark
       // resolved but nothing happened... doesn't do anything to indicate
       // it's taken my update." alert() shows a dialog on whatever window
       // is running THIS code -- when this gets triggered from the "All
-      // Picks" pop-out's own button (via op.dismissAutomationFlag), this
+      // Picks" pop-out's own button (via op.dismissAutomationFlags), this
       // function still executes in the MAIN tab's realm (it's defined
       // there, only invoked through window.opener), so the alert() was
       // popping up on the tab the user wasn't even looking at -- the
@@ -8793,18 +8831,18 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       }
     }
   }
-  window.dismissAutomationFlag = dismissAutomationFlag;
+  window.dismissAutomationFlags = dismissAutomationFlags;
 
   // Delegated wiring for the "Mark resolved" buttons automationGroupListHtml
   // renders -- called after every (re)render in both this tab and the "All
   // Picks" pop-out (via op.wireDismissButtons(...), since the actual
-  // dismissAutomationFlag call needs this tab's authenticated rest()).
+  // dismissAutomationFlags call needs this tab's authenticated rest()).
   function wireDismissButtons(container) {
     if (!container) return;
     container.querySelectorAll('.dismiss-automation-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const row = btn.closest('tr');
-        dismissAutomationFlag(btn.dataset.pickId, btn.dataset.category, row);
+        dismissAutomationFlags(btn.dataset.pickId, [btn.dataset.category], btn, () => { if (row) row.remove(); });
       });
     });
   }
@@ -16318,7 +16356,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 317; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 318; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
