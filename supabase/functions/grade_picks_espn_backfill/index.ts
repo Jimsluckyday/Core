@@ -197,6 +197,33 @@ Deno.serve(async (req) => {
       return text ? JSON.parse(text) : null;
     }
 
+    // ADDED 2026-08-22, direct request: "matching once a pick is resolved
+    // so that gives us an accurate name as a wrong name wouldn't get
+    // resolved unless we do it manually... this process isn't about
+    // speed but accuracy." Deliberately only ever called from a spot
+    // where a pick JUST got successfully graded (a real player/fighter
+    // name that matched a real box score or fight card) -- never from
+    // Teams/Tournaments' own roster lookup, which confirms a name earlier
+    // but before the outcome is known. resolution=ignore-duplicates makes
+    // this a safe no-op once a name is already registered for this sport,
+    // no need to check first. Wrapped so a missing known_players table
+    // (migration not run yet) or any other failure here can NEVER surface
+    // as a grading failure -- the pick above this call already graded
+    // successfully and was already written; this is optional bookkeeping
+    // on top of that, not part of the real result.
+    async function registerKnownPlayer(sportId: string, name: string | null | undefined) {
+      if (!name) return;
+      try {
+        await db('known_players', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+          body: JSON.stringify({ sport_id: sportId, name })
+        });
+      } catch (_e) {
+        // Silently skip -- see comment above.
+      }
+    }
+
     let ourSports = await db(`sports?select=id,name`);
     if (sportFilter) ourSports = (ourSports || []).filter((s: any) => normalize(s.name) === normalize(sportFilter));
     if (!ourSports || !ourSports.length) {
@@ -485,7 +512,7 @@ Deno.serve(async (req) => {
 
     async function gradePlayerProp(
       pick: any, sportNorm: 'mlb' | 'wnba' | 'nba', espnPath: string, games: any[], boxCache: Record<string, any>
-    ): Promise<{ grade: 'win' | 'loss' | 'push' | null; note: string | null; notFinal?: boolean; unsupported?: boolean }> {
+    ): Promise<{ grade: 'win' | 'loss' | 'push' | null; note: string | null; notFinal?: boolean; unsupported?: boolean; matchedName?: string }> {
       const statNorm = normalize(pick.prop_stat || '');
       // Confirmed real finding (direct report): Total Bases can't be
       // computed from this box score at all -- see the long comment above
@@ -510,7 +537,7 @@ Deno.serve(async (req) => {
       // games (rare, but real) must never be silently guessed.
       let foundInAnyGame = false;
       let foundInNotFinalGame = false;
-      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching' }[] = [];
+      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching'; displayName: string }[] = [];
       for (const g of games) {
         const completed = !!(g.status && g.status.type && g.status.type.completed);
         const box = await fetchBoxscore(espnPath, g.id, boxCache);
@@ -540,7 +567,7 @@ Deno.serve(async (req) => {
                 foundInAnyGame = true;
                 if (!completed) { foundInNotFinalGame = true; return; }
                 allMatches.push({
-                  stats: a.stats, keys: sg.keys,
+                  stats: a.stats, keys: sg.keys, displayName: rawDisplayName,
                   group: (sportNorm === 'mlb' && sgIdx === 1) ? 'pitching' : 'batting'
                 });
               }
@@ -598,9 +625,17 @@ Deno.serve(async (req) => {
       if (!isOver && !isUnder) {
         return { grade: null, note: `Selection "${pick.selection}" isn't a recognized Over/Under call -- needs manual review.` };
       }
-      if (value === line) return { grade: 'push', note: null };
+      // allMatches[0] rather than the loop-scoped `row` above -- every
+      // entry in allMatches represents the SAME confirmed player (that's
+      // the whole point of the unique-match check above), so the first
+      // one's displayName is a safe, simple way to get ESPN's own
+      // canonical spelling back to the caller for known_players
+      // registration, regardless of which spec/group actually supplied
+      // the graded value.
+      const matchedName = allMatches[0] ? allMatches[0].displayName : pick.prop_player;
+      if (value === line) return { grade: 'push', note: null, matchedName };
       const won = isOver ? value > line : value < line;
-      return { grade: won ? 'win' : 'loss', note: null };
+      return { grade: won ? 'win' : 'loss', note: null, matchedName };
     }
 
     const overall = {
@@ -918,6 +953,7 @@ Deno.serve(async (req) => {
             }
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: result.grade, grading_status: 'graded', grading_note: null }) });
             sportResult.graded.push({ id: pick.id, selection: propLabel, result: result.grade });
+            await registerKnownPlayer(ourSport.id, result.matchedName || pick.prop_player);
             continue;
           }
 
@@ -950,6 +986,12 @@ Deno.serve(async (req) => {
             const grade = entry.winner ? 'win' : 'loss';
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
             sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade });
+            // Both fighters in this bout are now confirmed real (this
+            // exact fight just resolved on ESPN's own card) -- register
+            // the opponent too, not just whichever side this one pick
+            // happened to name, so a resolved bout seeds both names at once.
+            await registerKnownPlayer(ourSport.id, entry.displayName);
+            await registerKnownPlayer(ourSport.id, entry.opponentName);
             continue;
           }
 

@@ -794,7 +794,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
       <div class="row" id="propRow" style="display:none;">
         <div class="field">
           <label>Player <span style="color:var(--stamp-red);font-weight:bold;">*required for Player Props</span></label>
-          <input id="propPlayer" placeholder="e.g. Chad Dallas" />
+          <input id="propPlayer" list="propPlayerSuggestions" placeholder="e.g. Chad Dallas" />
+          <datalist id="propPlayerSuggestions"></datalist>
         </div>
         <div class="field">
           <label>Stat <span style="color:var(--stamp-red);font-weight:bold;">*required for Player Props</span></label>
@@ -3228,6 +3229,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // ---------- Main app: tournaments / events ----------
   let teams = [];
   let propStats = [];
+  // CONFIRMED direct request 2026-08-22: "matching once a pick is
+  // resolved so that gives us an accurate name... this process isn't
+  // about speed but accuracy." known_players is populated ONLY by
+  // grade_picks_espn_backfill, ONLY when a player prop or MMA pick
+  // actually finishes grading successfully -- never from typing a name
+  // in here, and never from Teams/Tournaments' own roster match (which
+  // confirms a name before the outcome is known, a weaker signal than a
+  // pick that actually resolved). This array is purely a read-only
+  // mirror of that table for the datalist below -- nothing here ever
+  // writes to known_players.
+  let knownPlayers = [];
 
   async function refreshTeams() {
     teams = await rest('teams?select=id,name,sport_id,sports(name)&order=name.asc');
@@ -3996,6 +4008,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     }
 
     updateSelectionDatalist();
+    updatePropPlayerDatalist();
     updateGolfPropSelectionField();
     updateMatchupFields();
   }
@@ -4378,6 +4391,31 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const teamNames = sportId ? teams.filter(t => String(t.sport_id) === String(sportId)).map(t => t.name) : [];
     const combined = [...new Set([...staticSuggestions, ...teamNames])];
     datalist.innerHTML = combined.map(s => `<option value="${escapeHtml(s)}"></option>`).join('');
+  }
+
+  // Same recipe as refreshTeams/updateSelectionDatalist above, applied to
+  // player/fighter names instead of teams -- see knownPlayers' own
+  // comment for what populates the underlying table and why.
+  async function refreshKnownPlayers() {
+    // Wrapped -- known_players is a brand-new table that needs a one-time
+    // migration run in Supabase; this must never block the rest of app
+    // init (refreshCappers/refreshSports/etc. run right alongside this)
+    // just because that migration hasn't happened yet on a given
+    // environment. Missing table just means no suggestions yet, not a
+    // broken app.
+    try {
+      knownPlayers = await rest('known_players?select=id,name,sport_id&order=name.asc');
+    } catch (e) {
+      console.warn('Could not load known_players (has the migration been run yet?):', e.message);
+      knownPlayers = [];
+    }
+    updatePropPlayerDatalist();
+  }
+  function updatePropPlayerDatalist() {
+    const datalist = $('propPlayerSuggestions');
+    const sportId = $('pickSport').value;
+    const names = sportId ? knownPlayers.filter(p => String(p.sport_id) === String(sportId)).map(p => p.name) : [];
+    datalist.innerHTML = names.map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
   }
 
   // ---------- Main app: save pick (add or edit) ----------
@@ -16744,13 +16782,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     await refreshSports();
     await refreshBetTypes();
     await refreshTeams();
+    await refreshKnownPlayers();
     await refreshPropStats();
     await refreshTournaments();
     await refreshPicksList();
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 331; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 332; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
