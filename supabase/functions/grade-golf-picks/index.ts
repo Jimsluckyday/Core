@@ -85,6 +85,19 @@
 // values above -- every other pick, sport, and bet type is completely
 // untouched.
 //
+// ADDED 2026-08-22, direct request: "Tennis cappers have a tendency to
+// use last name only a lot of the time... can this be applied to Golf?"
+// findCompetitor now matches by exact surname as a fallback after exact
+// full name, same discipline as grade_picks_espn_backfill's player-prop
+// and MMA matching -- and along the way, fixed a real pre-existing bug
+// in the OLD fallback here (a loose substring match with no check for a
+// SECOND golfer also containing that substring in a 150+ player field --
+// same class of collision already fixed elsewhere in this codebase for
+// team names). Also now registers any player confirmed by a successful
+// grade into known_players (shared with grade_picks_espn_backfill) --
+// only from a pick that actually resolved, never from the match alone,
+// so a wrong name can't get in without a human forcing it by hand.
+//
 // Call with: POST /grade-golf-picks?date=2026-08-14
 
 const corsHeaders = {
@@ -143,6 +156,27 @@ async function db(supabaseUrl: string, serviceRoleKey: string, path: string, opt
   if (res.status === 204) return null;
   const text = await res.text();
   return text ? JSON.parse(text) : null;
+}
+
+// ADDED 2026-08-22, same pattern/reasoning as grade_picks_espn_backfill's
+// own registerKnownPlayer (see that file's comment) -- only ever called
+// from a spot where a golf pick JUST resolved successfully, never from
+// the matching step alone, so a wrong name structurally can't get in
+// without a human forcing a grade by hand. Wrapped so a missing
+// known_players table (migration not run yet) or any other failure here
+// can never surface as a grading failure -- the pick above it already
+// graded and was already written.
+async function registerKnownPlayer(supabaseUrl: string, serviceRoleKey: string, sportId: number, name: string | null | undefined) {
+  if (!name) return;
+  try {
+    await db(supabaseUrl, serviceRoleKey, 'known_players', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify({ sport_id: sportId, name })
+    });
+  } catch (_e) {
+    // Silently skip -- see comment above.
+  }
 }
 
 // Parses ESPN's own to-par display format ("-11", "E", "+3") into a plain
@@ -226,20 +260,47 @@ Deno.serve(async (req) => {
     );
     const roundNumber = Math.round((pickDateUtcMidnight - tournamentStartUtcMidnight) / 86400000) + 1;
 
-    function findCompetitor(name: string) {
+    // CONFIRMED REAL BUG, found and fixed together with the surname
+    // feature below, direct request 2026-08-22: "Tennis cappers have a
+    // tendency to use last name only... can this be applied to Golf?"
+    // The OLD fallback here (cn.includes(norm) || norm.includes(cn)) was
+    // unsafe -- .find() stops at the FIRST substring match with no check
+    // for a SECOND golfer whose name also contains the same substring, a
+    // real risk in a 150+ player PGA Tour field (e.g. searching "Scott"
+    // loosely matches both "Adam Scott" and "Scottie Scheffler"),
+    // silently picking whichever one happens to come first instead of
+    // flagging the ambiguity -- the exact class of bug already fixed
+    // elsewhere in this codebase (Chicago Cubs/White Sox, Philadelphia/
+    // LA Dodgers substring collisions). Replaced with exact SURNAME
+    // match only, same safe discipline as grade_picks_espn_backfill's
+    // player-prop and MMA matching: collects EVERY surname match and
+    // returns ambiguous=true if more than one golfer shares a last name,
+    // rather than guessing.
+    function findCompetitor(name: string): { competitor: any | null; ambiguous: boolean } {
       const norm = normalize(name || '');
-      if (!norm) return null;
-      let hit = competitors.find((c: any) => normalize((c.athlete && c.athlete.displayName) || '') === norm);
-      if (!hit) hit = competitors.find((c: any) => {
-        const cn = normalize((c.athlete && c.athlete.displayName) || '');
-        return cn && (cn.includes(norm) || norm.includes(cn));
+      if (!norm) return { competitor: null, ambiguous: false };
+      const exact = competitors.filter((c: any) => normalize((c.athlete && c.athlete.displayName) || '') === norm);
+      if (exact.length === 1) return { competitor: exact[0], ambiguous: false };
+      if (exact.length > 1) return { competitor: null, ambiguous: true };
+      const bySurname = competitors.filter((c: any) => {
+        const displayName = (c.athlete && c.athlete.displayName) || '';
+        const tokens = displayName.trim().split(/\s+/);
+        const surname = tokens.length ? normalize(tokens[tokens.length - 1]) : '';
+        return surname && surname === norm;
       });
-      return hit || null;
+      if (bySurname.length === 1) return { competitor: bySurname[0], ambiguous: false };
+      if (bySurname.length > 1) return { competitor: null, ambiguous: true };
+      return { competitor: null, ambiguous: false };
     }
 
     for (const p of relevant) {
       const statNorm = normalize(p.prop_stat || '');
-      const backed = findCompetitor(p.prop_player);
+      const backedResult = findCompetitor(p.prop_player);
+      if (backedResult.ambiguous) {
+        result.unmatched.push({ id: p.id, prop_player: p.prop_player, reason: `"${p.prop_player}" matches more than one golfer's name/surname in this field -- needs manual review.` });
+        continue;
+      }
+      const backed = backedResult.competitor;
       if (!backed) {
         result.unmatched.push({ id: p.id, prop_player: p.prop_player, reason: `"${p.prop_player}" was not found in the field for this PGA Tour event.` });
         continue;
@@ -255,12 +316,18 @@ Deno.serve(async (req) => {
           method: 'PATCH', body: JSON.stringify({ result: won ? 'win' : 'loss' })
         });
         result.graded.push({ id: p.id, prop_player: p.prop_player, result: won ? 'win' : 'loss', finalOrder: backed.order });
+        await registerKnownPlayer(supabaseUrl, serviceRoleKey, golfSport.id, (backed.athlete && backed.athlete.displayName) || p.prop_player);
         continue;
       }
 
       // Round Matchup / Tournament Matchup both need the opponent, stored
       // in `selection` per this function's own header comment.
-      const opponent = findCompetitor(p.selection);
+      const opponentResult = findCompetitor(p.selection);
+      if (opponentResult.ambiguous) {
+        result.unmatched.push({ id: p.id, prop_player: p.prop_player, reason: `Opponent "${p.selection}" matches more than one golfer's name/surname in this field -- needs manual review.` });
+        continue;
+      }
+      const opponent = opponentResult.competitor;
       if (!opponent) {
         result.unmatched.push({ id: p.id, prop_player: p.prop_player, reason: `Opponent "${p.selection}" was not found in the field for this PGA Tour event.` });
         continue;
@@ -310,6 +377,11 @@ Deno.serve(async (req) => {
         method: 'PATCH', body: JSON.stringify({ result: outcome })
       });
       result.graded.push({ id: p.id, prop_player: p.prop_player, opponent: p.selection, scope: scopeLabel, backedVal, oppVal, result: outcome });
+      // Both golfers in this matchup are now confirmed real (this exact
+      // matchup just resolved) -- register both, not just whichever one
+      // this pick's prop_player happened to name.
+      await registerKnownPlayer(supabaseUrl, serviceRoleKey, golfSport.id, (backed.athlete && backed.athlete.displayName) || p.prop_player);
+      await registerKnownPlayer(supabaseUrl, serviceRoleKey, golfSport.id, (opponent.athlete && opponent.athlete.displayName) || p.selection);
     }
 
     return new Response(JSON.stringify(result), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
