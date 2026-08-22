@@ -883,37 +883,49 @@ Deno.serve(async (req) => {
         const fighterLookup = new Map<string, FighterEntry>();
         const fighterDisplayNames: string[] = [];
         if (isMma) {
+          const registerKey = (key: string, entry: FighterEntry) => {
+            const existing = fighterLookup.get(key);
+            if (existing && existing.displayName !== entry.displayName) {
+              fighterLookup.set(key, { ...existing, ambiguous: true });
+              return;
+            }
+            fighterLookup.set(key, entry);
+          };
           for (const e of games) {
-            const comp = e.competitions && e.competitions[0];
-            if (!comp) continue;
-            const competitors = comp.competitors || [];
-            if (competitors.length !== 2) continue; // safety: a real bout is exactly 2 fighters
-            const completed = !!(comp.status && comp.status.type && comp.status.type.completed);
-            const [a, b] = competitors;
-            const nameA = a.athlete && a.athlete.displayName;
-            const nameB = b.athlete && b.athlete.displayName;
-            if (!nameA || !nameB) continue;
-            const matchup = `${nameA} vs ${nameB}`;
-            const registerKey = (key: string, entry: FighterEntry) => {
-              const existing = fighterLookup.get(key);
-              if (existing && existing.displayName !== entry.displayName) {
-                fighterLookup.set(key, { ...existing, ambiguous: true });
-                return;
-              }
-              fighterLookup.set(key, entry);
-            };
-            const registerFighter = (name: string, opponent: string, winnerVal: any) => {
-              const entry: FighterEntry = {
-                displayName: name, opponentName: opponent, matchup, completed,
-                winner: typeof winnerVal === 'boolean' ? winnerVal : null
+            // CONFIRMED REAL BUG, direct investigation 2026-08-22: ESPN's
+            // UFC scoreboard nests EVERY bout on the card under ONE
+            // top-level "event" (the whole fight night) as
+            // e.competitions[] -- unlike every other sport here, where
+            // each event IS one single game. Reading only
+            // e.competitions[0] (the first bout listed) meant every other
+            // fighter on a multi-bout card was never registered at all --
+            // confirmed directly against a real card (UFC Fight Night:
+            // Muhammad vs. Bonfim, 2026-06-06, 12 bouts): only the
+            // first-listed bout (Ketlen Souza) graded, the other 11
+            // bouts' fighters were silently invisible to this lookup and
+            // stayed pending with no error or note.
+            for (const comp of (e.competitions || [])) {
+              const competitors = comp.competitors || [];
+              if (competitors.length !== 2) continue; // safety: a real bout is exactly 2 fighters
+              const completed = !!(comp.status && comp.status.type && comp.status.type.completed);
+              const [a, b] = competitors;
+              const nameA = a.athlete && a.athlete.displayName;
+              const nameB = b.athlete && b.athlete.displayName;
+              if (!nameA || !nameB) continue;
+              const matchup = `${nameA} vs ${nameB}`;
+              const registerFighter = (name: string, opponent: string, winnerVal: any) => {
+                const entry: FighterEntry = {
+                  displayName: name, opponentName: opponent, matchup, completed,
+                  winner: typeof winnerVal === 'boolean' ? winnerVal : null
+                };
+                registerKey(normalize(name), entry);
+                const surname = name.trim().split(/\s+/).pop();
+                if (surname && normalize(surname) !== normalize(name)) registerKey(normalize(surname), entry);
+                fighterDisplayNames.push(name);
               };
-              registerKey(normalize(name), entry);
-              const surname = name.trim().split(/\s+/).pop();
-              if (surname && normalize(surname) !== normalize(name)) registerKey(normalize(surname), entry);
-              fighterDisplayNames.push(name);
-            };
-            registerFighter(nameA, nameB, a.winner);
-            registerFighter(nameB, nameA, b.winner);
+              registerFighter(nameA, nameB, a.winner);
+              registerFighter(nameB, nameA, b.winner);
+            }
           }
         }
 
