@@ -7221,7 +7221,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           // Tennis/Soccer are handled separately below via schedule-sync-
           // backfill (they don't use prop_team at all -- individual/no-
           // team sports), so they're not real "unsupported" gaps here.
-          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)', reason: `No automated team/tournament lookup exists for ${sportName || 'this sport'} -- needs manual entry.` });
+          // CONFIRMED REAL BUG, direct report 2026-08-21, broke the whole
+          // page ("not connected", nothing loading): this exact line sits
+          // inside the "All Picks" pop-out's OWN giant template literal
+          // (built via win.document.write(`...`) further down in this same
+          // popout-generator function). A backtick-delimited template
+          // literal here PREMATURELY CLOSES that outer one the instant the
+          // parser reaches it, turning everything after it in the
+          // generator into code to be parsed instead of string content.
+          // String concatenation with single quotes instead -- the
+          // established safe pattern already used for the rest of this
+          // exact pop-out's own code (see e.g. the reason strings just
+          // above this one in the same function).
+          summary.unsupported.push({ id: p.id, player: p.prop_player, sport: sportName || '(unknown)', reason: 'No automated team/tournament lookup exists for ' + (sportName || 'this sport') + ' -- needs manual entry.' });
         }
       }
       for (const norm of Object.keys(bySportNorm)) {
