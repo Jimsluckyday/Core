@@ -1072,6 +1072,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div style="align-self:flex-end;">
               <button id="autoMissingOddsBtn">Find Missing Odds</button>
             </div>
+          </div>
+          <!-- Direct request 2026-08-22: "I can see a scenario where
+               someone forgets that you stop at finding the odds to then
+               publish the results... a good delineator that you've
+               finished looking for stuff now you need to publish your
+               work before updating the results." A plain horizontal
+               break plus this explicit stop-and-publish button sits
+               between the finding/fixing tools above and the
+               grading tools below, so the workflow reads as three
+               distinct steps instead of one undifferentiated row of
+               buttons someone could click straight through in order. -->
+          <div style="border-top:2px dashed var(--stamp-amber);margin:14px 0;padding-top:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+            <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;max-width:480px;">
+              &#9888; Stop here and publish before grading — once picks are live, come back and run "Find &amp; Update Results" below.
+            </div>
+            <button type="button" class="ghost" id="goPublishFromAutomationBtn" title="Doesn't rank or publish anything by itself -- just takes you to the Publish tab's own Rank Pending Picks tool.">Rank pending picks &rarr;</button>
+          </div>
+          <div class="row">
             <div style="align-self:flex-end;">
               <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
             </div>
@@ -8731,6 +8749,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const showing = panel.style.display !== 'none';
     panel.style.display = showing ? 'none' : 'block';
     $('toggleAutomationBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+  });
+
+  // Direct request 2026-08-22: a stop-and-publish delineator between the
+  // finding/fixing tools and the grading tools in Automation Tools --
+  // this doesn't rank or publish anything itself, it just switches to
+  // the Publish tab and opens/scrolls to its real "Rank pending picks"
+  // tool, so clicking through in order naturally lands you there instead
+  // of skipping straight to grading.
+  $('goPublishFromAutomationBtn').addEventListener('click', () => {
+    switchTab('publish');
+    const panel = $('publishRankPanel');
+    if (panel && panel.style.display === 'none') $('togglePublishRankBtn').click();
+    $('togglePublishRankBtn').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   // Direct request 2026-08-21: a raw JSON dump after running one of the 4
