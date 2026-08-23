@@ -984,6 +984,21 @@ Deno.serve(async (req) => {
         for (const pick of picks) {
           const betTypeName = pick.bet_types ? pick.bet_types.name : '';
           const betTypeNorm = normalize(betTypeName);
+          // Direct report 2026-08-22: "why is this coming up as a failure
+          // I didn't do anything to this pick." A Parlay parent isn't a
+          // single game with a score, so it can never be "supported" by
+          // this per-pick grader -- it's ALREADY handled correctly by the
+          // separate ?parlaysOnly=true rollup pass admin.html always runs
+          // right after this one. Silently skipping here (not even
+          // writing grading_status='unsupported') means it never shows up
+          // as a failure at all -- previously it fell through to the
+          // unsupported_bet_type bucket below on EVERY run, which is real
+          // but permanently uninformative noise: it always fires (nothing
+          // was ever wrong), and often self-resolves moments later within
+          // the SAME click once the rollup pass catches up, so a person
+          // opening the results would see a "failure" for something
+          // that's already correctly graded by the time they look at it.
+          if (betTypeNorm === 'parlay') continue;
           const hasSlash = pick.selection.includes('/');
 
           // Bet-type detection is now entirely name-based -- never

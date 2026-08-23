@@ -336,6 +336,16 @@ Deno.serve(async (req) => {
           }
           const betTypeName = pick.bet_types ? pick.bet_types.name : '';
           const betTypeNorm = normalize(betTypeName);
+          // Direct report 2026-08-22 (same fix as grade_picks_espn_
+          // backfill): a Parlay parent isn't a single game with a score,
+          // so it can never be "supported" by this per-pick grader --
+          // it's already handled correctly by the separate
+          // ?parlaysOnly=true rollup pass admin.html always runs right
+          // after this one. Silently skipping here means it never shows
+          // up as a failure at all, instead of permanently-uninformative
+          // noise that often self-resolves within the same click once
+          // the rollup pass catches up.
+          if (betTypeNorm === 'parlay') continue;
           const isTotal = pick.selection.includes('/');
           const isMoneyline = !isTotal && betTypeNorm === 'moneyline';
           const isSpread = !isTotal && betTypeNorm === 'spread';
