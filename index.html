@@ -16971,7 +16971,18 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         notes: row.notes || null,
         is_published: ['yes', 'true', '1'].includes((row.published || '').toLowerCase()),
         result: 'pending',
-        is_parlay_leg: !!parlayNumber
+        is_parlay_leg: !!parlayNumber,
+        // CONFIRMED REAL BUG, direct report 2026-08-22: "Import failed:
+        // All object keys must match." PostgREST's bulk insert builds
+        // one INSERT from the FIRST object's keys -- every row in the
+        // same POST must have the identical key set, or it rejects the
+        // whole batch. The import handler only added these two keys to
+        // rows WITH warnings, so a batch mixing warning and clean rows
+        // broke every time. Present on every row from the start (null
+        // when there's nothing to flag) so the key set is always
+        // uniform; only the VALUE gets overwritten for a warning row.
+        schedule_sync_status: null,
+        schedule_sync_note: null
       } : null
     };
   }
@@ -17082,7 +17093,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           is_published: false,
           result: 'pending',
           is_parlay_leg: false,
-          parlay_local_number: number
+          parlay_local_number: number,
+          // Kept in sync with validateBulkRow's own resolved shape (see
+          // its own comment on the "All object keys must match" bug) --
+          // this particular row is preview-only and never actually
+          // inserted directly, but keeping every resolved object's key
+          // set identical is the invariant that matters here.
+          schedule_sync_status: null,
+          schedule_sync_note: null
         }
       });
     }
