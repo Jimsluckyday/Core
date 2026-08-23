@@ -2246,6 +2246,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           Paste rows copied from a spreadsheet (or built in a chat) — first row must be column headers. <strong>Required: id</strong> only. <strong>Optional: result, event_date, event_name, line, opening_odds, closing_odds, line_flag, notes</strong> — only included columns get changed; anything left out is left alone. If <strong>result</strong> is included it must be exactly <code>win</code>, <code>loss</code>, or <code>push</code>, and marks the pick as manually graded — leave it blank entirely for an odds-only correction on a pick that's already graded (notes in that case are saved to the pick's own notes field instead, since grading wasn't touched). <strong>The line a capper gave us is always what we grade against, regardless of normal line movement between when the pick was sent and when it was researched</strong> — that's expected and never needs fixing. <strong>line</strong> should only ever be used for a genuine, obvious transcription error, and is rare; for the much more common "the line looks different than current research" situation, use <strong>line_flag</strong> (enter <code>yes</code>) instead — it doesn't change anything about the pick or hold up grading, it just adds it to the Flagged Lines list in Data Tools for an optional, unhurried look later. <strong>opening_odds / closing_odds</strong> are meant for a quick manual lookup (an AI chat search, Covers, Flashscore, or similar) when a pick's sport isn't covered by our own odds API, or historical odds are missing entirely — approximate is fine here, and if that pick is already published, this will correctly flow into the site's live win-rate and $100-per-bet totals the moment it's saved. Matching is by the exact pick <strong>id</strong>, never by name/date guessing, so there's no risk of updating the wrong pick.
         </div>
+        <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label for="gradingCorrectionsFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a CSV file directly (from this device, no copy/paste needed):</label>
+          <input type="file" id="gradingCorrectionsFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
+        </div>
         <textarea id="gradingCorrectionsInput" rows="8" style="width:100%;font-family:monospace;font-size:12px;" placeholder="id,result,event_date,event_name,line,opening_odds,closing_odds,line_flag,notes&#10;483705c0-644c-4c2a-8693-5181fabca262,win,2026-06-07,Memorial Tournament,,,-150,,Confirmed via PGA Tour final leaderboard&#10;191a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8,win,,,,,-110,yes,Entered line was -4.5 -- graded against that as always; flagged only because -9.5 would have made more sense as a typo, worth a later glance"></textarea>
         <div style="margin-top:10px;">
           <button id="parseGradingCorrectionsBtn">Parse &amp; preview</button>
@@ -2263,6 +2267,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
       <div id="bulkImportPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           Paste rows copied from a spreadsheet (or built here in chat) — first row must be column headers. Required columns: <strong>date, capper, sport, bet type, selection</strong>. Optional: <strong>line, home_away, odds, prop_player, prop_stat (or just "stat"), prop_team, confidence, notes, published, parlay</strong>. For player props, if you don't include a separate <strong>prop_player</strong> column, the player's name is automatically taken from <strong>selection</strong>. <strong>prop_team</strong> is shown to customers alongside the player's name on the public page so casual fans don't have to look up who they play for — leave it blank if unknown, since it's not required for grading. <strong>parlay</strong> is a plain number (1, 2, 3…), your own local label for that capper's parlays that day — leave every standalone pick blank, and if the same selection belongs to more than one parlay, just paste it again on its own row with the other number rather than trying to combine numbers in one cell. The combined parlay summary row is created automatically from whichever rows share a number — you never type it yourself. Capper/sport/bet type must already exist in this tool (added via the Cappers/Sports/Bet Types section above) — unmatched names get flagged instead of guessed at.
+        </div>
+        <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label for="bulkImportFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a spreadsheet file directly (from this device, no copy/paste needed):</label>
+          <input type="file" id="bulkImportFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
         </div>
         <textarea id="bulkImportText" placeholder="date&#9;capper&#9;sport&#9;bet type&#9;selection&#9;line&#9;odds&#9;parlay
 2026-07-08&#9;Dave&#9;MLB&#9;Moneyline&#9;Yankees&#9;&#9;&#9;
@@ -13974,6 +13982,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return { rows, errors };
   }
 
+  // Direct request 2026-08-22: "a button where we can search for a file
+  // on my computer or the local file folders on whatever device is
+  // using it... makes things easier on say a tablet/phone... instead of
+  // opening the file and manually copying the information by hand." A
+  // plain <input type="file"> already gives the native file picker on
+  // desktop, tablet, and phone with no extra library -- reads the
+  // selected file's text straight into the same textarea this already
+  // parses, then auto-clicks Parse & preview so picking the file is the
+  // only manual step. Never applies anything by itself -- preview still
+  // requires its own separate confirm click below.
+  $('gradingCorrectionsFileInput').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      $('gradingCorrectionsInput').value = String(reader.result || '');
+      $('parseGradingCorrectionsBtn').click();
+    };
+    reader.onerror = () => alert('Could not read that file: ' + (reader.error ? reader.error.message : 'unknown error'));
+    reader.readAsText(file);
+    // Clears the picked filename so selecting the SAME file again later
+    // (e.g. after re-exporting under the same name) still fires "change".
+    e.target.value = '';
+  });
+
   $('parseGradingCorrectionsBtn').addEventListener('click', async () => {
     const wrap = $('gradingCorrectionsWrap');
     const { rows, errors, error } = parseCorrectionsCsv($('gradingCorrectionsInput').value);
@@ -17341,6 +17374,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     return failedGroups;
   }
+
+  // Same direct request as Grading Corrections' file input above --
+  // native file picker works on desktop/tablet/phone with no extra
+  // library, reads the file straight into the same textarea this
+  // already parses, then auto-clicks Parse & preview.
+  $('bulkImportFileInput').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      $('bulkImportText').value = String(reader.result || '');
+      $('parseBulkImportBtn').click();
+    };
+    reader.onerror = () => alert('Could not read that file: ' + (reader.error ? reader.error.message : 'unknown error'));
+    reader.readAsText(file);
+    e.target.value = '';
+  });
 
   $('parseBulkImportBtn').addEventListener('click', async () => {
     const text = $('bulkImportText').value;
