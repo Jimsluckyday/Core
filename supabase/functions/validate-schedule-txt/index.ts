@@ -110,9 +110,24 @@ Deno.serve(async (req) => {
 
     let games: any[];
 
-    const cachedRows = canCache
-      ? await db(`rundown_schedule_cache?date=eq.${targetDate}&sport=eq.${sportKey}&select=games_json`)
-      : [];
+    // CONFIRMED REAL BUG, direct report 2026-08-22: "Schedule validation
+    // could not run... likely TheRundown being slow, rate-limited, or
+    // down" -- the actual cause had nothing to do with TheRundown at
+    // all. rundown_schedule_cache didn't exist in the database yet (a
+    // missing migration), so this READ threw immediately and the whole
+    // request failed before ever reaching the TheRundown fetch below.
+    // Wrapped the same "best-effort, never block the real work" way the
+    // cache WRITE already is further down -- a cache read failure now
+    // just means this date isn't served from cache this time, not a
+    // failed validation.
+    let cachedRows: any[] = [];
+    if (canCache) {
+      try {
+        cachedRows = await db(`rundown_schedule_cache?date=eq.${targetDate}&sport=eq.${sportKey}&select=games_json`);
+      } catch (_) {
+        cachedRows = [];
+      }
+    }
 
     if (cachedRows.length) {
       games = cachedRows[0].games_json;
