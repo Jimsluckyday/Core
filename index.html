@@ -5586,6 +5586,33 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return escapeHtml(name);
   }
 
+  // CONFIRMED REAL BUG, direct report 2026-08-22: uploading a genuine
+  // .xlsx file through the CSV file-upload inputs (Grading Corrections,
+  // Bulk Import) showed "wingdings" garbage with an error on every row.
+  // .xlsx (and old-style .xls, and .docx) is a ZIP/OLE2 binary archive
+  // under the hood, not plain text -- reading it with a plain text
+  // reader doesn't fail, it just returns garbled bytes reinterpreted as
+  // characters, which then "parses" as nonsense CSV instead of failing
+  // clearly. Peeks at the file's first few bytes for known binary
+  // signatures before ever treating it as text, and rejects with a
+  // specific, actionable message instead. This app deliberately loads no
+  // external libraries (confirmed: no CDN <script> anywhere in this
+  // file) -- genuine .xlsx parsing would need one, so for now this is a
+  // clear "wrong format" error, not silent corruption.
+  async function readAsCsvTextOrReject(file) {
+    const headerBytes = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    const hex = Array.from(headerBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    // ZIP local file header -- what .xlsx, newer .xls, and .docx all
+    // actually are, regardless of file extension.
+    const isZip = hex.startsWith('504b0304') || hex.startsWith('504b0506') || hex.startsWith('504b0708');
+    // OLE2 compound file signature -- old-style pre-2007 binary .xls/.doc.
+    const isOle2 = hex.startsWith('d0cf11e0');
+    if (isZip || isOle2) {
+      throw new Error(`"${file.name}" looks like an Excel file, not a CSV. In Excel, LibreOffice, or Google Sheets, use File → Save As / Export → CSV first, then upload that .csv file instead.`);
+    }
+    return await file.text();
+  }
+
   function escapeHtml(str) {
     // Standard HTML escaping, PLUS backtick and ${ neutralizing -- this
     // string very often ends up embedded inside a JS template literal
@@ -13992,19 +14019,18 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // parses, then auto-clicks Parse & preview so picking the file is the
   // only manual step. Never applies anything by itself -- preview still
   // requires its own separate confirm click below.
-  $('gradingCorrectionsFileInput').addEventListener('change', (e) => {
+  $('gradingCorrectionsFileInput').addEventListener('change', async (e) => {
     const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      $('gradingCorrectionsInput').value = String(reader.result || '');
-      $('parseGradingCorrectionsBtn').click();
-    };
-    reader.onerror = () => alert('Could not read that file: ' + (reader.error ? reader.error.message : 'unknown error'));
-    reader.readAsText(file);
     // Clears the picked filename so selecting the SAME file again later
     // (e.g. after re-exporting under the same name) still fires "change".
     e.target.value = '';
+    if (!file) return;
+    try {
+      $('gradingCorrectionsInput').value = await readAsCsvTextOrReject(file);
+      $('parseGradingCorrectionsBtn').click();
+    } catch (err) {
+      alert('Could not read that file: ' + err.message);
+    }
   });
 
   $('parseGradingCorrectionsBtn').addEventListener('click', async () => {
@@ -17379,17 +17405,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // native file picker works on desktop/tablet/phone with no extra
   // library, reads the file straight into the same textarea this
   // already parses, then auto-clicks Parse & preview.
-  $('bulkImportFileInput').addEventListener('change', (e) => {
+  $('bulkImportFileInput').addEventListener('change', async (e) => {
     const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      $('bulkImportText').value = String(reader.result || '');
-      $('parseBulkImportBtn').click();
-    };
-    reader.onerror = () => alert('Could not read that file: ' + (reader.error ? reader.error.message : 'unknown error'));
-    reader.readAsText(file);
     e.target.value = '';
+    if (!file) return;
+    try {
+      $('bulkImportText').value = await readAsCsvTextOrReject(file);
+      $('parseBulkImportBtn').click();
+    } catch (err) {
+      alert('Could not read that file: ' + err.message);
+    }
   });
 
   $('parseBulkImportBtn').addEventListener('click', async () => {
