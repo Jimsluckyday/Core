@@ -10516,47 +10516,72 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   }
 
+  // Shared win/loss/push/win% computation for any array of picks -- used
+  // by both the totals and by-capper breakdowns below.
+  function potdPerfComputeRecord(picks) {
+    let wins = 0, losses = 0, pushes = 0;
+    picks.forEach(p => {
+      if (p.result === 'win') wins++;
+      else if (p.result === 'loss') losses++;
+      else if (p.result === 'push') pushes++;
+    });
+    return {
+      total_picks: picks.length, wins, losses, pushes,
+      win_pct: (wins + losses) > 0 ? Math.round((1000 * wins) / (wins + losses)) / 10 : null
+    };
+  }
+
+  // CONFIRMED REAL GAP, direct report 2026-08-22: "one for straight bets
+  // and parlays may make sense to be fair." A parlay's win/loss dynamics
+  // are fundamentally different from a straight bet's (any one leg
+  // losing kills the whole thing), so blending both into one combined
+  // win% at a tier can hide real differences -- e.g. a capper hitting
+  // 90% on straight Tier 3 picks but 20% on Tier 3 parlays would read as
+  // one misleading middle number. Split into two separate records
+  // instead -- a tier/capper+tier with picks of only one type simply
+  // gets no row for the other, rather than a padded 0-pick row.
+  function potdPerfSplitStraightParlay(picks) {
+    const straight = [];
+    const parlay = [];
+    picks.forEach(p => {
+      if (p.bet_types && p.bet_types.name === 'Parlay') parlay.push(p);
+      else straight.push(p);
+    });
+    return { straight, parlay };
+  }
+
   // Direct request 2026-08-22: "I would need both the total and by
-  // capper. I would prefer one sheet to be the total then the 2nd the
-  // breakdown by capper." The report only ever had the by-capper
-  // breakdown below (potdPerfRowsFlat) -- this aggregates the exact same
-  // picks across EVERY capper, grouped by tier alone, for the overall
-  // picture that breakdown never showed on its own.
-  function potdPerfRowsTotalByTier(picks, includeStraightParlay) {
+  // capper... I wanted an overall picture." Every capper combined,
+  // grouped by tier, each tier split into a Straight row and a Parlay
+  // row (see potdPerfSplitStraightParlay's own comment).
+  function potdPerfRowsTotalByTier(picks) {
     const byTier = {};
     picks.forEach(p => {
       const tier = Number(p.pick_tier) || 0;
-      if (!byTier[tier]) byTier[tier] = { tier, total_picks: 0, straight: 0, parlay: 0, wins: 0, losses: 0, pushes: 0 };
-      const b = byTier[tier];
-      b.total_picks++;
-      if (p.result === 'win') b.wins++;
-      else if (p.result === 'loss') b.losses++;
-      else if (p.result === 'push') b.pushes++;
-      if (includeStraightParlay) {
-        if (p.bet_types && p.bet_types.name === 'Parlay') b.parlay++;
-        else b.straight++;
-      }
+      (byTier[tier] = byTier[tier] || []).push(p);
     });
-    return Object.values(byTier).map(b => ({
-      ...b,
-      win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null
-    }));
+    const rows = [];
+    Object.keys(byTier).forEach(tierKey => {
+      const tier = Number(tierKey);
+      const { straight, parlay } = potdPerfSplitStraightParlay(byTier[tier]);
+      if (straight.length) rows.push({ tier, type: 'Straight', ...potdPerfComputeRecord(straight) });
+      if (parlay.length) rows.push({ tier, type: 'Parlay', ...potdPerfComputeRecord(parlay) });
+    });
+    return rows;
   }
 
-  function potdPerfTotalTableHtml(rows, title, tierLabel, includeStraightParlay, filterNote, tableId) {
+  function potdPerfTotalTableHtml(rows, title, tierLabel, filterNote, tableId) {
     if (!rows.length) {
       return `<p class="stub-title" style="margin-bottom:8px;">${title}</p><div class="empty-state" style="margin-bottom:20px;">No picks match these filters.</div>`;
     }
-    const sorted = [...rows].sort((a, b) => a.tier - b.tier);
+    const sorted = [...rows].sort((a, b) => a.tier - b.tier || a.type.localeCompare(b.type));
 
     function row(r) {
       const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
-      const spCell = includeStraightParlay
-        ? `<td data-value="${r.straight}/${r.parlay}">${r.straight}/${r.parlay}</td>` : '';
       return `<tr>
         <td data-value="${r.tier}">${escapeHtml(tierLabel(r.tier))}</td>
+        <td data-value="${escapeHtml(r.type)}">${escapeHtml(r.type)}</td>
         <td data-value="${r.total_picks}">${r.total_picks}</td>
-        ${spCell}
         <td data-value="${r.wins}">${r.wins}</td>
         <td data-value="${r.losses}">${r.losses}</td>
         <td data-value="${r.pushes}">${r.pushes}</td>
@@ -10564,9 +10589,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </tr>`;
     }
 
-    const cols = [{ label: 'Tier', type: 'num' }, { label: 'Total picks', type: 'num' }];
-    if (includeStraightParlay) cols.push({ label: 'Straight/Parlay', type: 'str' });
-    cols.push({ label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' });
+    const cols = [{ label: 'Tier', type: 'num' }, { label: 'Type', type: 'str' }, { label: 'Total picks', type: 'num' },
+      { label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' }];
 
     const body = sorted.map(row).join('');
     return `
@@ -10586,50 +10610,42 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---- Pick Tier Performance pop-out: same underlying data as the inline
-  // report above, but flattened to one row per capper+tier so it can use
-  // the same sortable/filterable table machinery as Capper Performance by
-  // Bet Type -- lets the user sort by capper, by tier, or filter down to
-  // just the rows they care about instead of scanning the static tables.
-  function potdPerfRowsFlat(picks, includeStraightParlay) {
-    const byKey = {};
+  // report above, but flattened to one row per capper+tier(+type) so it
+  // can use the same sortable/filterable table machinery as Capper
+  // Performance by Bet Type -- lets the user sort by capper, by tier, or
+  // filter down to just the rows they care about instead of scanning the
+  // static tables. Same Straight/Parlay split as the totals table above.
+  function potdPerfRowsByCapper(picks) {
+    const byKey = new Map();
     picks.forEach(p => {
       const tier = Number(p.pick_tier) || 0;
       const capperName = p.cappers ? p.cappers.name : '—';
-      const key = `${capperName}::${tier}`;
-      if (!byKey[key]) {
-        byKey[key] = { capper_name: capperName, tier, total_picks: 0, straight: 0, parlay: 0, wins: 0, losses: 0, pushes: 0 };
-      }
-      const b = byKey[key];
-      b.total_picks++;
-      if (p.result === 'win') b.wins++;
-      else if (p.result === 'loss') b.losses++;
-      else if (p.result === 'push') b.pushes++;
-      if (includeStraightParlay) {
-        if (p.bet_types && p.bet_types.name === 'Parlay') b.parlay++;
-        else b.straight++;
-      }
+      const key = capperName + ' ' + tier;
+      if (!byKey.has(key)) byKey.set(key, { capper_name: capperName, tier, picks: [] });
+      byKey.get(key).picks.push(p);
     });
-    return Object.values(byKey).map(b => ({
-      ...b,
-      win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null
-    }));
+    const rows = [];
+    byKey.forEach(bucket => {
+      const { straight, parlay } = potdPerfSplitStraightParlay(bucket.picks);
+      if (straight.length) rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, type: 'Straight', ...potdPerfComputeRecord(straight) });
+      if (parlay.length) rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, type: 'Parlay', ...potdPerfComputeRecord(parlay) });
+    });
+    return rows;
   }
 
-  function potdPerfTableHtml(rows, title, tierLabel, includeStraightParlay, filterNote, tableId) {
+  function potdPerfByCapperTableHtml(rows, title, tierLabel, filterNote, tableId) {
     if (!rows.length) {
       return `<p class="stub-title" style="margin-bottom:8px;">${title}</p><div class="empty-state" style="margin-bottom:20px;">No picks match these filters.</div>`;
     }
-    const sorted = [...rows].sort((a, b) => a.capper_name.localeCompare(b.capper_name) || a.tier - b.tier);
+    const sorted = [...rows].sort((a, b) => a.capper_name.localeCompare(b.capper_name) || a.tier - b.tier || a.type.localeCompare(b.type));
 
     function row(r) {
       const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
-      const spCell = includeStraightParlay
-        ? `<td data-value="${r.straight}/${r.parlay}">${r.straight}/${r.parlay}</td>` : '';
       return `<tr>
         <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
         <td data-value="${r.tier}">${escapeHtml(tierLabel(r.tier))}</td>
+        <td data-value="${escapeHtml(r.type)}">${escapeHtml(r.type)}</td>
         <td data-value="${r.total_picks}">${r.total_picks}</td>
-        ${spCell}
         <td data-value="${r.wins}">${r.wins}</td>
         <td data-value="${r.losses}">${r.losses}</td>
         <td data-value="${r.pushes}">${r.pushes}</td>
@@ -10637,9 +10653,65 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </tr>`;
     }
 
-    const cols = [{ label: 'Capper', type: 'str' }, { label: 'Tier', type: 'num' }, { label: 'Total picks', type: 'num' }];
-    if (includeStraightParlay) cols.push({ label: 'Straight/Parlay', type: 'str' });
-    cols.push({ label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' });
+    const cols = [{ label: 'Capper', type: 'str' }, { label: 'Tier', type: 'num' }, { label: 'Type', type: 'str' }, { label: 'Total picks', type: 'num' },
+      { label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' }];
+
+    const body = sorted.map(row).join('');
+    return `
+      <p class="stub-title" style="margin-bottom:8px;">${title}</p>
+      <table class="picks-table sortable-table" id="${tableId}">
+        <thead>
+          <tr class="header-row">
+            ${cols.map((c, i) => `<th data-col="${i}" data-type="${c.type}">
+              <span class="th-label">${c.label}</span>
+              <button type="button" class="filter-btn" data-col="${i}">&#9662;</button>
+            </th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:20px;">${filterNote}</div>`;
+  }
+
+  // Parlay LEGS volume table -- every entry here is, by definition,
+  // already part of a parlay (there's no "straight" version of a leg),
+  // so this keeps the original single-row-per-capper+tier shape with no
+  // Straight/Parlay split at all.
+  function potdPerfLegRows(picks) {
+    const byKey = new Map();
+    picks.forEach(p => {
+      const tier = Number(p.pick_tier) || 0;
+      const capperName = p.cappers ? p.cappers.name : '—';
+      const key = capperName + ' ' + tier;
+      if (!byKey.has(key)) byKey.set(key, { capper_name: capperName, tier, picks: [] });
+      byKey.get(key).picks.push(p);
+    });
+    const rows = [];
+    byKey.forEach(bucket => rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, ...potdPerfComputeRecord(bucket.picks) }));
+    return rows;
+  }
+
+  function potdPerfLegsTableHtml(rows, title, tierLabel, filterNote, tableId) {
+    if (!rows.length) {
+      return `<p class="stub-title" style="margin-bottom:8px;">${title}</p><div class="empty-state" style="margin-bottom:20px;">No picks match these filters.</div>`;
+    }
+    const sorted = [...rows].sort((a, b) => a.capper_name.localeCompare(b.capper_name) || a.tier - b.tier);
+
+    function row(r) {
+      const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
+      return `<tr>
+        <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
+        <td data-value="${r.tier}">${escapeHtml(tierLabel(r.tier))}</td>
+        <td data-value="${r.total_picks}">${r.total_picks}</td>
+        <td data-value="${r.wins}">${r.wins}</td>
+        <td data-value="${r.losses}">${r.losses}</td>
+        <td data-value="${r.pushes}">${r.pushes}</td>
+        <td data-value="${winPctVal}">${r.win_pct !== null && r.win_pct !== undefined ? r.win_pct + '%' : '—'}</td>
+      </tr>`;
+    }
+
+    const cols = [{ label: 'Capper', type: 'str' }, { label: 'Tier', type: 'num' }, { label: 'Total picks', type: 'num' },
+      { label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' }];
 
     const body = sorted.map(row).join('');
     return `
@@ -10665,18 +10737,18 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       return;
     }
     const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
-    const totalRows = potdPerfRowsTotalByTier(picks, true);
-    const totalHtml = potdPerfTotalTableHtml(totalRows, 'Totals — every capper combined', tierLabel, true,
-      'Every capper combined into one row per tier -- the overall picture, before breaking down by individual capper below.',
+    const totalRows = potdPerfRowsTotalByTier(picks);
+    const totalHtml = potdPerfTotalTableHtml(totalRows, 'Totals — every capper combined', tierLabel,
+      'Every capper combined into one row per tier, split into Straight and Parlay -- a parlay\'s win/loss behaves very differently from a straight bet\'s, so this keeps the two from blending into one misleading combined win%.',
       'dataTableTotal');
-    const mainRows = potdPerfRowsFlat(picks, true);
-    const legRows = potdPerfRowsFlat(legPicks, false);
-    const mainHtml = potdPerfTableHtml(mainRows, 'By capper', tierLabel, true,
-      'Straight bets and parlays (counted as one unit each) together — the Straight/Parlay column shows how many of that capper/tier\'s picks were which. A parlay\'s own tier comes from what the capper called the whole combo, not guessed from its legs. Click the arrow on Capper or Tier to sort or filter — e.g. check one tier to compare every capper at that confidence level side by side.',
+    const mainRows = potdPerfRowsByCapper(picks);
+    const legRows = potdPerfLegRows(legPicks);
+    const mainHtml = potdPerfByCapperTableHtml(mainRows, 'By capper', tierLabel,
+      'Same Straight/Parlay split as the totals table above, per capper and tier. A parlay\'s own tier comes from what the capper called the whole combo, not guessed from its legs. Click the arrow on any column to sort or filter — e.g. check one tier to compare every capper at that confidence level side by side.',
       'dataTableMain');
     const legHtml = legRows.length
-      ? potdPerfTableHtml(legRows, 'By tier — parlay legs (individual games inside a parlay)', tierLabel, false,
-          'Every leg shares its parlay\'s own tier, so this isn\'t a separate confidence signal from the table above — it\'s about volume: how many games a capper is packaging at each level.',
+      ? potdPerfLegsTableHtml(legRows, 'By tier — parlay legs (individual games inside a parlay)', tierLabel,
+          'Every leg shares its parlay\'s own tier, so this isn\'t a separate confidence signal from the tables above — it\'s about volume: how many games a capper is packaging at each level.',
           'dataTableLegs')
       : '';
 
