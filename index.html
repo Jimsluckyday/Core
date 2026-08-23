@@ -8644,36 +8644,58 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // elements actually exist in that pop-out's DOM at click time (stripping
   // any buttons/selects/inputs first), so it needs no per-report column
   // mapping and stays correct even as a report's columns change later.
-  function csvExportPopoutScript(filenamePrefix) {
+  // separateFiles (optional, default false/undefined -- every existing
+  // caller keeps its current single-combined-file behavior unchanged):
+  // direct request 2026-08-22, Pick Tier Performance specifically --
+  // "one sheet to be the total then the 2nd the breakdown by capper."
+  // CSV has no real concept of separate sheets (that's an Excel-only
+  // idea), so when true this downloads one CSV file PER table on the
+  // page instead of combining them into one, named from that table's own
+  // preceding heading so each file is self-explanatory on its own.
+  function csvExportPopoutScript(filenamePrefix, separateFiles) {
     return `<script>
 (function() {
   const btn = document.getElementById('exportCsvBtn');
   if (!btn) return;
-  btn.addEventListener('click', function() {
-    const tables = Array.prototype.slice.call(document.querySelectorAll('table'));
-    if (!tables.length) { alert('Nothing to export yet.'); return; }
-    const blocks = tables.map(function(table) {
-      const rows = Array.prototype.slice.call(table.querySelectorAll('tr'));
-      return rows.map(function(tr) {
-        const cells = Array.prototype.slice.call(tr.querySelectorAll('th,td'));
-        return cells.map(function(td) {
-          const clone = td.cloneNode(true);
-          Array.prototype.slice.call(clone.querySelectorAll('button,select,input')).forEach(function(el) { el.parentNode.removeChild(el); });
-          const text = clone.textContent.replace(/\\s+/g, ' ').trim();
-          return /[",\\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
-        }).join(',');
-      }).join('\\r\\n');
-    });
-    const csv = '\\ufeff' + blocks.join('\\r\\n\\r\\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var SEPARATE_FILES = ${separateFiles ? 'true' : 'false'};
+  function tableToCsv(table) {
+    const rows = Array.prototype.slice.call(table.querySelectorAll('tr'));
+    return rows.map(function(tr) {
+      const cells = Array.prototype.slice.call(tr.querySelectorAll('th,td'));
+      return cells.map(function(td) {
+        const clone = td.cloneNode(true);
+        Array.prototype.slice.call(clone.querySelectorAll('button,select,input')).forEach(function(el) { el.parentNode.removeChild(el); });
+        const text = clone.textContent.replace(/\\s+/g, ' ').trim();
+        return /[",\\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+      }).join(',');
+    }).join('\\r\\n');
+  }
+  function downloadCsvBlob(csv, filename) {
+    const blob = new Blob(['\\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = '${filenamePrefix}-' + new Date().toISOString().split('T')[0] + '.csv';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+  btn.addEventListener('click', function() {
+    const tables = Array.prototype.slice.call(document.querySelectorAll('table'));
+    if (!tables.length) { alert('Nothing to export yet.'); return; }
+    const dateSuffix = new Date().toISOString().split('T')[0];
+    if (SEPARATE_FILES) {
+      tables.forEach(function(table, i) {
+        const heading = table.previousElementSibling;
+        const label = (heading && heading.textContent ? heading.textContent : ('table-' + (i + 1))).trim();
+        const safeLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+        downloadCsvBlob(tableToCsv(table), '${filenamePrefix}-' + (safeLabel || ('part-' + (i + 1))) + '-' + dateSuffix + '.csv');
+      });
+    } else {
+      const blocks = tables.map(tableToCsv);
+      downloadCsvBlob(blocks.join('\\r\\n\\r\\n'), '${filenamePrefix}-' + dateSuffix + '.csv');
+    }
   });
 })();
 <\/script>`;
@@ -10494,6 +10516,75 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   }
 
+  // Direct request 2026-08-22: "I would need both the total and by
+  // capper. I would prefer one sheet to be the total then the 2nd the
+  // breakdown by capper." The report only ever had the by-capper
+  // breakdown below (potdPerfRowsFlat) -- this aggregates the exact same
+  // picks across EVERY capper, grouped by tier alone, for the overall
+  // picture that breakdown never showed on its own.
+  function potdPerfRowsTotalByTier(picks, includeStraightParlay) {
+    const byTier = {};
+    picks.forEach(p => {
+      const tier = Number(p.pick_tier) || 0;
+      if (!byTier[tier]) byTier[tier] = { tier, total_picks: 0, straight: 0, parlay: 0, wins: 0, losses: 0, pushes: 0 };
+      const b = byTier[tier];
+      b.total_picks++;
+      if (p.result === 'win') b.wins++;
+      else if (p.result === 'loss') b.losses++;
+      else if (p.result === 'push') b.pushes++;
+      if (includeStraightParlay) {
+        if (p.bet_types && p.bet_types.name === 'Parlay') b.parlay++;
+        else b.straight++;
+      }
+    });
+    return Object.values(byTier).map(b => ({
+      ...b,
+      win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null
+    }));
+  }
+
+  function potdPerfTotalTableHtml(rows, title, tierLabel, includeStraightParlay, filterNote, tableId) {
+    if (!rows.length) {
+      return `<p class="stub-title" style="margin-bottom:8px;">${title}</p><div class="empty-state" style="margin-bottom:20px;">No picks match these filters.</div>`;
+    }
+    const sorted = [...rows].sort((a, b) => a.tier - b.tier);
+
+    function row(r) {
+      const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
+      const spCell = includeStraightParlay
+        ? `<td data-value="${r.straight}/${r.parlay}">${r.straight}/${r.parlay}</td>` : '';
+      return `<tr>
+        <td data-value="${r.tier}">${escapeHtml(tierLabel(r.tier))}</td>
+        <td data-value="${r.total_picks}">${r.total_picks}</td>
+        ${spCell}
+        <td data-value="${r.wins}">${r.wins}</td>
+        <td data-value="${r.losses}">${r.losses}</td>
+        <td data-value="${r.pushes}">${r.pushes}</td>
+        <td data-value="${winPctVal}">${r.win_pct !== null && r.win_pct !== undefined ? r.win_pct + '%' : '—'}</td>
+      </tr>`;
+    }
+
+    const cols = [{ label: 'Tier', type: 'num' }, { label: 'Total picks', type: 'num' }];
+    if (includeStraightParlay) cols.push({ label: 'Straight/Parlay', type: 'str' });
+    cols.push({ label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' });
+
+    const body = sorted.map(row).join('');
+    return `
+      <p class="stub-title" style="margin-bottom:8px;">${title}</p>
+      <table class="picks-table sortable-table" id="${tableId}">
+        <thead>
+          <tr class="header-row">
+            ${cols.map((c, i) => `<th data-col="${i}" data-type="${c.type}">
+              <span class="th-label">${c.label}</span>
+              <button type="button" class="filter-btn" data-col="${i}">&#9662;</button>
+            </th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:20px;">${filterNote}</div>`;
+  }
+
   // ---- Pick Tier Performance pop-out: same underlying data as the inline
   // report above, but flattened to one row per capper+tier so it can use
   // the same sortable/filterable table machinery as Capper Performance by
@@ -10574,9 +10665,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       return;
     }
     const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
+    const totalRows = potdPerfRowsTotalByTier(picks, true);
+    const totalHtml = potdPerfTotalTableHtml(totalRows, 'Totals — every capper combined', tierLabel, true,
+      'Every capper combined into one row per tier -- the overall picture, before breaking down by individual capper below.',
+      'dataTableTotal');
     const mainRows = potdPerfRowsFlat(picks, true);
     const legRows = potdPerfRowsFlat(legPicks, false);
-    const mainHtml = potdPerfTableHtml(mainRows, 'By tier', tierLabel, true,
+    const mainHtml = potdPerfTableHtml(mainRows, 'By capper', tierLabel, true,
       'Straight bets and parlays (counted as one unit each) together — the Straight/Parlay column shows how many of that capper/tier\'s picks were which. A parlay\'s own tier comes from what the capper called the whole combo, not guessed from its legs. Click the arrow on Capper or Tier to sort or filter — e.g. check one tier to compare every capper at that confidence level side by side.',
       'dataTableMain');
     const legHtml = legRows.length
@@ -10620,9 +10715,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 </head><body>
   <h1>Pick Tier Performance <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${escapeHtml(filterSummary)}</div>
+  ${totalHtml}
   ${mainHtml}
   ${legHtml}
-  ${csvExportPopoutScript('pick-tier-performance')}
+  ${csvExportPopoutScript('pick-tier-performance', true)}
 <script>
 (function() {
   function wireSortableTable(table) {
