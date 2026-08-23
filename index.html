@@ -8970,12 +8970,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const editBtnHtml = it.id
         ? `<button type="button" class="edit-automation-btn" data-pick-id="${it.id}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;">Edit</button>`
         : '';
+      // Direct request 2026-08-22: "I wanted this to refresh the data so I
+      // don't have to re-grade everything... when I get to paid APIs I
+      // could end up using tokens for that for no reason." This does NOT
+      // call the grading/schedule-sync Edge Function again -- it's a
+      // plain re-read of this ONE pick's current row, checked against
+      // whatever condition originally flagged it for this category (see
+      // automationItemStillFails below). Covers a manual correction
+      // (fixed odds, set a real result, matched a team by hand, etc.)
+      // just as well as an automated one, and never touches ESPN/
+      // TheRundown/a future paid odds API at all -- if you genuinely want
+      // that, the existing "Update Results"-style buttons are still
+      // right there to click again.
+      const refreshBtnHtml = (category && it.id)
+        ? `<button type="button" class="refresh-automation-btn" data-pick-id="${it.id}" data-category="${escapeHtml(category)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #55584d;background:transparent;color:#55584d;white-space:nowrap;margin-right:4px;">Refresh</button>`
+        : '';
       html += `<tr data-capper-name="${escapeHtml(it.capperName || '')}">
         <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;" class="automation-capper-cell">${capperCellHtml}</td>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
         <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
         <td style="${reasonCellStyle}" ${reasonCellAttrs}>${escapeHtml(shortReason)}</td>
-        <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${editBtnHtml}${dismissBtnHtml}</td>
+        <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${refreshBtnHtml}${editBtnHtml}${dismissBtnHtml}</td>
       </tr>`;
     });
     return html + '</table>';
@@ -9219,6 +9234,39 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
   window.openAutomationPickEditor = openAutomationPickEditor;
 
+  // Direct request 2026-08-22: "I wanted this to refresh the data so I
+  // don't have to re-grade everything... when I get to paid APIs I could
+  // end up using tokens for that for no reason." A pure DB re-read of one
+  // pick, checked against whatever condition originally put it in THIS
+  // category's failure/pending list -- never calls grade_picks,
+  // grade_picks_espn_backfill, grade-golf-picks, or schedule-sync-backfill
+  // again, so a manual correction (or deciding to leave it pending) can
+  // be confirmed without spending a future paid API's request budget.
+  // Returns true if the pick still looks like a failure for this
+  // category, false if it's been resolved since (by any means).
+  async function automationItemStillFails(category, pickId) {
+    const rows = await rest(`picks?id=eq.${pickId}&select=result,schedule_sync_status,opening_odds,closing_odds,odds_unavailable`);
+    const p = rows && rows[0];
+    if (!p) return false; // deleted -- nothing left to flag
+    if (category === 'results' || category === 'golf_results') {
+      // Covers every original reason this pick could have landed here
+      // (ambiguous, unsupported bet type, not final yet) -- all of them
+      // leave result='pending' until either automation or a human sets a
+      // real win/loss/push, so this one check is the correct umbrella for
+      // "has anything actually changed" regardless of which specific
+      // reason flagged it originally.
+      return p.result === 'pending';
+    }
+    if (category === 'teams_tournaments' || category === 'pick_info') {
+      return p.schedule_sync_status === 'unmatched' || p.schedule_sync_status === 'not_supported';
+    }
+    if (category === 'missing_odds') {
+      return !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined || p.closing_odds === null || p.closing_odds === undefined);
+    }
+    return true; // unrecognized category -- be conservative, keep showing it
+  }
+  window.automationItemStillFails = automationItemStillFails;
+
   // Delegated wiring for the "Mark resolved"/"Edit" buttons
   // automationGroupListHtml renders -- called after every (re)render in
   // both this tab and the "All Picks" pop-out (via
@@ -9234,6 +9282,26 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     });
     container.querySelectorAll('.edit-automation-btn').forEach(btn => {
       btn.addEventListener('click', () => openAutomationPickEditor(btn.dataset.pickId, btn));
+    });
+    container.querySelectorAll('.refresh-automation-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('tr');
+        btn.disabled = true;
+        btn.textContent = 'Checking...';
+        try {
+          const stillFails = await automationItemStillFails(btn.dataset.category, btn.dataset.pickId);
+          if (!stillFails) {
+            removeAutomationRow(row);
+          } else {
+            btn.textContent = 'Still pending';
+            setTimeout(() => { btn.disabled = false; btn.textContent = 'Refresh'; }, 1500);
+          }
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = 'Failed -- retry?';
+          btn.title = e.message;
+        }
+      });
     });
     // Export-just-these-rows button (automationResultSummaryHtml above) --
     // the row data is embedded on the button itself as JSON since this
