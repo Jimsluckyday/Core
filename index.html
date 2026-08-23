@@ -2277,8 +2277,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
 2026-07-08&#9;Dave&#9;MLB&#9;Spread&#9;Yankees&#9;-1.5&#9;&#9;
 2026-07-08&#9;Dave&#9;NHL&#9;Moneyline&#9;Hurricanes&#9;&#9;+2015&#9;1
 2026-07-08&#9;Dave&#9;MLB&#9;Moneyline&#9;Pirates&#9;&#9;+2015&#9;1" style="min-height:120px;width:100%;font-family:monospace;font-size:12px;"></textarea>
-        <div class="row" style="margin-top:8px;">
+        <div class="row" style="margin-top:8px;align-items:center;gap:14px;">
           <button id="parseBulkImportBtn">Parse & preview</button>
+          <label style="font-size:11px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;" title="A team name that doesn't match your registered list, a player name a roster check couldn't find, or a date outside a registered tournament window -- all just unconfirmed, not structurally broken (the field is free text either way). Checked rows still get flagged (via the same schedule-sync fields Missing Data and Teams/Tournaments already use) so you can find and confirm them later instead of digging through the source messages right now.">
+            <input type="checkbox" id="bulkImportAllowWarnings" />
+            Import rows with unresolved validation warnings anyway (team names, player names, tournament dates not confirmed) — flag for later review
+          </label>
         </div>
         <div id="bulkImportPreview"></div>
       </div>
@@ -16831,6 +16835,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   function validateBulkRow(row) {
     const errors = [];
+    // Direct request 2026-08-22: "1% of the data shouldn't hold up an
+    // entire upload... we risk holding up an upload while we spend 5-10
+    // minutes or more digging through data." errors stays for HARD,
+    // structural problems (missing capper/sport/bet type/date/selection
+    // -- a row that genuinely can't be inserted at all). warnings is for
+    // SOFT, unconfirmed data (a typed team name that doesn't match the
+    // registered list, a player name a roster check couldn't find) --
+    // the underlying fields are already free text either way, so these
+    // rows CAN still be imported; the "Import despite validation
+    // warnings" checkbox below decides whether they're offered for
+    // import now (flagged via schedule_sync_status/note for later
+    // review, same fields Missing Data and Teams/Tournaments already
+    // surface) or held back like a hard error until fixed and re-pasted.
+    const warnings = [];
     const date = row.date || '';
     if (!date || isNaN(Date.parse(date))) errors.push('missing/invalid date');
     // Used everywhere downstream that needs to compare against Supabase's
@@ -16897,9 +16915,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const check = checkTeamName(teamName, sport.id);
         if (check) {
           if (check.ambiguous) {
-            errors.push(`team name "${check.rawName}" is ambiguous for ${sport.name} -- matches multiple registered teams (${check.matches.join(', ')}). Use the full team name to specify which one.`);
+            warnings.push(`team name "${check.rawName}" is ambiguous for ${sport.name} -- matches multiple registered teams (${check.matches.join(', ')}). Use the full team name to specify which one.`);
           } else {
-            errors.push(check.suggestion
+            warnings.push(check.suggestion
               ? `team name "${check.rawName}" not recognized for ${sport.name} -- did you mean "${check.suggestion}"?`
               : `team name "${check.rawName}" not recognized for ${sport.name} -- if this is a genuinely new/correct team, add it in Setup first`);
           }
@@ -16917,7 +16935,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     if (sport && date && !isNaN(Date.parse(date))) {
       const tournamentCheck = checkTournamentDate(normalizedDate, sport.id);
       if (tournamentCheck) {
-        errors.push(`event_date ${date} doesn't fall within any known ${sport.name} tournament window -- closest registered is "${tournamentCheck.closest.name}" (${tournamentCheck.closest.start_date} to ${tournamentCheck.closest.end_date}). Double-check the date, or add the correct tournament in Setup first if this one is missing.`);
+        warnings.push(`event_date ${date} doesn't fall within any known ${sport.name} tournament window -- closest registered is "${tournamentCheck.closest.name}" (${tournamentCheck.closest.start_date} to ${tournamentCheck.closest.end_date}). Double-check the date, or add the correct tournament in Setup first if this one is missing.`);
       } else if (!row.event_name) {
         // Date check passed and no event name was given in the pasted
         // data -- auto-fill from whichever registered tournament the date
@@ -16933,6 +16951,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return {
       raw: row,
       errors,
+      warnings,
       parlayNumber, // working field only -- never sent to the DB directly, see processParlayGroups()
       resolved: errors.length === 0 ? {
         event_date: normalizedDate,
@@ -17041,6 +17060,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         raw: { date: template.event_date, capper: capperName, sport: sportName, bet_type: 'Parlay',
                selection: `Parlay ${number} (${members.length} legs, auto-generated)` },
         errors: [],
+        warnings: [],
         parlayNumber: null,
         isSynthesizedParlaySummary: true,
         parlayLocalNumber: number,
@@ -17070,10 +17090,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return [...validated, ...summaries];
   }
 
+  // Direct request 2026-08-22: "1% of the data shouldn't hold up an
+  // entire upload." A row is only ever excluded outright for a HARD,
+  // structural problem (v.errors -- missing capper/sport/bet type/date/
+  // selection, something that genuinely can't be inserted). A row whose
+  // only issue is a SOFT warning (v.warnings -- unconfirmed team name,
+  // player name, or tournament date) is selectable once "Import rows
+  // with unresolved validation warnings anyway" is checked -- the
+  // underlying field is free text regardless, so there's nothing
+  // structurally stopping the insert, just an unconfirmed value worth
+  // flagging for a later look instead of blocking the whole batch now.
+  function isBulkRowSelectable(v, allowWarnings) {
+    if (v.errors.length > 0) return false;
+    if (v.warnings && v.warnings.length && !allowWarnings) return false;
+    return true;
+  }
+
   function renderBulkImportPreview(validated, scheduleCheckFailures) {
     const wrap = $('bulkImportPreview');
-    const valid = validated.filter(v => v.errors.length === 0);
-    const invalid = validated.filter(v => v.errors.length > 0);
+    const allowWarnings = $('bulkImportAllowWarnings').checked;
+    const valid = validated.filter(v => isBulkRowSelectable(v, allowWarnings));
+    const invalid = validated.filter(v => !isBulkRowSelectable(v, allowWarnings));
     const dupCount = valid.filter(v => v.dupWarning).length;
 
     // Made visible deliberately -- if the live schedule check couldn't
@@ -17101,14 +17138,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // entry in `validated`, regardless of what order things are shown in.
     const withIndex = validated.map((v, i) => ({ v, i }));
     withIndex.sort((a, b) => {
-      const aInvalid = a.v.errors.length > 0, bInvalid = b.v.errors.length > 0;
+      const aInvalid = !isBulkRowSelectable(a.v, allowWarnings), bInvalid = !isBulkRowSelectable(b.v, allowWarnings);
       if (aInvalid !== bInvalid) return aInvalid ? -1 : 1;
       return 0; // stable sort keeps original relative order within each group
     });
 
     function rowHtml(v, i) {
-      const isValid = v.errors.length === 0;
+      const hasWarnings = !!(v.warnings && v.warnings.length);
+      const isHardInvalid = v.errors.length > 0;
+      const isSelectable = isBulkRowSelectable(v, allowWarnings);
       const dupNote = v.dupWarning ? `<div style="color:var(--stamp-amber);font-weight:bold;">⚠ ${escapeHtml(v.dupWarning)}</div>` : '';
+      // Shown for every warning, selectable or not -- a warning-only row
+      // that IS currently selectable (because the checkbox above is on)
+      // still deserves the same visible flag, since it's about to be
+      // imported unconfirmed on purpose, not because nothing was found.
+      const warnNote = hasWarnings
+        ? `<div style="color:var(--stamp-amber);">⚠ ${escapeHtml(v.warnings.join('; '))}${(!isHardInvalid && !allowWarnings) ? ' -- check "Import rows with unresolved validation warnings anyway" above to include this row' : ''}</div>`
+        : '';
       const eventName = v.resolved ? v.resolved.event_name : (v.raw.event_name || '');
       const eventDisplay = eventName
         ? (v.raw.event_name ? escapeHtml(eventName) : `<span style="font-style:italic;color:var(--ink-soft);" title="Auto-filled from a registered tournament matching this sport and date -- not typed in the pasted data">${escapeHtml(eventName)} (auto)</span>`)
@@ -17120,10 +17166,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // offered as something to opt in or out of.
       const checkboxCell = v.isSynthesizedParlaySummary
         ? '<span title="Auto-created when its legs are imported below -- nothing to check here">—</span>'
-        : (isValid ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${v.dupWarning ? '' : 'checked'} />` : '✗');
+        : (isSelectable ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${v.dupWarning ? '' : 'checked'} />`
+          : (isHardInvalid ? '✗' : '⚠'));
       const summaryNote = v.isSynthesizedParlaySummary
         ? '<div style="color:var(--ink-soft);font-style:italic;">Preview only -- created automatically from its legs at import time.</div>' : '';
-      return `<tr style="${v.dupWarning ? 'background:rgba(200,150,20,0.08);' : ''}${v.isSynthesizedParlaySummary ? 'background:rgba(100,100,100,0.06);' : ''}">
+      return `<tr style="${v.dupWarning ? 'background:rgba(200,150,20,0.08);' : ''}${(!isHardInvalid && hasWarnings) ? 'background:rgba(200,150,20,0.05);' : ''}${v.isSynthesizedParlaySummary ? 'background:rgba(100,100,100,0.06);' : ''}">
         <td>${checkboxCell}</td>
         <td>${escapeHtml(v.raw.date || '')}</td>
         <td>${escapeHtml(v.raw.capper || '')}</td>
@@ -17132,7 +17179,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${escapeHtml(v.raw.selection || '')}</td>
         <td>${escapeHtml(v.raw.line || '')}</td>
         <td>${eventDisplay}</td>
-        <td style="color:var(--stamp-red);font-size:11px;">${v.errors.join('; ')}${dupNote}${summaryNote}</td>
+        <td style="font-size:11px;">${v.errors.length ? `<span style="color:var(--stamp-red);">${v.errors.join('; ')}</span>` : ''}${warnNote}${dupNote}${summaryNote}</td>
       </tr>`;
     }
 
@@ -17142,7 +17189,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     let rowsHtml = '';
     let dividerInserted = invalid.length === 0; // no divider needed if nothing's invalid
     for (const { v, i } of withIndex) {
-      if (!dividerInserted && v.errors.length === 0) {
+      if (!dividerInserted && isBulkRowSelectable(v, allowWarnings)) {
         rowsHtml += `<tr><td colspan="9" style="background:var(--field);font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;padding:8px 6px;">Ready to import (${valid.length})</td></tr>`;
         dividerInserted = true;
       }
@@ -17152,10 +17199,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       rowsHtml = `<tr><td colspan="9" style="background:var(--stamp-red);color:var(--paper);font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;padding:8px 6px;">Needs fixing (${invalid.length})</td></tr>` + rowsHtml;
     }
 
+    const hardInvalidCount = invalid.filter(v => v.errors.length > 0).length;
+    const needsReviewCount = invalid.length - hardInvalidCount;
     wrap.innerHTML = `
       ${scheduleWarningHtml}
       <div style="font-size:12px;margin:10px 0;">
-        <strong>${valid.length}</strong> ready to import, <strong style="color:var(--stamp-red);">${invalid.length}</strong> flagged as invalid
+        <strong>${valid.length}</strong> ready to import, <strong style="color:var(--stamp-red);">${hardInvalidCount}</strong> flagged as invalid
+        ${needsReviewCount > 0 ? `, <strong style="color:var(--stamp-amber);">${needsReviewCount}</strong> unconfirmed (check "Import rows with unresolved validation warnings anyway" above to include ${needsReviewCount === 1 ? 'it' : 'them'} now instead of fixing first)` : ''}
         ${dupCount > 0 ? `, <strong style="color:var(--stamp-amber);">${dupCount}</strong> possible duplicate${dupCount === 1 ? '' : 's'} (unchecked by default — review and check the box if it's intentional)` : ''}
       </div>
       <table class="picks-table">
@@ -17164,7 +17214,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </table>
       <button id="importValidRowsBtn" style="margin-top:10px;" ${valid.length === 0 ? 'disabled' : ''}>Import selected picks</button>
       <div style="font-size:10px;color:var(--ink-soft);margin-top:6px;">
-        Flagged-invalid rows are skipped entirely — fix the name (add the missing capper/sport/bet type above, or correct a typo) and paste again. Possible-duplicate rows are matched on the same capper, date, sport, bet type, selection, and line (and player/stat for props) — either against another row in this same paste, or against a pick already saved in the database. They're left unchecked on purpose so a re-imported file or two people entering the same picks doesn't silently double up your data — check the box for any that are genuinely intentional (e.g. a capper really did pick the same team twice for different reasons).
+        Flagged-invalid rows (red ✗) are skipped entirely — fix the name (add the missing capper/sport/bet type above, or correct a typo) and paste again. Unconfirmed rows (amber ⚠) only failed a soft check (team name, player name, or tournament date not confirmed) — check "Import rows with unresolved validation warnings anyway" above to import them now instead; they're saved with a schedule-sync flag noting exactly what wasn't confirmed, so they show up later in Missing Data ("Schedule sync flagged") or the "Find &amp; Update Teams / Tournaments" automation tool for a proper look, instead of being dug up from the original source now. Possible-duplicate rows are matched on the same capper, date, sport, bet type, selection, and line (and player/stat for props) — either against another row in this same paste, or against a pick already saved in the database. They're left unchecked on purpose so a re-imported file or two people entering the same picks doesn't silently double up your data — check the box for any that are genuinely intentional (e.g. a capper really did pick the same team twice for different reasons).
       </div>`;
 
     if (valid.length > 0) {
@@ -17176,6 +17226,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         btn.disabled = true;
         btn.textContent = 'Importing...';
         try {
+          // Direct request 2026-08-22: rows imported anyway despite an
+          // unresolved warning (team name, player name, or tournament
+          // date not confirmed) get flagged the same way an ordinary
+          // schedule-sync failure already is -- so they surface later in
+          // Missing Data ("Schedule sync flagged") or the "Find & Update
+          // Teams / Tournaments" tool's own failure list, instead of the
+          // fact that they were ever unconfirmed getting silently lost
+          // the moment they're saved.
+          toImport.forEach(v => {
+            if (v.resolved && v.warnings && v.warnings.length) {
+              v.resolved.schedule_sync_status = 'unmatched';
+              v.resolved.schedule_sync_note = `Imported without full confirmation: ${v.warnings.join('; ')}`;
+            }
+          });
           // Synthesized "N-Leg Parlay" preview rows are display-only -- the
           // real summary row is found-or-created by linkLegToParlay() below
           // as each of its actual legs gets linked, which also recomputes
@@ -17330,8 +17394,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             if (r.teamAActuallyPlaying || r.teamBActuallyPlaying) {
               msg += ` (${item.teamA} is actually playing: ${r.teamAActuallyPlaying || 'not found today'}${item.teamB ? `; ${item.teamB} is actually playing: ${r.teamBActuallyPlaying || 'not found today'}` : ''})`;
             }
-            item.v.errors.push(msg);
-            item.v.resolved = null;
+            // Direct request 2026-08-22: "1% of the data shouldn't hold
+            // up an entire upload." This is a soft, informational check
+            // (confirms the entered date/matchup against the real
+            // schedule) -- pushed to warnings instead of errors, and
+            // resolved is deliberately left intact (previously nulled
+            // out here, which made the row impossible to import even
+            // with the "import anyway" option, since there was no
+            // payload left to insert).
+            item.v.warnings.push(msg);
           }
         });
       } catch (e) {
@@ -17386,8 +17457,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         (data.results || []).forEach((r, i) => {
           if (r.verifiable && !r.valid) {
             const item = items[i];
-            item.v.errors.push(`MLB roster check: ${r.reason}`);
-            item.v.resolved = null;
+            // Same reasoning as the schedule check above -- soft warning,
+            // resolved left intact so "import anyway" has something to
+            // actually insert.
+            item.v.warnings.push(`MLB roster check: ${r.reason}`);
           }
         });
       } catch (e) {
