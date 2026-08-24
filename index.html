@@ -17706,6 +17706,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         is_published: ['yes', 'true', '1'].includes((row.published || '').toLowerCase()),
         result: 'pending',
         is_parlay_leg: !!parlayNumber,
+        // Direct request 2026-08-23: capture the RAW value seen in the
+        // capper's own message (e.g. "🔥🔥🔥", "Lock of the Day", "3
+        // units") on import, same field/free-text convention the single-
+        // pick Add form already uses (normalizeUnitSize + per-capper
+        // history maps this to a real pick_tier elsewhere) -- never
+        // guessed or computed here, just passed through as typed.
+        raw_unit_size: (row.raw_unit_size || row.unit_size || row.tier || '').trim() || null,
         // CONFIRMED REAL BUG, direct report 2026-08-22: "Import failed:
         // All object keys must match." PostgREST's bulk insert builds
         // one INSERT from the FIRST object's keys -- every row in the
@@ -17834,7 +17841,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           // inserted directly, but keeping every resolved object's key
           // set identical is the invariant that matters here.
           schedule_sync_status: null,
-          schedule_sync_note: null
+          schedule_sync_note: null,
+          raw_unit_size: null
         }
       });
     }
