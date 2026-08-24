@@ -473,7 +473,7 @@ Deno.serve(async (req) => {
     // Outs); hrrbi and the WNBA combo stats (PRA/PR/PA/RA) are summed from
     // two or three already-available keys, handled specially below rather
     // than needing their own derive function.
-    type StatSpec = { key: string; group: 'batting' | 'pitching'; derive?: 'outs' };
+    type StatSpec = { key: string; group: 'batting' | 'pitching'; derive?: 'outs' | 'attempted' };
     const MLB_STAT_SPECS: Record<string, StatSpec[]> = {
       hits: [{ key: 'hits', group: 'batting' }],
       homeruns: [{ key: 'homeRuns', group: 'batting' }],
@@ -530,6 +530,22 @@ Deno.serve(async (req) => {
       // from both "pointsreboundsassists" (all spelled out) and
       // "ptsrebassists" (all abbreviated) above. Same underlying stat.
       ptsreboundsassists: [{ key: '', group: 'batting' }],
+      // ADDED 2026-08-23, direct request: "anything we can do to get this
+      // done automatically." Confirmed directly against a real box score
+      // (Spurs @ Knicks, 2026-06-08) that ESPN's stat keys are
+      // 'fieldGoalsMade-fieldGoalsAttempted' and
+      // 'freeThrowsMade-freeThrowsAttempted' -- same "made-attempted"
+      // compound format already proven for 3-pointers above. Free throws
+      // reuses espnStatToNumber's existing "take the first number" default
+      // (made), matching the same convention 3-pointers already use.
+      // Field Goal Attempts needs the SECOND number instead, hence the new
+      // derive:'attempted' path below rather than reusing the plain key
+      // lookup.
+      freethrows: [{ key: 'freeThrowsMade-freeThrowsAttempted', group: 'batting' }],
+      ft: [{ key: 'freeThrowsMade-freeThrowsAttempted', group: 'batting' }],
+      freethrowsmade: [{ key: 'freeThrowsMade-freeThrowsAttempted', group: 'batting' }],
+      fieldgoalattempts: [{ key: 'fieldGoalsMade-fieldGoalsAttempted', group: 'batting', derive: 'attempted' }],
+      fga: [{ key: 'fieldGoalsMade-fieldGoalsAttempted', group: 'batting', derive: 'attempted' }],
     };
     // Identical box-score schema to WNBA (confirmed directly, see
     // PLAYER_PROP_SPORTS comment above) -- same spec, same keys.
@@ -544,6 +560,17 @@ Deno.serve(async (req) => {
       if (/^-?\d+-\d+$/.test(s)) return Number(s.split('-')[0]);
       const n = Number(s);
       return isNaN(n) ? null : n;
+    }
+
+    // Same "made-attempted" parsing as espnStatToNumber, but returns the
+    // ATTEMPTED count (second number) instead of made -- added for Field
+    // Goal Attempts. Deliberately returns null (not a misread) if the raw
+    // value isn't in the expected "N-N" shape, rather than falling back to
+    // treating a bare number as an attempt count.
+    function espnStatToNumberAttempted(raw: any): number | null {
+      if (raw === undefined || raw === null || raw === '--' || raw === '') return null;
+      const s = String(raw);
+      return /^-?\d+-\d+$/.test(s) ? Number(s.split('-')[1]) : null;
     }
 
     // CONFIRMED REAL FINDING, direct report ("one type failed which was
@@ -688,6 +715,10 @@ Deno.serve(async (req) => {
         }
         const row = rowsInGroup[0];
         if (spec.derive === 'outs') value = deriveOuts(row.keys, row.stats);
+        else if (spec.derive === 'attempted') {
+          const idx = row.keys.indexOf(spec.key);
+          value = idx >= 0 ? espnStatToNumberAttempted(row.stats[idx]) : null;
+        }
         else if (statNorm === 'hrrbi') {
           const hrIdx = row.keys.indexOf('homeRuns'), rbiIdx = row.keys.indexOf('RBIs');
           const hr = hrIdx >= 0 ? espnStatToNumber(row.stats[hrIdx]) : null;
@@ -1042,6 +1073,13 @@ Deno.serve(async (req) => {
           const isSpread1stQuarter = betTypeNorm === 'spread1stquarter';
           const isSpread1stHalf = betTypeNorm === 'spread1sthalf';
           const isMoneyline1stHalf = betTypeNorm === 'moneyline1sthalf';
+          // ADDED 2026-08-23, direct request: "anything we can do to get
+          // this done automatically." Reuses the exact same
+          // first_inning_home/away field as Spread 1st Quarter (see that
+          // flag's own comment -- "period 1" already means 1st quarter for
+          // NBA/WNBA), just graded as a straight win/loss via
+          // gradeMoneylinePeriod instead of gradeSpreadPeriod's line math.
+          const isMoneyline1stQuarter = betTypeNorm === 'moneyline1stquarter';
           // Direct request 2026-08-17: "that's extra work to have to run 2
           // buttons and wait for results as well as it's possible someone
           // forgets or the button itself breaks and no one notices" --
@@ -1053,6 +1091,7 @@ Deno.serve(async (req) => {
           const supported = isMoneyline || isSpread || isTotalType || isNRFI || isYRFI
             || isTeamTotal || isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7
             || isMoneyline1stInning || isSpread1stQuarter || isSpread1stHalf || isMoneyline1stHalf
+            || isMoneyline1stQuarter
             || (isPlayerProp && propsSupportedForThisSport);
 
           if (!supported) {
@@ -1226,14 +1265,14 @@ Deno.serve(async (req) => {
           else if (isMoneylineFirst5) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 5);
           else if (isTotalFirst5) grade = gradeTotalFirstN(game.score, 5, Number(pick.line));
           else if (isTotalFirst7) grade = gradeTotalFirstN(game.score, 7, Number(pick.line));
-          else if (isMoneyline1stInning || isSpread1stQuarter) {
-            // Same field for both -- see gradeMoneylinePeriod/gradeSpreadPeriod's
+          else if (isMoneyline1stInning || isSpread1stQuarter || isMoneyline1stQuarter) {
+            // Same field for all three -- see gradeMoneylinePeriod/gradeSpreadPeriod's
             // own comment: first_inning_home/away holds "period 1" of
             // whatever this sport's linescores represent (1 inning for MLB,
-            // 1 quarter for NBA).
-            grade = isMoneyline1stInning
-              ? gradeMoneylinePeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!)
-              : gradeSpreadPeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!, Number(pick.line));
+            // 1 quarter for NBA/WNBA).
+            grade = isSpread1stQuarter
+              ? gradeSpreadPeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!, Number(pick.line))
+              : gradeMoneylinePeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!);
           }
           else if (isSpread1stHalf) grade = gradeSpreadPeriod(game.score.first_half_home, game.score.first_half_away, matchedIsHome!, Number(pick.line));
           else if (isMoneyline1stHalf) grade = gradeMoneylinePeriod(game.score.first_half_home, game.score.first_half_away, matchedIsHome!);
@@ -1243,7 +1282,7 @@ Deno.serve(async (req) => {
               ? '1st-inning score data looked incomplete or unclear -- needs manual review.'
               : (isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7)
               ? 'First 5/7 innings score data looked incomplete or unclear -- needs manual review.'
-              : (isMoneyline1stInning || isSpread1stQuarter)
+              : (isMoneyline1stInning || isSpread1stQuarter || isMoneyline1stQuarter)
               ? '1st period score data looked incomplete or unclear -- needs manual review.'
               : (isSpread1stHalf || isMoneyline1stHalf)
               ? '1st half score data looked incomplete or unclear -- needs manual review.'
