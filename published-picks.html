@@ -632,17 +632,27 @@
       countedPicks++;
     });
 
+    // Spelled out in full sentences rather than a bare "2-1 / +$88.21" --
+    // direct request 2026-08-23, that shorthand wasn't descriptive enough
+    // for a casual viewer to parse at a glance.
+    const totalBets = wins + losses + pushes;
+    const recordParts = [
+      `${wins} ${wins === 1 ? 'win' : 'wins'}`,
+      `${losses} ${losses === 1 ? 'loss' : 'losses'}`
+    ];
+    if (pushes) recordParts.push(`${pushes} ${pushes === 1 ? 'push' : 'pushes'}`);
+    const recordText = `${totalBets} total ${totalBets === 1 ? 'bet' : 'bets'}: ${recordParts.join(', ')}`;
+
     const isPositive = total >= 0;
     const amtClass = isPositive ? 'win' : 'loss';
-    const amtText = `${isPositive ? '+' : '−'}$${Math.abs(total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const amtText = `$${Math.abs(total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const coverageHtml = countedPicks < totalGraded
       ? `<span class="coverage-note">(based on ${countedPicks} of ${totalGraded} graded picks with odds on file)</span>`
       : '';
 
     el.style.display = 'flex';
     el.innerHTML = `
-      <span><strong>${escapeHtml(dateStr)}</strong>: ${wins}-${losses}${pushes ? '-' + pushes : ''}</span>
-      <span class="amt ${amtClass}">${amtText}</span>
+      <span><strong>${escapeHtml(dateStr)}</strong> — ${recordText} for a total ${isPositive ? 'profit' : 'loss'} of <span class="amt ${amtClass}">${amtText}</span></span>
       ${coverageHtml}`;
   }
 
