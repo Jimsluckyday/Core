@@ -11202,16 +11202,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       panel.className = 'filter-panel';
       const values = distinctValues(colIndex);
       const allowed = columnFilters[colIndex];
-      let html = `
+      let html = \`
         <div class="sort-opt" data-sort="asc">Sort ascending</div>
         <div class="sort-opt" data-sort="desc">Sort descending</div>
         <input type="text" class="search-box" placeholder="Search values..." />
-        <div class="value-list">`;
+        <div class="value-list">\`;
       values.forEach((text, raw) => {
         const checked = !allowed || allowed.has(raw);
-        html += `<label class="value-item"><input type="checkbox" value="${raw.replace(/"/g, '&quot;')}" ${checked ? 'checked' : ''}/> ${text}</label>`;
+        html += \`<label class="value-item"><input type="checkbox" value="\${raw.replace(/"/g, '&quot;')}" \${checked ? 'checked' : ''}/> \${text}</label>\`;
       });
-      html += `</div><div class="panel-actions"><button class="btn-clear" data-action="clear">Clear filter</button><button class="btn-ok" data-action="ok">OK</button></div>`;
+      html += \`</div><div class="panel-actions"><button class="btn-clear" data-action="clear">Clear filter</button><button class="btn-ok" data-action="ok">OK</button></div>\`;
       panel.innerHTML = html;
       th.style.position = 'relative';
       th.appendChild(panel);
