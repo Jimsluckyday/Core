@@ -521,6 +521,13 @@
       </div>
       <div id="teamListWrap" style="margin-top:10px;"></div>
 
+      <p class="stub-title" style="margin-top:24px;">Find duplicate cappers / teams</p>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+        Direct request 2026-08-24, after finding "NC Sharp" registered twice with picks split across both records: a periodic check rather than relying on noticing by accident. <strong>Exact duplicates</strong> (identical name, just entered twice) get a one-click Merge -- reassigns every pick from the smaller record onto the larger one, then removes the empty duplicate, same steps already done by hand for NC Sharp. <strong>Similar names</strong> (a likely typo, not necessarily a real duplicate -- e.g. two genuinely different cappers could share a similar name on purpose) are only listed with pick counts for both, plus a Merge button in EITHER direction, so a human always decides which one to keep rather than this guessing.
+      </div>
+      <button id="findDuplicatesBtn">Scan for duplicates</button>
+      <div id="duplicatesWrap" style="margin-top:12px;"></div>
+
       <p class="stub-title" style="margin-top:24px;">Prop stats</p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Powers the Stat dropdown for Player Props in Add Picks, so common stats (Strikeouts, Points, Goals, etc.) don't need retyping every time -- add a new one here, or directly from Add Picks itself, any time a new stat type comes up.
@@ -3592,6 +3599,170 @@ These are almost always the same day, so "Date entered" only fills in a starting
       showMsg($('teamMsg'), e.message, 'error');
     }
   });
+
+  // ---------- Find duplicate cappers / teams ----------
+  // Direct request 2026-08-24, after finding "NC Sharp" registered twice
+  // with real picks split across both records -- a periodic check rather
+  // than relying on noticing an obvious duplicate by accident. Cappers are
+  // referenced by picks.capper_id (a real foreign key), so an exact-name
+  // duplicate is safe to auto-merge (reassign every pick from the smaller
+  // record onto the larger one, then delete the empty duplicate) -- exactly
+  // the steps already done by hand for NC Sharp. Teams are NOT referenced
+  // by any foreign key at all (confirmed directly: picks store team names
+  // as free text in selection/prop_team/home_away, teams is purely a
+  // reference/validation list) -- so a duplicate team has no picks to
+  // reassign, "merging" one is just deleting the redundant row.
+  // Near-duplicates (a likely typo, reusing the same levenshtein() helper
+  // already proven for Bulk Import's own "did you mean" suggestions) are
+  // only ever listed with counts for a human to decide -- two similarly-
+  // named cappers/teams could genuinely be different entities, so this
+  // never guesses a merge direction the way the exact-match case safely can.
+  function findDuplicatePairs(items, distanceThreshold) {
+    const exact = [];
+    const similar = [];
+    const seenExact = new Set();
+    const byNorm = new Map();
+    items.forEach(it => {
+      const norm = normalizeForMatch(it.name);
+      if (!byNorm.has(norm)) byNorm.set(norm, []);
+      byNorm.get(norm).push(it);
+    });
+    byNorm.forEach(group => {
+      if (group.length > 1) {
+        exact.push(group);
+        group.forEach(g => seenExact.add(g.id));
+      }
+    });
+    for (let i = 0; i < items.length; i++) {
+      if (seenExact.has(items[i].id)) continue;
+      for (let j = i + 1; j < items.length; j++) {
+        if (seenExact.has(items[j].id)) continue;
+        const a = normalizeForMatch(items[i].name), b = normalizeForMatch(items[j].name);
+        if (a === b) continue; // already caught above
+        if (Math.abs(a.length - b.length) > distanceThreshold) continue; // cheap skip before the real distance calc
+        if (levenshtein(a, b) <= distanceThreshold) similar.push([items[i], items[j]]);
+      }
+    }
+    return { exact, similar };
+  }
+
+  async function findDuplicates() {
+    const wrap = $('duplicatesWrap');
+    wrap.innerHTML = '<div class="empty-state">Scanning...</div>';
+    try {
+      const pickCapperRows = await restAllPages('picks?select=capper_id');
+      const pickCountByCapper = {};
+      pickCapperRows.forEach(p => { pickCountByCapper[p.capper_id] = (pickCountByCapper[p.capper_id] || 0) + 1; });
+
+      const capperItems = cappers.map(c => ({ id: c.id, name: c.name, count: pickCountByCapper[c.id] || 0 }));
+      const capperDupes = findDuplicatePairs(capperItems, 2);
+
+      // Teams compared WITHIN their own sport only -- same discipline used
+      // everywhere else in this project, a name coincidentally similar
+      // across two different sports is never a real duplicate.
+      const teamsBySport = {};
+      teams.forEach(t => {
+        const key = String(t.sport_id);
+        if (!teamsBySport[key]) teamsBySport[key] = [];
+        teamsBySport[key].push({ id: t.id, name: t.name });
+      });
+      let teamExact = [], teamSimilar = [];
+      Object.keys(teamsBySport).forEach(sportId => {
+        const { exact, similar } = findDuplicatePairs(teamsBySport[sportId], 2);
+        exact.forEach(g => teamExact.push({ sportId, group: g }));
+        similar.forEach(p => teamSimilar.push({ sportId, pair: p }));
+      });
+
+      const sportName = id => (sports.find(s => String(s.id) === String(id)) || {}).name || '—';
+
+      function capperExactHtml(group) {
+        const sorted = [...group].sort((a, b) => b.count - a.count);
+        const keep = sorted[0];
+        return `<div class="msg" style="margin-bottom:8px;">
+          <strong>${escapeHtml(keep.name)}</strong> registered ${sorted.length} times: ${sorted.map(g => `${g.count} pick${g.count === 1 ? '' : 's'} (id ...${g.id.slice(-6)})`).join(', ')}
+          <div style="margin-top:6px;">
+            ${sorted.slice(1).map(dupe => `<button type="button" class="merge-capper-btn" data-keep="${keep.id}" data-delete="${dupe.id}" data-keepname="${escapeHtml(keep.name)}" data-deletecount="${dupe.count}">Merge into the ${keep.count}-pick record</button>`).join(' ')}
+          </div>
+        </div>`;
+      }
+      function capperSimilarHtml(pair) {
+        const [a, b] = pair;
+        return `<div class="msg" style="margin-bottom:8px;">
+          <strong>${escapeHtml(a.name)}</strong> (${a.count} picks) vs <strong>${escapeHtml(b.name)}</strong> (${b.count} picks) -- similar names, may or may not be the same capper.
+          <div style="margin-top:6px;">
+            <button type="button" class="merge-capper-btn" data-keep="${a.id}" data-delete="${b.id}" data-keepname="${escapeHtml(a.name)}" data-deletecount="${b.count}">Merge "${escapeHtml(b.name)}" into "${escapeHtml(a.name)}"</button>
+            <button type="button" class="merge-capper-btn" data-keep="${b.id}" data-delete="${a.id}" data-keepname="${escapeHtml(b.name)}" data-deletecount="${a.count}">Merge "${escapeHtml(a.name)}" into "${escapeHtml(b.name)}"</button>
+          </div>
+        </div>`;
+      }
+      function teamExactHtml(entry) {
+        const sport = sportName(entry.sportId);
+        const sorted = entry.group;
+        const keep = sorted[0];
+        return `<div class="msg" style="margin-bottom:8px;">
+          <strong>${escapeHtml(keep.name)}</strong> (${escapeHtml(sport)}) registered ${sorted.length} times -- no picks reference a team by ID, so this is just a redundant list entry, safe to remove.
+          <div style="margin-top:6px;">
+            ${sorted.slice(1).map(dupe => `<button type="button" class="delete-dupe-team-btn" data-id="${dupe.id}" data-name="${escapeHtml(dupe.name)}">Delete the duplicate entry</button>`).join(' ')}
+          </div>
+        </div>`;
+      }
+      function teamSimilarHtml(entry) {
+        const [a, b] = entry.pair;
+        const sport = sportName(entry.sportId);
+        return `<div class="msg" style="margin-bottom:8px;">
+          <strong>${escapeHtml(a.name)}</strong> vs <strong>${escapeHtml(b.name)}</strong> (${escapeHtml(sport)}) -- similar names, may be two real teams.
+          <div style="margin-top:6px;">
+            <button type="button" class="delete-dupe-team-btn" data-id="${a.id}" data-name="${escapeHtml(a.name)}">Delete "${escapeHtml(a.name)}"</button>
+            <button type="button" class="delete-dupe-team-btn" data-id="${b.id}" data-name="${escapeHtml(b.name)}">Delete "${escapeHtml(b.name)}"</button>
+          </div>
+        </div>`;
+      }
+
+      const sections = [];
+      if (capperDupes.exact.length) sections.push(`<p class="stub-title">Cappers -- exact duplicates</p>${capperDupes.exact.map(capperExactHtml).join('')}`);
+      if (capperDupes.similar.length) sections.push(`<p class="stub-title">Cappers -- similar names</p>${capperDupes.similar.map(capperSimilarHtml).join('')}`);
+      if (teamExact.length) sections.push(`<p class="stub-title">Teams -- exact duplicates</p>${teamExact.map(teamExactHtml).join('')}`);
+      if (teamSimilar.length) sections.push(`<p class="stub-title">Teams -- similar names</p>${teamSimilar.map(teamSimilarHtml).join('')}`);
+
+      wrap.innerHTML = sections.length ? sections.join('') : '<div class="empty-state">No duplicates or near-duplicates found.</div>';
+
+      wrap.querySelectorAll('.merge-capper-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const keepId = btn.getAttribute('data-keep'), deleteId = btn.getAttribute('data-delete');
+          const keepName = btn.getAttribute('data-keepname'), deleteCount = btn.getAttribute('data-deletecount');
+          if (!confirm(`Move ${deleteCount} pick(s) onto "${keepName}", then delete the now-empty duplicate capper record? This cannot be undone.`)) return;
+          btn.disabled = true;
+          try {
+            await rest(`picks?capper_id=eq.${deleteId}`, { method: 'PATCH', body: JSON.stringify({ capper_id: keepId }) });
+            await rest(`cappers?id=eq.${deleteId}`, { method: 'DELETE' });
+            await refreshCappers();
+            findDuplicates();
+          } catch (e) {
+            alert('Merge failed: ' + e.message);
+            btn.disabled = false;
+          }
+        });
+      });
+      wrap.querySelectorAll('.delete-dupe-team-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-id'), name = btn.getAttribute('data-name');
+          if (!confirm(`Delete the duplicate team entry "${name}"? This cannot be undone.`)) return;
+          btn.disabled = true;
+          try {
+            await rest(`teams?id=eq.${id}`, { method: 'DELETE' });
+            await refreshTeams();
+            findDuplicates();
+          } catch (e) {
+            alert('Delete failed: ' + e.message);
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  }
+  $('findDuplicatesBtn').addEventListener('click', findDuplicates);
 
   // ---------- Prop stats (Setup management + Add Picks dropdown) ----------
   async function refreshPropStats() {
