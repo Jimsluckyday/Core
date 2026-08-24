@@ -528,6 +528,13 @@
       <button id="findDuplicatesBtn">Scan for duplicates</button>
       <div id="duplicatesWrap" style="margin-top:12px;"></div>
 
+      <p class="stub-title" style="margin-top:24px;">Download entry template</p>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+        Direct request 2026-08-24: a spreadsheet for manual historical backfill entry, with Capper/Sport/Bet Type dropdowns and a live "does this match something on file" check next to Selection/Prop Team -- generated fresh from your CURRENT Cappers/Sports/Bet Types/Teams every time you click this, so it never goes stale the way a one-off file would. This is the only place in the whole app that loads anything from outside it -- a free spreadsheet library (ExcelJS, via jsDelivr's CDN) loads only at the moment you click the button below, never on a normal page visit, so it can't slow down or affect anything else here. If the CDN ever happens to be down when you click it, nothing else in the app is affected -- just try again shortly, or ask in chat and we'll sort it out another way.
+      </div>
+      <button id="downloadEntryTemplateBtn">&#8681; Download entry template (.xlsx)</button>
+      <div id="downloadEntryTemplateMsg" style="margin-top:8px;"></div>
+
       <p class="stub-title" style="margin-top:24px;">Prop stats</p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Powers the Stat dropdown for Player Props in Add Picks, so common stats (Strikeouts, Points, Goals, etc.) don't need retyping every time -- add a new one here, or directly from Add Picks itself, any time a new stat type comes up.
@@ -3907,6 +3914,223 @@ These are almost always the same day, so "Date entered" only fills in a starting
     }
   }
   $('findTierInconsistenciesBtn').addEventListener('click', findTierInconsistencies);
+
+  // ---------- Download entry template (.xlsx) ----------
+  // Direct request 2026-08-24: a manual backfill entry spreadsheet with
+  // real dropdowns and a "does this match the database" check, generated
+  // fresh from LIVE data every time -- never a stale one-off file. Loads
+  // ExcelJS from jsDelivr's CDN (the free, open-source library that
+  // actually supports writing real dropdown validation -- confirmed
+  // directly that SheetJS's free version silently drops validation on
+  // write, so it wasn't usable for this). This is the ONLY place in the
+  // whole app that loads anything external, and it loads ON CLICK only,
+  // never on a normal page visit -- every other tab/tool works completely
+  // offline from any CDN, so this can never slow down or destabilize
+  // anything else here, even if jsDelivr is ever unreachable.
+  let exceljsLoadPromise = null;
+  function ensureExcelJsLoaded() {
+    if (window.ExcelJS) return Promise.resolve();
+    if (exceljsLoadPromise) return exceljsLoadPromise;
+    exceljsLoadPromise = new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+      el.onload = () => resolve();
+      el.onerror = () => { exceljsLoadPromise = null; reject(new Error('Could not load the spreadsheet library from jsDelivr -- check your connection, or try again shortly.')); };
+      document.head.appendChild(el);
+    });
+    return exceljsLoadPromise;
+  }
+
+  const TEMPLATE_HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3D2B' } };
+  const TEMPLATE_HEADER_FONT = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  const TEMPLATE_INPUT_FONT = { name: 'Arial', size: 10, color: { argb: 'FF0000FF' } };
+  const TEMPLATE_CHECK_FONT = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF555555' } };
+  const TEMPLATE_THIN_BORDER = { style: 'thin', color: { argb: 'FFCCCCCC' } };
+  const TEMPLATE_BORDER = { top: TEMPLATE_THIN_BORDER, bottom: TEMPLATE_THIN_BORDER, left: TEMPLATE_THIN_BORDER, right: TEMPLATE_THIN_BORDER };
+
+  function writeRefSheet(wb, name, headerCols, rows) {
+    const ws = wb.addWorksheet(name);
+    headerCols.forEach((h, i) => {
+      const c = ws.getCell(1, i + 1);
+      c.value = h;
+      c.font = TEMPLATE_HEADER_FONT;
+      c.fill = TEMPLATE_HEADER_FILL;
+    });
+    rows.forEach((row, ri) => {
+      const arr = Array.isArray(row) ? row : [row];
+      arr.forEach((v, ci) => { ws.getCell(ri + 2, ci + 1).value = v; ws.getCell(ri + 2, ci + 1).font = { name: 'Arial', size: 10 }; });
+    });
+    ws.getColumn(1).width = 30;
+    if (headerCols.length > 1) ws.getColumn(2).width = 16;
+    ws.views = [{ showGridLines: false }];
+    return ws;
+  }
+
+  async function downloadEntryTemplate() {
+    const btn = $('downloadEntryTemplateBtn');
+    const msg = $('downloadEntryTemplateMsg');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Loading spreadsheet library...';
+    msg.innerHTML = '';
+    try {
+      await ensureExcelJsLoaded();
+      btn.textContent = 'Building...';
+
+      // Live data, deduped/sorted -- never a stale snapshot. Same
+      // normalizeForMatch dedup already used by Find duplicate cappers /
+      // teams, so a lingering exact-duplicate name doesn't show up twice
+      // in the dropdown while it's still waiting to be merged.
+      const seenCapperNames = new Set();
+      const capperNames = cappers
+        .filter(c => { const n = normalizeForMatch(c.name); if (seenCapperNames.has(n)) return false; seenCapperNames.add(n); return true; })
+        .map(c => c.name).sort((a, b) => a.localeCompare(b));
+      const sportNames = sports.map(s => s.name).sort((a, b) => a.localeCompare(b));
+      const betTypeNames = betTypes.map(b => b.name).sort((a, b) => a.localeCompare(b));
+      const sportNameById = {};
+      sports.forEach(s => { sportNameById[String(s.id)] = s.name; });
+      const teamRows = teams
+        .map(t => [t.name, sportNameById[String(t.sport_id)] || '—'])
+        .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Core Betting Solutions';
+      wb.created = new Date();
+
+      // ---- Instructions ----
+      const wsI = wb.addWorksheet('Instructions');
+      wsI.getColumn(1).width = 100;
+      wsI.views = [{ showGridLines: false }];
+      const instructionLines = [
+        ['Core Betting Solutions -- Historical Backfill Entry Template', true, 14],
+        ['Generated ' + new Date().toISOString().slice(0, 10) + ' from live data -- Cappers/Sports/Bet Types/Teams are exactly what\'s in Setup right now.', false, 10],
+        ['', false, 10],
+        ['HOW TO USE', true, 12],
+        ['1. Go to the "Picks" tab. Row 3 is a filled-in EXAMPLE -- copy its format, then delete it before importing.', false, 10],
+        ['2. Type data starting in row 4 (or overwrite the example row once you understand the format).', false, 10],
+        ['3. Capper / Sport / Bet Type have dropdowns -- click the cell and use the arrow, or start typing and Excel jumps to matches.', false, 10],
+        ['4. Columns S-W (grey, italic) are AUTOMATIC CHECKS -- don\'t type in them. OK = matches something on file. NEW? = doesn\'t match anything on file -- either a typo, or genuinely new (add it in Setup first). n/a = this check doesn\'t apply to this row.', false, 10],
+        ['5. The Selection/Team check is a simple sanity aid, not a full replica of the real validation -- it does not understand combined "TeamA/TeamB" entries. The real, thorough check still runs automatically when you paste into Bulk Import.', false, 10],
+        ['6. When ready to upload: File -> Save As -> CSV (Comma delimited) -- Bulk Import only accepts .csv/.tsv/.txt, not .xlsx directly. The extra check columns are harmless to leave in.', false, 10],
+        ['7. Paste or upload that CSV into Data Tools -> Bulk Import, same as any other batch.', false, 10],
+        ['', false, 10],
+        ['COLUMN GUIDE', true, 12],
+        ['Date -- the REAL date of the event, as YYYY-MM-DD. Type it exactly this way to avoid any month/day ambiguity.', false, 10],
+        ['Date Entered -- the day the capper actually posted the pick, if different from Date. Leave blank if same as Date.', false, 10],
+        ['Capper / Sport / Bet Type -- must match an existing one exactly (or flag as NEW in Setup first).', false, 10],
+        ['Selection -- the team, player, or side picked.', false, 10],
+        ['Line -- the spread/total/prop number, if any. Leave blank if not applicable.', false, 10],
+        ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
+        ['Odds -- the American odds at the time of the pick (e.g. -110, +150).', false, 10],
+        ['Event Name -- tournament/event name, mainly for Tennis/Golf/MMA/Soccer.', false, 10],
+        ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only.', false, 10],
+        ['Raw Unit Size -- type EXACTLY what you see in the capper\'s own message (e.g. "3 units", "Lock of the Day"). Don\'t convert this to a tier yourself.', false, 10],
+        ['Confidence -- only if the capper gives an explicit numeric confidence score. Usually blank.', false, 10],
+        ['Notes -- anything else worth keeping about this pick.', false, 10],
+        ['Parlay -- leave blank for a straight bet. Give every leg of the SAME parlay the same number.', false, 10],
+        ['Published -- "yes" or "no". Leave blank unless intentionally publishing on entry.', false, 10],
+      ];
+      instructionLines.forEach(([text, bold, size], i) => {
+        const c = wsI.getCell(i + 1, 1);
+        c.value = text;
+        c.font = { name: 'Arial', size, bold, color: { argb: bold ? 'FF1F3D2B' : 'FF222222' } };
+        c.alignment = { wrapText: true, vertical: 'top' };
+      });
+
+      // ---- Reference sheets ----
+      writeRefSheet(wb, 'Cappers', ['Capper'], capperNames);
+      writeRefSheet(wb, 'Sports', ['Sport'], sportNames);
+      writeRefSheet(wb, 'BetTypes', ['Bet Type'], betTypeNames);
+      writeRefSheet(wb, 'Teams', ['Team', 'Sport'], teamRows);
+      const CAPPERS_LAST = capperNames.length + 1, SPORTS_LAST = sportNames.length + 1,
+        BETTYPES_LAST = betTypeNames.length + 1, TEAMS_LAST = teamRows.length + 1;
+
+      // ---- Picks sheet ----
+      const ws = wb.addWorksheet('Picks');
+      const HEADERS = ['Date', 'Date Entered', 'Capper', 'Sport', 'Bet Type', 'Selection', 'Line', 'Home/Away', 'Odds',
+        'Event Name', 'Prop Player', 'Prop Stat', 'Prop Team', 'Raw Unit Size', 'Confidence', 'Notes', 'Parlay', 'Published',
+        'Capper Check', 'Sport Check', 'Bet Type Check', 'Selection/Team Check', 'Prop Team Check'];
+      HEADERS.forEach((h, i) => {
+        const c = ws.getCell(1, i + 1);
+        c.value = h;
+        c.font = TEMPLATE_HEADER_FONT;
+        c.fill = TEMPLATE_HEADER_FILL;
+        c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+        c.border = TEMPLATE_BORDER;
+      });
+      const WIDTHS = [12, 13, 20, 10, 16, 22, 8, 10, 8, 16, 16, 14, 16, 16, 11, 24, 8, 10, 14, 12, 14, 20, 16];
+      WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+      const exampleRow = ['2025-06-01', '', 'Duck Investments', 'MLB', 'Moneyline', 'Milwaukee Brewers', '', 'away', '-144',
+        '', '', '', '', '3 units', '', 'Series opener', '', 'no'];
+      exampleRow.forEach((v, i) => {
+        const c = ws.getCell(2, i + 1);
+        c.value = v;
+        c.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+        c.border = TEMPLATE_BORDER;
+      });
+
+      const LAST_DATA_ROW = 500;
+      for (let row = 3; row <= LAST_DATA_ROW; row++) {
+        for (let col = 1; col <= 18; col++) {
+          const c = ws.getCell(row, col);
+          c.font = TEMPLATE_INPUT_FONT;
+          c.border = TEMPLATE_BORDER;
+        }
+        ws.getCell(row, 1).numberFormat = '@';
+        ws.getCell(row, 2).numberFormat = '@';
+
+        const cRef = `C${row}`, dRef = `D${row}`, eRef = `E${row}`, fRef = `F${row}`, mRef = `M${row}`;
+
+        ws.getCell(row, 19).value = { formula: `IF(${cRef}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${cRef})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 20).value = { formula: `IF(${dRef}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${dRef})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 21).value = { formula: `IF(${eRef}="","",IF(COUNTIF(BetTypes!$A$2:$A$${BETTYPES_LAST},${eRef})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 22).value = { formula:
+          `IF(OR(${fRef}="",${dRef}="",${eRef}=""),"",` +
+          `IF(OR(${eRef}="Player Prop",${eRef}="Parlay"),"n/a (prop/parlay)",` +
+          `IF(ISNUMBER(SEARCH("/",${fRef})),"combo - checked at import",` +
+          `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${dRef})=0,"n/a (no team list for this sport)",` +
+          `IF(COUNTIFS(Teams!$A$2:$A$${TEAMS_LAST},${fRef},Teams!$B$2:$B$${TEAMS_LAST},${dRef})>0,"OK","NEW? check spelling/Setup")))))` };
+        ws.getCell(row, 23).value = { formula:
+          `IF(${mRef}="","",` +
+          `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${dRef})=0,"n/a (no team list for this sport)",` +
+          `IF(COUNTIFS(Teams!$A$2:$A$${TEAMS_LAST},${mRef},Teams!$B$2:$B$${TEAMS_LAST},${dRef})>0,"OK","NEW? check spelling/Setup")))` };
+        for (let col = 19; col <= 23; col++) {
+          const c = ws.getCell(row, col);
+          c.font = TEMPLATE_CHECK_FONT;
+          c.border = TEMPLATE_BORDER;
+          c.alignment = { horizontal: 'center' };
+        }
+
+        ws.getCell(row, 3).dataValidation = { type: 'list', allowBlank: true, formulae: [`Cappers!$A$2:$A$${CAPPERS_LAST}`] };
+        ws.getCell(row, 4).dataValidation = { type: 'list', allowBlank: true, formulae: [`Sports!$A$2:$A$${SPORTS_LAST}`] };
+        ws.getCell(row, 5).dataValidation = { type: 'list', allowBlank: true, formulae: [`BetTypes!$A$2:$A$${BETTYPES_LAST}`] };
+        ws.getCell(row, 8).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
+        ws.getCell(row, 18).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
+      }
+
+      ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `core-betting-entry-template-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      msg.innerHTML = `<div class="msg ok">Downloaded -- built from ${capperNames.length} cappers, ${sportNames.length} sports, ${betTypeNames.length} bet types, ${teamRows.length} teams, current as of right now.</div>`;
+    } catch (e) {
+      msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+  $('downloadEntryTemplateBtn').addEventListener('click', downloadEntryTemplate);
 
   // ---------- Prop stats (Setup management + Add Picks dropdown) ----------
   async function refreshPropStats() {
