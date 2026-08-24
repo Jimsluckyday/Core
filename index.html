@@ -888,12 +888,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div class="field">
           <label>Pick tier</label>
           <select id="pickTier">
+            <option value="-2">Tier -2 — furthest below base</option>
             <option value="-1">Tier -1 — explicitly below base (lotto pick, half unit, smaller than his normal size)</option>
             <option value="0" selected>Tier 0 — base pick (default)</option>
             <option value="1">Tier 1</option>
             <option value="2">Tier 2</option>
             <option value="3">Tier 3</option>
-            <option value="4">Tier 4 — highest confidence (Whale/Lock/VIP, etc.)</option>
+            <option value="4">Tier 4</option>
+            <option value="5">Tier 5</option>
+            <option value="6">Tier 6</option>
+            <option value="7">Tier 7</option>
+            <option value="8">Tier 8 — highest confidence (Whale/Lock/VIP, etc.)</option>
           </select>
           <input id="pickRawUnitSize" type="text" placeholder="Unit size as shown (optional), e.g. 2U, 1.5U, Whale" style="margin-top:6px;" />
           <div style="font-size:10px;color:var(--ink-soft);margin-top:2px;">Exactly as the capper wrote it -- this is what "Unit sizes seen" below pulls from. Leave blank if none was shown.</div>
@@ -1013,13 +1018,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <label>Tier</label>
           <select id="filterTier">
             <option value="">All tiers</option>
+            <option value="-2">Tier -2 only (below base)</option>
             <option value="-1">Tier -1 only (below base)</option>
             <option value="0">Tier 0 (base) only</option>
-            <option value="1+">Any special tier (1-4)</option>
+            <option value="1+">Any special tier (1-8)</option>
             <option value="1">Tier 1 only</option>
             <option value="2">Tier 2 only</option>
             <option value="3">Tier 3 only</option>
             <option value="4">Tier 4 only</option>
+            <option value="5">Tier 5 only</option>
+            <option value="6">Tier 6 only</option>
+            <option value="7">Tier 7 only</option>
+            <option value="8">Tier 8 only</option>
           </select>
         </div>
       </div>
@@ -1792,14 +1802,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <input id="fsParlayLegWeight" type="number" min="0" max="100" step="1" />
           </div>
         </div>
-        <p class="stub-title" style="margin-bottom:8px;">Pick tier bonuses (nominal/maximum points, Tier 0 is always 0)</p>
+        <p class="stub-title" style="margin-bottom:8px;">Pick tier bonuses (nominal/maximum points, Tier 0 is always 0) <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— range expanded 2026-08-24, -2 to 8, direct request after seeing enough real capper variance that -1..4 wasn't enough room</span></p>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:8px;">
+          Tier -2 and -1 share ONE confluence weight setting (below), not two -- both mean the same kind of thing (an explicit reduced-confidence call), just a further degree of it, so splitting that into a second setting would add a knob without a real distinction behind it.
+        </div>
         <div class="row">
+          <div class="field">
+            <label>Tier -2 bonus (furthest below base)</label>
+            <input id="fsTierMinus2Bonus" type="number" step="1" />
+          </div>
           <div class="field">
             <label>Tier -1 bonus (below base)</label>
             <input id="fsTierMinus1Bonus" type="number" step="1" />
           </div>
           <div class="field">
-            <label>Tier -1 confluence weight (%)</label>
+            <label>Tier -1/-2 confluence weight (%)</label>
             <input id="fsTierMinus1ConfluenceWeight" type="number" min="0" max="100" step="1" />
           </div>
           <div class="field">
@@ -1817,6 +1834,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <div class="field">
             <label>Tier 4 bonus</label>
             <input id="fsTier4Bonus" type="number" step="1" />
+          </div>
+          <div class="field">
+            <label>Tier 5 bonus</label>
+            <input id="fsTier5Bonus" type="number" step="1" />
+          </div>
+          <div class="field">
+            <label>Tier 6 bonus</label>
+            <input id="fsTier6Bonus" type="number" step="1" />
+          </div>
+          <div class="field">
+            <label>Tier 7 bonus</label>
+            <input id="fsTier7Bonus" type="number" step="1" />
+          </div>
+          <div class="field">
+            <label>Tier 8 bonus (highest)</label>
+            <input id="fsTier8Bonus" type="number" step="1" />
           </div>
         </div>
         <p class="stub-title" style="margin-bottom:8px;">Personal tier calibration (per-capper, independent of the bonuses above)</p>
@@ -5755,12 +5788,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <select id="bulkValueSport" style="display:none;"></select>
           <select id="bulkValueBetType" style="display:none;"></select>
           <select id="bulkValueTier" style="display:none;">
+            <option value="-2">Tier -2</option>
             <option value="-1">Tier -1</option>
             <option value="0">Base</option>
             <option value="1">Tier 1</option>
             <option value="2">Tier 2</option>
             <option value="3">Tier 3</option>
             <option value="4">Tier 4</option>
+            <option value="5">Tier 5</option>
+            <option value="6">Tier 6</option>
+            <option value="7">Tier 7</option>
+            <option value="8">Tier 8</option>
           </select>
         </div>
         <div class="checkbox-row" id="bulkTierGuardRow" style="display:none;flex:0 0 auto;">
@@ -5820,7 +5858,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const field = $('bulkFieldSelect').value;
       const valueInputs = { event_date: 'bulkValueDate', capper_id: 'bulkValueCapper', sport_id: 'bulkValueSport', bet_type_id: 'bulkValueBetType', pick_tier: 'bulkValueTier' };
       const fieldLabels = { event_date: 'date', capper_id: 'capper', sport_id: 'sport', bet_type_id: 'bet type', pick_tier: 'tier' };
-      const tierLabels = { '-1': 'Tier -1', '0': 'Base', '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '4': 'Tier 4' };
+      const tierLabels = { '-2': 'Tier -2', '-1': 'Tier -1', '0': 'Base', '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '4': 'Tier 4', '5': 'Tier 5', '6': 'Tier 6', '7': 'Tier 7', '8': 'Tier 8' };
       const rawValue = $(valueInputs[field]).value;
       if (!rawValue && field !== 'pick_tier') { alert('Pick a value first.'); return; }
       const newValue = field === 'pick_tier' ? Number(rawValue) : rawValue;
@@ -6472,12 +6510,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
           const link = linkByLegId[leg.id] || {};
           const linkTier = link.pick_tier;
           const tierSelectHtml = `<select class="leg-tier-select" data-parlay-id="${parlayId}" data-leg-id="${leg.id}" style="font-family:inherit;font-size:10px;padding:1px 2px;margin-left:6px;">
+              <option value="-2" ${Number(linkTier) === -2 ? 'selected' : ''}>Tier -2</option>
               <option value="-1" ${Number(linkTier) === -1 ? 'selected' : ''}>Tier -1</option>
               <option value="0" ${linkTier === null || linkTier === undefined || Number(linkTier) === 0 ? 'selected' : ''}>Tier 0</option>
               <option value="1" ${Number(linkTier) === 1 ? 'selected' : ''}>Tier 1</option>
               <option value="2" ${Number(linkTier) === 2 ? 'selected' : ''}>Tier 2</option>
               <option value="3" ${Number(linkTier) === 3 ? 'selected' : ''}>Tier 3</option>
               <option value="4" ${Number(linkTier) === 4 ? 'selected' : ''}>Tier 4</option>
+              <option value="5" ${Number(linkTier) === 5 ? 'selected' : ''}>Tier 5</option>
+              <option value="6" ${Number(linkTier) === 6 ? 'selected' : ''}>Tier 6</option>
+              <option value="7" ${Number(linkTier) === 7 ? 'selected' : ''}>Tier 7</option>
+              <option value="8" ${Number(linkTier) === 8 ? 'selected' : ''}>Tier 8</option>
             </select>`;
           const unitSizeInputHtml = `<input type="text" class="leg-unitsize-input" data-parlay-id="${parlayId}" data-leg-id="${leg.id}" value="${escapeHtml(link.raw_unit_size || '')}" placeholder="unit size" style="width:70px;font-family:inherit;font-size:10px;padding:1px 3px;margin-left:4px;" />`;
           return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}
@@ -6965,12 +7008,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // signal on an individual pick.
       const tierZeroLabel = (p.cappers && p.cappers.no_tier_signal) ? 'None given' : 'Tier 0';
       const tierCell = `<select class="inline-tier-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;">
+        <option value="-2" ${Number(p.pick_tier) === -2 ? 'selected' : ''}>Tier -2</option>
         <option value="-1" ${Number(p.pick_tier) === -1 ? 'selected' : ''}>Tier -1</option>
         <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>${tierZeroLabel}</option>
         <option value="1" ${Number(p.pick_tier) === 1 ? 'selected' : ''}>Tier 1</option>
         <option value="2" ${Number(p.pick_tier) === 2 ? 'selected' : ''}>Tier 2</option>
         <option value="3" ${Number(p.pick_tier) === 3 ? 'selected' : ''}>Tier 3</option>
         <option value="4" ${Number(p.pick_tier) === 4 ? 'selected' : ''}>Tier 4</option>
+        <option value="5" ${Number(p.pick_tier) === 5 ? 'selected' : ''}>Tier 5</option>
+        <option value="6" ${Number(p.pick_tier) === 6 ? 'selected' : ''}>Tier 6</option>
+        <option value="7" ${Number(p.pick_tier) === 7 ? 'selected' : ''}>Tier 7</option>
+        <option value="8" ${Number(p.pick_tier) === 8 ? 'selected' : ''}>Tier 8</option>
       </select>`;
       const unitSizeCell = `<input type="text" class="inline-unitsize-input" data-id="${p.id}" value="${escapeHtml(p.raw_unit_size || '')}" placeholder="e.g. 2U" style="width:80px;font-family:inherit;font-size:11px;padding:3px 4px;" />`;
       // Read-only reference, not another input -- CONFIRMED as the actual
@@ -8117,12 +8165,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             const link = linkByLegId[leg.id] || {};
             const linkTier = link.pick_tier;
             const tierSelectHtml = '<select class="leg-tier-select" data-parlay-id="' + parlayId + '" data-leg-id="' + leg.id + '" style="font-family:inherit;font-size:10px;padding:1px 2px;margin-left:6px;">' +
+              '<option value="-2"' + (Number(linkTier) === -2 ? ' selected' : '') + '>Tier -2</option>' +
               '<option value="-1"' + (Number(linkTier) === -1 ? ' selected' : '') + '>Tier -1</option>' +
               '<option value="0"' + ((linkTier === null || linkTier === undefined || Number(linkTier) === 0) ? ' selected' : '') + '>Tier 0</option>' +
               '<option value="1"' + (Number(linkTier) === 1 ? ' selected' : '') + '>Tier 1</option>' +
               '<option value="2"' + (Number(linkTier) === 2 ? ' selected' : '') + '>Tier 2</option>' +
               '<option value="3"' + (Number(linkTier) === 3 ? ' selected' : '') + '>Tier 3</option>' +
               '<option value="4"' + (Number(linkTier) === 4 ? ' selected' : '') + '>Tier 4</option>' +
+              '<option value="5"' + (Number(linkTier) === 5 ? ' selected' : '') + '>Tier 5</option>' +
+              '<option value="6"' + (Number(linkTier) === 6 ? ' selected' : '') + '>Tier 6</option>' +
+              '<option value="7"' + (Number(linkTier) === 7 ? ' selected' : '') + '>Tier 7</option>' +
+              '<option value="8"' + (Number(linkTier) === 8 ? ' selected' : '') + '>Tier 8</option>' +
               '</select>';
             const unitSizeInputHtml = '<input type="text" class="leg-unitsize-input" data-parlay-id="' + parlayId + '" data-leg-id="' + leg.id + '" value="' + escLocal(link.raw_unit_size || '') + '" placeholder="unit size" style="width:70px;font-family:inherit;font-size:10px;padding:1px 3px;margin-left:4px;" />';
             return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml +
@@ -11489,7 +11542,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
       return;
     }
-    const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
+    const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t < 0 ? `Tier ${t} (below base)` : `Tier ${t}`);
     const totalRows = potdPerfRowsTotalByTier(picks);
     const totalHtml = potdPerfTotalTableHtml(totalRows, 'Totals — every capper combined', tierLabel,
       'Every capper combined into one row per tier, split into Straight and Parlay -- a parlay\'s win/loss behaves very differently from a straight bet\'s, so this keeps the two from blending into one misleading combined win%.',
@@ -11803,8 +11856,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       return;
     }
 
-    const tiers = [-1, 0, 1, 2, 3, 4];
-    const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t === -1 ? 'Tier -1 (below base)' : `Tier ${t}`);
+    const tiers = [-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+    const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t < 0 ? `Tier ${t} (below base)` : `Tier ${t}`);
 
     // Every capper's picks at each tier combined into one record -- e.g.
     // "Tier 4 picks are 20 for 25 overall" -- for judging whether a tier is
@@ -12426,7 +12479,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return { lower: (center - margin) / denom, upper: (center + margin) / denom };
   }
 
-  const TIER_LABELS_NOTABLE = { '-1': 'Tier -1', '0': 'Tier 0', '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '4': 'Tier 4' };
+  const TIER_LABELS_NOTABLE = { '-2': 'Tier -2', '-1': 'Tier -1', '0': 'Tier 0', '1': 'Tier 1', '2': 'Tier 2', '3': 'Tier 3', '4': 'Tier 4', '5': 'Tier 5', '6': 'Tier 6', '7': 'Tier 7', '8': 'Tier 8' };
 
   async function computeNotableStats(minPct, absMin, barPct) {
     const picks = await restAllPages(
@@ -14385,12 +14438,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           <div class="field">
             <label>Tier</label>
             <select id="rqTier">
+              <option value="-2" ${Number(p.pick_tier) === -2 ? 'selected' : ''}>Tier -2</option>
               <option value="-1" ${Number(p.pick_tier) === -1 ? 'selected' : ''}>Tier -1</option>
               <option value="0" ${!p.pick_tier || Number(p.pick_tier) === 0 ? 'selected' : ''}>${(p.cappers && p.cappers.no_tier_signal) ? 'None given' : 'Tier 0'}</option>
               <option value="1" ${Number(p.pick_tier) === 1 ? 'selected' : ''}>Tier 1</option>
               <option value="2" ${Number(p.pick_tier) === 2 ? 'selected' : ''}>Tier 2</option>
               <option value="3" ${Number(p.pick_tier) === 3 ? 'selected' : ''}>Tier 3</option>
               <option value="4" ${Number(p.pick_tier) === 4 ? 'selected' : ''}>Tier 4</option>
+              <option value="5" ${Number(p.pick_tier) === 5 ? 'selected' : ''}>Tier 5</option>
+              <option value="6" ${Number(p.pick_tier) === 6 ? 'selected' : ''}>Tier 6</option>
+              <option value="7" ${Number(p.pick_tier) === 7 ? 'selected' : ''}>Tier 7</option>
+              <option value="8" ${Number(p.pick_tier) === 8 ? 'selected' : ''}>Tier 8</option>
             </select>
           </div>
           <div class="field">
@@ -15076,7 +15134,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   let scoringConfig = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
-    tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    tierMinus2BonusPoints: 0, tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    tier5BonusPoints: 0, tier6BonusPoints: 0, tier7BonusPoints: 0, tier8BonusPoints: 0,
     parlayLegWeight: 0.5,
     // How much a Tier -1 pick counts toward confluence for OTHER cappers'
     // picks on the same game -- CONFIRMED, direct concern from the project
@@ -15121,11 +15180,24 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           streakCapGames: Number(r.streak_cap_games),
           confluenceCapCappers: Number(r.confluence_cap_cappers),
           hotPickStreakThreshold: Number(r.hot_pick_streak_threshold),
+          // Nullish-fallback to 0, not num()'s own "missing = 0" -- these
+          // columns are BRAND NEW (Tier -2/5/6/7/8, added for the -2..8
+          // range expansion) and won't exist in the DB row at all until the
+          // matching ALTER TABLE runs. num() would already read a genuinely
+          // missing key as 0 via Number(undefined -> 0)... but that masks a
+          // real "migration not run yet" state the same way, so this stays
+          // explicit and consistent with the other newer-optional-column
+          // fields below rather than silently relying on that coincidence.
+          tierMinus2BonusPoints: r.tier_minus2_bonus_points !== null && r.tier_minus2_bonus_points !== undefined ? Number(r.tier_minus2_bonus_points) : 0,
           tierMinus1BonusPoints: num(r.tier_minus1_bonus_points),
           tier1BonusPoints: num(r.tier1_bonus_points),
           tier2BonusPoints: num(r.tier2_bonus_points),
           tier3BonusPoints: num(r.tier3_bonus_points),
           tier4BonusPoints: num(r.tier4_bonus_points),
+          tier5BonusPoints: r.tier5_bonus_points !== null && r.tier5_bonus_points !== undefined ? Number(r.tier5_bonus_points) : 0,
+          tier6BonusPoints: r.tier6_bonus_points !== null && r.tier6_bonus_points !== undefined ? Number(r.tier6_bonus_points) : 0,
+          tier7BonusPoints: r.tier7_bonus_points !== null && r.tier7_bonus_points !== undefined ? Number(r.tier7_bonus_points) : 0,
+          tier8BonusPoints: r.tier8_bonus_points !== null && r.tier8_bonus_points !== undefined ? Number(r.tier8_bonus_points) : 0,
           parlayLegWeight: r.parlay_leg_weight !== null && r.parlay_leg_weight !== undefined ? Number(r.parlay_leg_weight) : 0.5,
           tierMinus1ConfluenceWeight: r.tier_minus1_confluence_weight !== null && r.tier_minus1_confluence_weight !== undefined ? Number(r.tier_minus1_confluence_weight) : 0.25,
           tierCalibrationWeight: r.tier_calibration_weight !== null && r.tier_calibration_weight !== undefined ? Number(r.tier_calibration_weight) : 0,
@@ -15213,7 +15285,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // whichever discount happens to be larger.
   function confluenceWeightFor(pick) {
     let w = pick.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
-    if (Number(pick.pick_tier) === -1) w *= scoringConfig.tierMinus1ConfluenceWeight;
+    // Generalized from "=== -1" to "< 0" for the -2..8 tier range expansion
+    // -- Tier -2 is the same KIND of signal as -1 (explicitly reduced
+    // confidence), just a further degree of it, so it reuses the same
+    // single confluence-weight setting rather than needing its own.
+    if (Number(pick.pick_tier) < 0) w *= scoringConfig.tierMinus1ConfluenceWeight;
     return w;
   }
 
@@ -15242,19 +15318,24 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   function tierBonusPoints(tier, tierAdjWinPct) {
     const nominal = (() => {
       switch (Number(tier) || 0) {
+        case -2: return scoringConfig.tierMinus2BonusPoints;
         case -1: return scoringConfig.tierMinus1BonusPoints;
         case 1: return scoringConfig.tier1BonusPoints;
         case 2: return scoringConfig.tier2BonusPoints;
         case 3: return scoringConfig.tier3BonusPoints;
         case 4: return scoringConfig.tier4BonusPoints;
+        case 5: return scoringConfig.tier5BonusPoints;
+        case 6: return scoringConfig.tier6BonusPoints;
+        case 7: return scoringConfig.tier7BonusPoints;
+        case 8: return scoringConfig.tier8BonusPoints;
         default: return 0;
       }
     })();
     if (!nominal) return 0;
-    // A positive nominal (reward, tiers 1-4) scales UP with how well this
+    // A positive nominal (reward, tiers 1-8) scales UP with how well this
     // capper's stated confidence at this tier is actually borne out --
     // full reward only when his own win rate here backs up the claim. A
-    // negative nominal (penalty, Tier -1) is the mirror image: the penalty
+    // negative nominal (penalty, Tier -1/-2) is the mirror image: the penalty
     // should scale up as his LOSS rate at this tier confirms his own
     // lowered-confidence signal, and soften if he's surprisingly good
     // despite calling it a lotto/reduced pick -- so it uses his loss rate
@@ -17030,9 +17111,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const winPct = (wins + losses) > 0 ? Math.round((1000 * wins) / (wins + losses)) / 10 : null;
       return { wins, losses, pushes, total: arr.length, winPct };
     }
-    const tierLabelsBt = { '-1': 'Tier -1 (below base)', 0: 'Tier 0 (base picks)', 1: 'Tier 1', 2: 'Tier 2', 3: 'Tier 3', 4: 'Tier 4 (highest)' };
+    const tierLabelsBt = { '-2': 'Tier -2 (below base)', '-1': 'Tier -1 (below base)', 0: 'Tier 0 (base picks)', 1: 'Tier 1', 2: 'Tier 2', 3: 'Tier 3', 4: 'Tier 4', 5: 'Tier 5', 6: 'Tier 6', 7: 'Tier 7', 8: 'Tier 8 (highest)' };
     const hasAnyTiered = entries.some(e => e.tier !== 0);
-    const tierRowsBt = [-1, 0, 1, 2, 3, 4].map(t => {
+    const tierRowsBt = [-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8].map(t => {
       const arr = entries.filter(e => e.tier === t);
       if (!arr.length) return '';
       const s = simpleWinPct(arr);
@@ -17415,7 +17496,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   const FORMULA_DEFAULTS = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
     smoothingK: 20, streakCapGames: 10, confluenceCapCappers: 3, hotPickStreakThreshold: 10,
-    tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    tierMinus2BonusPoints: 0, tierMinus1BonusPoints: 0, tier1BonusPoints: 0, tier2BonusPoints: 0, tier3BonusPoints: 0, tier4BonusPoints: 0,
+    tier5BonusPoints: 0, tier6BonusPoints: 0, tier7BonusPoints: 0, tier8BonusPoints: 0,
     parlayLegWeight: 0.5,
     tierMinus1ConfluenceWeight: 0.25,
     tierCalibrationWeight: 0, tierCalibrationMinSample: 10,
@@ -17431,12 +17513,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('fsStreakCap').value = cfg.streakCapGames;
     $('fsConfluenceCap').value = cfg.confluenceCapCappers;
     $('fsHotThreshold').value = cfg.hotPickStreakThreshold;
+    $('fsTierMinus2Bonus').value = cfg.tierMinus2BonusPoints;
     $('fsTierMinus1Bonus').value = cfg.tierMinus1BonusPoints;
     $('fsTierMinus1ConfluenceWeight').value = Math.round(cfg.tierMinus1ConfluenceWeight * 100);
     $('fsTier1Bonus').value = cfg.tier1BonusPoints;
     $('fsTier2Bonus').value = cfg.tier2BonusPoints;
     $('fsTier3Bonus').value = cfg.tier3BonusPoints;
     $('fsTier4Bonus').value = cfg.tier4BonusPoints;
+    $('fsTier5Bonus').value = cfg.tier5BonusPoints;
+    $('fsTier6Bonus').value = cfg.tier6BonusPoints;
+    $('fsTier7Bonus').value = cfg.tier7BonusPoints;
+    $('fsTier8Bonus').value = cfg.tier8BonusPoints;
     $('fsParlayLegWeight').value = Math.round(cfg.parlayLegWeight * 100);
     $('fsTierCalibrationWeight').value = Math.round(cfg.tierCalibrationWeight * 100);
     $('fsTierCalibrationMinSample').value = cfg.tierCalibrationMinSample;
@@ -17482,12 +17569,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       streakCapGames: Number($('fsStreakCap').value),
       confluenceCapCappers: Number($('fsConfluenceCap').value),
       hotPickStreakThreshold: Number($('fsHotThreshold').value),
+      tierMinus2BonusPoints: Number($('fsTierMinus2Bonus').value),
       tierMinus1BonusPoints: Number($('fsTierMinus1Bonus').value),
       tierMinus1ConfluenceWeight: Number($('fsTierMinus1ConfluenceWeight').value) / 100,
       tier1BonusPoints: Number($('fsTier1Bonus').value),
       tier2BonusPoints: Number($('fsTier2Bonus').value),
       tier3BonusPoints: Number($('fsTier3Bonus').value),
       tier4BonusPoints: Number($('fsTier4Bonus').value),
+      tier5BonusPoints: Number($('fsTier5Bonus').value),
+      tier6BonusPoints: Number($('fsTier6Bonus').value),
+      tier7BonusPoints: Number($('fsTier7Bonus').value),
+      tier8BonusPoints: Number($('fsTier8Bonus').value),
       parlayLegWeight: Number($('fsParlayLegWeight').value) / 100,
       tierCalibrationWeight: Number($('fsTierCalibrationWeight').value) / 100,
       tierCalibrationMinSample: Number($('fsTierCalibrationMinSample').value),
@@ -17523,12 +17615,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           streak_cap_games: newCfg.streakCapGames,
           confluence_cap_cappers: newCfg.confluenceCapCappers,
           hot_pick_streak_threshold: newCfg.hotPickStreakThreshold,
+          tier_minus2_bonus_points: newCfg.tierMinus2BonusPoints,
           tier_minus1_bonus_points: newCfg.tierMinus1BonusPoints,
           tier_minus1_confluence_weight: newCfg.tierMinus1ConfluenceWeight,
           tier1_bonus_points: newCfg.tier1BonusPoints,
           tier2_bonus_points: newCfg.tier2BonusPoints,
           tier3_bonus_points: newCfg.tier3BonusPoints,
           tier4_bonus_points: newCfg.tier4BonusPoints,
+          tier5_bonus_points: newCfg.tier5BonusPoints,
+          tier6_bonus_points: newCfg.tier6BonusPoints,
+          tier7_bonus_points: newCfg.tier7BonusPoints,
+          tier8_bonus_points: newCfg.tier8BonusPoints,
           parlay_leg_weight: newCfg.parlayLegWeight,
           tier_calibration_weight: newCfg.tierCalibrationWeight,
           tier_calibration_min_sample: newCfg.tierCalibrationMinSample,
