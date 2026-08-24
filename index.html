@@ -1377,6 +1377,41 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- PUBLISHING PROGRESS (internal only -- tracks the running tally of published picks as backfill data grows, NOT shown on the public site) -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Publishing progress <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public</span>
+        <button class="ghost small" id="togglePubProgressBtn">Show progress</button>
+      </p>
+      <div id="pubProgressPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Break down by</label>
+            <select id="pubProgressGranularity">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly" selected>Monthly</option>
+              <option value="annual">Annual</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>From date</label>
+            <input id="pubProgressFrom" type="date" />
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="pubProgressTo" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="runPubProgressBtn">Pop out report</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Direct request 2026-08-23, while backfilling a full year of test data (starting Jun 1 2025): a way to watch the site's picture change as more data gets published, without it showing anywhere on the public site itself -- for internal analysis only. Scoped to <strong>published</strong> picks only (same picks the public site would show), same $100-straight/$25-parlay flat-stake math already used there. Each row is one period's own totals; the last column is a running cumulative profit across the whole range, so you can watch the overall trend build as you publish more.
+        </div>
+      </div>
+    </div>
+
     <!-- CONSENSUS (internal for now — this is the data that eventually publishes) -->
     <div class="stub" data-tab="reports">
       <p class="stub-title">
@@ -11187,6 +11222,151 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('runPotdPerfBtn').addEventListener('click', runPotdPerf);
   $('popPotdPerfBtn').addEventListener('click', popPotdPerf);
+
+  // ---------- Publishing progress (internal analysis only) ----------
+  // Direct request 2026-08-23: same $100-straight/$25-parlay flat-stake
+  // profit math already live on published-picks.html, ported here since
+  // that math only exists in that separate file's own closure. Kept
+  // deliberately in sync with it -- if the public site's stake amounts
+  // ever change, update both places.
+  const PUB_PROGRESS_STRAIGHT_STAKE = 100;
+  const PUB_PROGRESS_PARLAY_STAKE = 25;
+  function pubProgressStake(betTypeName) {
+    return (betTypeName || '').trim().toLowerCase() === 'parlay' ? PUB_PROGRESS_PARLAY_STAKE : PUB_PROGRESS_STRAIGHT_STAKE;
+  }
+  function pubProgressProfit(odds, result, stake) {
+    if (result === 'loss') return -stake;
+    if (result !== 'win') return null;
+    if (odds === null || odds === undefined) return null;
+    return odds > 0 ? (odds * stake / 100) : (stake * 100 / Math.abs(odds));
+  }
+
+  // Monday of the ISO week containing dateStr -- UTC-anchored throughout
+  // (never a local-timezone-sensitive Date method) so "which day of the
+  // week" never shifts depending on the browser's own timezone, same
+  // discipline as normalizeDateStr elsewhere in this file.
+  function pubProgressMondayOf(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    const day = d.getUTCDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setUTCDate(d.getUTCDate() + diff);
+    return d.toISOString().slice(0, 10);
+  }
+  const PUB_PROGRESS_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  function pubProgressPeriodKey(dateStr, granularity) {
+    if (granularity === 'daily') return { key: dateStr, label: dateStr };
+    if (granularity === 'weekly') { const monday = pubProgressMondayOf(dateStr); return { key: monday, label: `Week of ${monday}` }; }
+    if (granularity === 'annual') { const y = dateStr.slice(0, 4); return { key: y, label: y }; }
+    const y = dateStr.slice(0, 4), m = dateStr.slice(5, 7);
+    return { key: `${y}-${m}`, label: `${PUB_PROGRESS_MONTH_NAMES[Number(m) - 1]} ${y}` };
+  }
+
+  $('togglePubProgressBtn').addEventListener('click', () => {
+    const panel = $('pubProgressPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('togglePubProgressBtn').textContent = showing ? 'Show progress' : 'Hide progress';
+  });
+
+  async function runPubProgress() {
+    const btn = $('runPubProgressBtn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    try {
+      const granularity = $('pubProgressGranularity').value;
+      const from = $('pubProgressFrom').value;
+      const to = $('pubProgressTo').value;
+      let query = 'picks?select=event_date,result,opening_odds,closing_odds,bet_types(name)&is_published=eq.true&is_parlay_leg=eq.false';
+      if (from) query += `&event_date=gte.${from}`;
+      if (to) query += `&event_date=lte.${to}`;
+      query += '&order=event_date.asc';
+      const picks = await restAllPages(query);
+
+      const buckets = {}; // key -> { label, sortKey, total, wins, losses, pushes, profit, countedForProfit }
+      picks.forEach(p => {
+        const { key, label } = pubProgressPeriodKey(p.event_date, granularity);
+        if (!buckets[key]) buckets[key] = { label, sortKey: key, total: 0, wins: 0, losses: 0, pushes: 0, profit: 0, countedForProfit: 0, gradedCount: 0 };
+        const b = buckets[key];
+        if (p.result !== 'win' && p.result !== 'loss' && p.result !== 'push') return; // pending -- not part of the tally yet
+        b.total++;
+        b.gradedCount++;
+        if (p.result === 'win') b.wins++;
+        else if (p.result === 'loss') b.losses++;
+        else b.pushes++;
+        const oddsVal = (p.opening_odds !== null && p.opening_odds !== undefined) ? p.opening_odds
+          : ((p.closing_odds !== null && p.closing_odds !== undefined) ? p.closing_odds : null);
+        const stake = pubProgressStake(p.bet_types ? p.bet_types.name : '');
+        const profit = pubProgressProfit(oddsVal, p.result, stake);
+        if (profit !== null) { b.profit += profit; b.countedForProfit++; }
+      });
+
+      const sorted = Object.values(buckets).sort((a, b) => a.sortKey < b.sortKey ? -1 : (a.sortKey > b.sortKey ? 1 : 0));
+      openPubProgressTab(sorted, granularity, from, to, picks.length);
+    } catch (e) {
+      alert('Could not run report: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+  $('runPubProgressBtn').addEventListener('click', runPubProgress);
+
+  function openPubProgressTab(rows, granularity, from, to, totalPicksAllTime) {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    const granularityLabel = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', annual: 'Annual' }[granularity] || granularity;
+    const rangeLabel = (from || to) ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time';
+
+    let cumulative = 0;
+    const bodyRows = rows.map(r => {
+      cumulative += r.profit;
+      const winPct = (r.wins + r.losses) > 0 ? Math.round((1000 * r.wins) / (r.wins + r.losses)) / 10 : null;
+      const profitText = r.countedForProfit > 0
+        ? `${r.profit >= 0 ? '+' : '−'}$${Math.abs(r.profit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : '—';
+      const cumulativeText = `${cumulative >= 0 ? '+' : '−'}$${Math.abs(cumulative).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `<tr>
+        <td>${escapeHtml(r.label)}</td>
+        <td>${r.total}</td>
+        <td>${r.wins}</td>
+        <td>${r.losses}</td>
+        <td>${r.pushes}</td>
+        <td>${winPct !== null ? winPct + '%' : '—'}</td>
+        <td style="color:${r.profit >= 0 ? '#234d35' : '#8a2f24'};font-weight:bold;">${profitText}</td>
+        <td style="font-weight:bold;">${cumulativeText}</td>
+      </tr>`;
+    }).join('');
+
+    const tableHtml = rows.length ? `
+      <table class="picks-table">
+        <thead><tr><th>Period</th><th>Total Bets</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th><th>Profit/Loss</th><th>Cumulative</th></tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>` : '<div class="empty-state">No published, graded picks in this range yet.</div>';
+
+    win.document.open();
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Publishing Progress</title>
+<style>
+  :root { --ink-soft: #55584d; }
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
+  .picks-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; }
+  .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
+  .empty-state { font-style: italic; color: #55584d; }
+</style>
+</head><body>
+  <h1>Publishing Progress <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
+  <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${escapeHtml(granularityLabel)} · ${escapeHtml(rangeLabel)} · ${totalPicksAllTime} published pick${totalPicksAllTime === 1 ? '' : 's'} matched (including pending)</div>
+  ${tableHtml}
+  ${csvExportPopoutScript('publishing-progress', false)}
+</body></html>`);
+    win.document.close();
+  }
 
   async function runAnalytics() {
     const minPicks = Math.max(1, Number($('analyticsMinPicks').value) || 2);
