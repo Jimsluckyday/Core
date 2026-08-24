@@ -1496,6 +1496,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- TIER CONSISTENCY CHECK (internal only) -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Tier consistency check <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public</span>
+        <button class="ghost small" id="toggleTierConsistencyBtn">Show check</button>
+      </p>
+      <div id="tierConsistencyPanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Direct request 2026-08-24: scope how many raw unit-size values have been tagged with more than one different tier for the SAME capper (e.g. Duck Investments' "1.5U" showing up as both Tier 2 and Tier 3 across different picks) -- exactly the kind of inconsistency that would make an automatic tier suggestion unreliable, since there'd be no single right answer to match against. Groups every capper's own raw_unit_size values (case/spacing normalized) and only shows the ones that disagree with themselves. Each pick's tier is directly editable right here -- fix the outliers to agree with the majority (or decide the majority was wrong and fix those instead), then re-scan to confirm it's clean.
+        </div>
+        <button id="findTierInconsistenciesBtn">Scan for inconsistencies</button>
+        <div id="tierConsistencyWrap" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
     <!-- PUBLISHING PROGRESS (internal only -- tracks the running tally of published picks as backfill data grows, NOT shown on the public site) -->
     <div class="stub" data-tab="reports">
       <p class="stub-title">
@@ -3796,6 +3811,102 @@ These are almost always the same day, so "Date entered" only fills in a starting
     }
   }
   $('findDuplicatesBtn').addEventListener('click', findDuplicates);
+
+  // ---------- Tier consistency check ----------
+  // Direct request 2026-08-24: "I need a way of looking at the current
+  // data to scope how many have multiple selections within each tier so I
+  // can fix them to help the automatic tier system." A raw_unit_size value
+  // that's been tagged with more than one different pick_tier for the SAME
+  // capper (e.g. "1.5U" showing up as both Tier 2 and Tier 3 across
+  // different picks) means there's no single right answer for a future
+  // auto-tier lookup to match against -- this has to be clean before that
+  // feature can trust history at all. Also directly useful for the named-
+  // tier problem (a capper using "Pressure Play"/"Platinum Play" instead
+  // of numbers) -- once a human decides those labels' tiers ONE time,
+  // this is what proves that decision actually got applied consistently
+  // afterward, not just guessed differently pick to pick.
+  $('toggleTierConsistencyBtn').addEventListener('click', () => {
+    const panel = $('tierConsistencyPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleTierConsistencyBtn').textContent = showing ? 'Show check' : 'Hide check';
+  });
+
+  async function findTierInconsistencies() {
+    const wrap = $('tierConsistencyWrap');
+    wrap.innerHTML = '<div class="empty-state">Scanning...</div>';
+    try {
+      const picks = await restAllPages(
+        'picks?select=id,event_date,selection,line,capper_id,pick_tier,raw_unit_size,cappers(name)' +
+        '&is_parlay_leg=eq.false&pick_tier=not.is.null&raw_unit_size=not.is.null&order=event_date.desc'
+      );
+
+      // Grouped by capper + normalized raw value (same normalizeUnitSize
+      // already used for the per-capper tier-history reference panel --
+      // strips a trailing "U" so "1.5U"/"1.5u"/"1.5" are treated as the
+      // same signal, never as three separate ones).
+      const groups = {};
+      picks.forEach(p => {
+        const raw = (p.raw_unit_size || '').trim();
+        if (!raw) return;
+        const norm = normalizeUnitSize(raw).trim().toLowerCase();
+        if (!norm) return;
+        const key = `${p.capper_id}::${norm}`;
+        if (!groups[key]) groups[key] = { capperName: p.cappers ? p.cappers.name : '—', raw, picks: [] };
+        groups[key].picks.push(p);
+      });
+
+      const inconsistent = Object.values(groups).filter(g => new Set(g.picks.map(p => Number(p.pick_tier))).size > 1);
+      inconsistent.sort((a, b) => a.capperName.localeCompare(b.capperName) || a.raw.localeCompare(b.raw));
+
+      if (!inconsistent.length) {
+        wrap.innerHTML = '<div class="empty-state">No inconsistencies found -- every raw unit-size value on file maps to exactly one tier per capper.</div>';
+        return;
+      }
+
+      const TIER_RANGE = [-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+      const tierOptionsHtml = current => TIER_RANGE.map(t => `<option value="${t}" ${Number(current) === t ? 'selected' : ''}>Tier ${t}</option>`).join('');
+
+      const html = inconsistent.map(g => {
+        const tierCounts = {};
+        g.picks.forEach(p => { const t = Number(p.pick_tier); tierCounts[t] = (tierCounts[t] || 0) + 1; });
+        const breakdown = Object.entries(tierCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => `Tier ${t} (${c})`).join(', ');
+        const rows = g.picks.slice().sort((a, b) => Number(a.pick_tier) - Number(b.pick_tier)).map(p => `
+          <tr>
+            <td>${p.event_date}</td>
+            <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
+            <td><select class="tier-fix-select" data-id="${p.id}">${tierOptionsHtml(p.pick_tier)}</select></td>
+          </tr>`).join('');
+        return `<div class="msg" style="margin-bottom:14px;">
+          <strong>${escapeHtml(g.capperName)}</strong> — raw value "${escapeHtml(g.raw)}": ${breakdown}
+          <table class="picks-table" style="margin-top:8px;">
+            <thead><tr><th>Date</th><th>Selection</th><th>Tier</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+      }).join('');
+
+      wrap.innerHTML = `<div style="margin-bottom:10px;font-size:12px;">${inconsistent.length} inconsistent raw value${inconsistent.length === 1 ? '' : 's'} found -- fix the outliers below, then re-scan to confirm.</div>${html}`;
+
+      wrap.querySelectorAll('.tier-fix-select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const id = sel.getAttribute('data-id');
+          sel.disabled = true;
+          try {
+            await rest(`picks?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ pick_tier: Number(sel.value) }) });
+            sel.style.borderColor = 'var(--stamp-green)';
+          } catch (e) {
+            alert('Could not save: ' + e.message);
+          } finally {
+            sel.disabled = false;
+          }
+        });
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  }
+  $('findTierInconsistenciesBtn').addEventListener('click', findTierInconsistencies);
 
   // ---------- Prop stats (Setup management + Add Picks dropdown) ----------
   async function refreshPropStats() {
