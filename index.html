@@ -2498,6 +2498,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           Paste rows copied from a spreadsheet (or built here in chat) — first row must be column headers. Required columns: <strong>date, capper, sport, bet type, selection</strong>. Optional: <strong>line, home_away, odds, prop_player, prop_stat (or just "stat"), prop_team, confidence, notes, published, parlay</strong>. For player props, if you don't include a separate <strong>prop_player</strong> column, the player's name is automatically taken from <strong>selection</strong>. <strong>prop_team</strong> is shown to customers alongside the player's name on the public page so casual fans don't have to look up who they play for — leave it blank if unknown, since it's not required for grading. <strong>parlay</strong> is a plain number (1, 2, 3…), your own local label for that capper's parlays that day — leave every standalone pick blank, and if the same selection belongs to more than one parlay, just paste it again on its own row with the other number rather than trying to combine numbers in one cell. The combined parlay summary row is created automatically from whichever rows share a number — you never type it yourself. Capper/sport/bet type must already exist in this tool (added via the Cappers/Sports/Bet Types section above) — unmatched names get flagged instead of guessed at.
         </div>
+        <div style="margin-bottom:12px;padding:10px;border:1px dashed var(--field);border-radius:3px;">
+          <button id="downloadEntryTemplateBtnBI">&#8681; Download entry template (.xlsx)</button>
+          <span style="font-size:10px;color:var(--ink-soft);margin-left:8px;">Starting from scratch or backfilling? Get a spreadsheet with Capper/Sport/Bet Type dropdowns and a live "does this match the database" check, generated fresh from what's registered right now -- fill it in, then Save As CSV and paste/upload it below.</span>
+          <div id="downloadEntryTemplateMsgBI" style="margin-top:6px;"></div>
+        </div>
         <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label for="bulkImportFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a spreadsheet file directly (from this device, no copy/paste needed):</label>
           <input type="file" id="bulkImportFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
@@ -3966,9 +3971,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return ws;
   }
 
-  async function downloadEntryTemplate() {
-    const btn = $('downloadEntryTemplateBtn');
-    const msg = $('downloadEntryTemplateMsg');
+  async function downloadEntryTemplate(btnId, msgId) {
+    const btn = $(btnId || 'downloadEntryTemplateBtn');
+    const msg = $(msgId || 'downloadEntryTemplateMsg');
     const original = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Loading spreadsheet library...';
@@ -4130,7 +4135,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       btn.textContent = original;
     }
   }
-  $('downloadEntryTemplateBtn').addEventListener('click', downloadEntryTemplate);
+  $('downloadEntryTemplateBtn').addEventListener('click', () => downloadEntryTemplate('downloadEntryTemplateBtn', 'downloadEntryTemplateMsg'));
+  // Second copy of the exact same button, in Bulk Import -- direct request:
+  // that's the more likely place someone realizes they need this, rather
+  // than digging through Setup. Same function, same live data, just a
+  // second entry point -- the Setup one stays too, no harm leaving both.
+  $('downloadEntryTemplateBtnBI').addEventListener('click', () => downloadEntryTemplate('downloadEntryTemplateBtnBI', 'downloadEntryTemplateMsgBI'));
 
   // ---------- Prop stats (Setup management + Add Picks dropdown) ----------
   async function refreshPropStats() {
