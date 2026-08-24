@@ -1,22 +1,49 @@
 // validate-schedule
 // Read-only helper for Bulk Import -- given a date, sport, and a batch of
-// team-name checks, looks up today's real schedule from TheRundown and
-// reports back whether each entered matchup is actually real. Never
-// writes to the picks table (or any table) at all -- this only ever
-// fetches TheRundown's schedule and compares it against what was typed,
-// so there is zero risk of this affecting any existing pick's data.
+// team-name checks, looks up the real schedule and reports back whether
+// each entered matchup is actually real. Never writes to the picks table
+// (or any table) at all -- this only ever fetches the schedule and
+// compares it against what was typed, so there is zero risk of this
+// affecting any existing pick's data.
 //
 // Call with: POST /validate-schedule
 // Body: { date: "2026-06-04", sport: "MLB", checks: [{ id: "row-1", teamA: "Cincinnati", teamB: "Kansas City" }, ...] }
 // (teamB is optional -- omit it for a single-team Moneyline-style check)
 //
-// Resilience: past-date results are cached in rundown_schedule_cache so a
-// date, once fetched successfully, never needs to hit TheRundown again --
-// re-running Bulk Import on the same historical dates costs zero further
-// TheRundown calls. Live/future dates always fetch fresh (never cached),
-// since those schedules can still change. Both TheRundown calls also retry
-// with backoff before giving up, instead of failing the whole batch on the
-// first bad response.
+// REWRITTEN 2026-08-23, direct request: "if ESPN is this robust why do we
+// need the Rundown at all... is there something it does differently than
+// ESPN that is worth paying for?" Switched from TheRundown to ESPN's
+// public scoreboard entirely for schedule/team-matchup validation.
+// TheRundown's free plan has a 7-day history limit, which made this tool
+// structurally unable to validate anything in a planned year-long
+// historical backfill (starting June 2025) unless the date happened to
+// already be cached from a previous run. ESPN has no observed rolling
+// window at all (confirmed repeatedly elsewhere in this project going
+// back months of real use) and no rate limit worth caching against, so
+// this drops the rundown_schedule_cache table and all its read/write
+// error handling entirely -- there's nothing left to cache, and nothing
+// left that needs SUPABASE_URL/SERVICE_ROLE_KEY at all, since this
+// function no longer touches the database in any way.
+//
+// Team-matching logic (bareNameIsUnique dedup so a bare city name like
+// "Chicago" only counts when unique, exact-vs-substring safety for short
+// abbreviations like "ARI" so it can't match inside "Mariners") is ported
+// directly from the already-proven, already-bug-fixed version in
+// grade_picks_espn_backfill.ts, rather than reinvented here a third time.
+// Soccer's 23-competition-slug coverage (ESPN has no single "soccer"
+// endpoint the way MLB/NBA do) is ported directly from
+// schedule-sync-backfill.ts's own proven SOCCER_COMPETITION_SLUGS list --
+// already confirmed end-to-end against real production data there, not
+// re-verified from scratch here. Reuses the same ESPN_SPORT_MAP as both
+// of those files for every other sport -- one shared source of truth for
+// "which sports ESPN can cover."
+//
+// TheRundown is NOT being dropped from the project entirely -- it remains
+// the only automated source this system has for actual betting ODDS
+// (moneyline/spread/total prices), which ESPN's public API doesn't expose
+// at all. This rewrite only removes it from schedule/team-matchup
+// validation specifically, a job ESPN already did better, for free, with
+// no history-window limit.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,36 +54,52 @@ function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
 }
 
-// A date already fully in the past is done -- its schedule can never
-// change, so it's safe to cache indefinitely. Deliberately conservative:
-// compares against UTC "today", so a date that's "today" in Eastern but
-// still "today" in UTC is correctly treated as not-yet-cacheable.
-function isPastDate(dateStr: string): boolean {
-  const today = new Date().toISOString().slice(0, 10);
-  return dateStr < today;
-}
-
-async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
+// Same fix already proven across every other ESPN-calling function in
+// this project: Deno's default fetch() sends no User-Agent at all, a
+// common trigger for an API's bot-protection/WAF to hard-reset the
+// connection instead of responding normally.
+async function espnFetch(url: string, attempts = 2): Promise<Response> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let i = 0; i < attempts; i++) {
     try {
-      const res = await fetch(url);
-      if (res.ok) return res;
-      // Only 429 (rate limited) and 5xx (transient) are worth retrying --
-      // a 4xx like 401/404 will never succeed just by trying again.
-      if (res.status !== 429 && res.status < 500) return res;
-      if (attempt === maxRetries) return res;
-      const retryAfter = res.headers.get('Retry-After');
-      const waitMs = retryAfter ? Number(retryAfter) * 1000 : 500 * Math.pow(2, attempt);
-      await new Promise((r) => setTimeout(r, waitMs));
-    } catch (err) {
-      lastErr = err;
-      if (attempt === maxRetries) throw err;
-      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+      return await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CoreBettingSolutions-ScheduleSync/1.0)' } });
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
     }
   }
   throw lastErr;
 }
+
+// Same mapping as grade_picks_espn_backfill.ts / schedule-sync-backfill.ts
+// -- kept identical on purpose, one shared source of truth for which
+// sports have a real ESPN scoreboard slug.
+const ESPN_SPORT_MAP: Record<string, string> = {
+  mlb: 'baseball/mlb',
+  nfl: 'football/nfl',
+  nba: 'basketball/nba',
+  nhl: 'hockey/nhl',
+  wnba: 'basketball/wnba',
+  ncaaf: 'football/college-football',
+  ncaafootball: 'football/college-football',
+  ncaab: 'basketball/mens-college-basketball',
+  ncaabaseball: 'baseball/college-baseball',
+  cfl: 'football/cfl',
+  mma: 'mma/ufc',
+};
+
+// Ported directly from schedule-sync-backfill.ts's own proven list --
+// ESPN has no single "soccer" endpoint the way MLB/NBA do, it exposes one
+// endpoint per competition instead.
+const SOCCER_COMPETITION_SLUGS = [
+  'eng.1', 'esp.1', 'ger.1', 'ita.1', 'fra.1',
+  'uefa.champions', 'uefa.europa', 'uefa.europa.conf',
+  'concacaf.champions', 'conmebol.libertadores', 'conmebol.sudamericana',
+  'usa.1', 'mex.1',
+  'fifa.friendly', 'fifa.world',
+  'fifa.worldq.uefa', 'fifa.worldq.concacaf', 'fifa.worldq.conmebol', 'fifa.worldq.afc', 'fifa.worldq.caf',
+  'uefa.euro', 'conmebol.america', 'concacaf.gold',
+];
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -64,15 +107,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const rundownKey = Deno.env.get('RUNDOWN_API_KEY');
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if (!rundownKey || !supabaseUrl || !serviceRoleKey) {
-      return new Response(JSON.stringify({ error: 'Missing required secret(s).' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
     const body = await req.json();
     const targetDate = body.date;
     const sportParam = body.sport;
@@ -83,117 +117,97 @@ Deno.serve(async (req) => {
       });
     }
 
-    async function db(path: string) {
-      const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-        headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
-      });
-      if (!res.ok) throw new Error(`DB request failed (${res.status}): ${await res.text()}`);
-      return res.json();
-    }
-
-    async function dbUpsert(path: string, payload: unknown) {
-      const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-        method: 'POST',
-        headers: {
-          apikey: serviceRoleKey,
-          Authorization: `Bearer ${serviceRoleKey}`,
-          'Content-Type': 'application/json',
-          Prefer: 'resolution=merge-duplicates,return=minimal'
-        },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error(`DB upsert failed (${res.status}): ${await res.text()}`);
-    }
-
     const sportKey = normalize(sportParam);
-    const canCache = isPastDate(targetDate);
+    const isSoccer = sportKey === 'soccer';
+    const espnPath = ESPN_SPORT_MAP[sportKey];
 
+    if (!isSoccer && !espnPath) {
+      // Not an error -- this sport just isn't one ESPN's generic
+      // scoreboard covers (golf, tennis, KBO, cricket, etc). Every check
+      // is reported as "cannot verify" rather than "wrong", so Bulk
+      // Import knows not to flag these as schedule mismatches.
+      return new Response(JSON.stringify({
+        status: 'unsupported_sport',
+        results: checks.map((c: any) => ({ id: c.id, verifiable: false }))
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const espnDate = targetDate.replace(/-/g, '');
     let games: any[];
 
-    // CONFIRMED REAL BUG, direct report 2026-08-22: "Schedule validation
-    // could not run... likely TheRundown being slow, rate-limited, or
-    // down" -- the actual cause had nothing to do with TheRundown at
-    // all. rundown_schedule_cache didn't exist in the database yet (a
-    // missing migration), so this READ threw immediately and the whole
-    // request failed before ever reaching the TheRundown fetch below.
-    // Wrapped the same "best-effort, never block the real work" way the
-    // cache WRITE already is further down -- a cache read failure now
-    // just means this date isn't served from cache this time, not a
-    // failed validation.
-    let cachedRows: any[] = [];
-    if (canCache) {
-      try {
-        cachedRows = await db(`rundown_schedule_cache?date=eq.${targetDate}&sport=eq.${sportKey}&select=games_json`);
-      } catch (_) {
-        cachedRows = [];
-      }
-    }
-
-    if (cachedRows.length) {
-      games = cachedRows[0].games_json;
-    } else {
-      // Same sport-name lookup pattern as schedule-sync -- confirms this
-      // sport is one TheRundown actually covers before trying to fetch
-      // anything, and fails safely (not an error) if it isn't.
-      const sportsRes = await fetchWithRetry(`https://therundown.io/api/v2/sports?key=${rundownKey}`);
-      if (!sportsRes.ok) {
-        return new Response(JSON.stringify({ error: 'Could not reach TheRundown /sports list', status: sportsRes.status }), {
-          status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-      const sportsData = await sportsRes.json();
-      const rundownSport = (sportsData.sports || []).find((s: any) => normalize(s.sport_name) === sportKey);
-      if (!rundownSport) {
-        // Not an error -- this sport just isn't one TheRundown covers
-        // (golf, tennis, KBO, etc). Every check is reported as "cannot
-        // verify" rather than "wrong", so Bulk Import knows not to flag
-        // these as schedule mismatches.
-        return new Response(JSON.stringify({
-          status: 'unsupported_sport',
-          results: checks.map((c: any) => ({ id: c.id, verifiable: false }))
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      const rundownSportId = rundownSport.sport_id;
-
-      const eventsRes = await fetchWithRetry(
-        `https://therundown.io/api/v2/sports/${rundownSportId}/events/${targetDate}?key=${rundownKey}&offset=300`
+    if (isSoccer) {
+      const competitionResults = await Promise.allSettled(
+        SOCCER_COMPETITION_SLUGS.map(slug =>
+          espnFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard?dates=${espnDate}`).then(r => r.ok ? r.json() : null)
+        )
       );
+      const seenEventIds = new Set<string>();
+      games = [];
+      for (const result of competitionResults) {
+        if (result.status === 'fulfilled' && result.value && Array.isArray(result.value.events)) {
+          for (const ev of result.value.events) {
+            if (seenEventIds.has(ev.id)) continue;
+            seenEventIds.add(ev.id);
+            games.push(ev);
+          }
+        }
+      }
+    } else {
+      const eventsRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${espnDate}`);
       if (!eventsRes.ok) {
-        return new Response(JSON.stringify({ error: 'TheRundown events request failed', status: eventsRes.status }), {
+        return new Response(JSON.stringify({ error: 'ESPN scoreboard request failed', status: eventsRes.status }), {
           status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
       const eventsData = await eventsRes.json();
       games = eventsData.events || [];
-
-      if (canCache) {
-        // Best-effort -- a cache-write hiccup should never break the
-        // validation response that's actually being returned right now.
-        try {
-          await dbUpsert('rundown_schedule_cache', { date: targetDate, sport: sportKey, games_json: games });
-        } catch (_) { /* ignore -- just means this date isn't cached yet next time either */ }
-      }
     }
 
-    // Same game-entry building as schedule-sync -- kept identical
-    // deliberately, since this exact logic has already been tested
-    // against real TheRundown responses.
-    const gameEntries = games.map((g: any) => {
-      const teams = g.teams_normalized || g.teams || [];
-      const variants = teams.map((t: any) => ({
-        names: [t.name, t.mascot, t.name && t.mascot ? `${t.name} ${t.mascot}` : null]
-          .filter(Boolean).map(normalize)
-      }));
-      const away = teams.find((t: any) => !t.is_home);
-      const home = teams.find((t: any) => t.is_home);
-      const matchup = away && home ? `${away.name} ${away.mascot} @ ${home.name} ${home.mascot}` : 'unknown matchup';
-      return { variants, matchup };
+    // Same "Chicago Cubs vs Chicago White Sox" / "ARI inside Mariners"
+    // safety already proven in grade_picks_espn_backfill.ts -- a bare
+    // city/location name is only trusted as a matchable variant when no
+    // OTHER team playing this sport today shares that same city; short
+    // abbreviations/short names always require an EXACT match, never
+    // substring containment.
+    const allTeamsToday: any[] = [];
+    for (const e of games) {
+      const competitors = (e.competitions && e.competitions[0] && e.competitions[0].competitors) || [];
+      for (const c of competitors) if (c.team) allTeamsToday.push(c.team);
+    }
+    const bareNameCounts = new Map<string, number>();
+    for (const t of allTeamsToday) {
+      if (!t.location) continue;
+      const n = normalize(t.location);
+      bareNameCounts.set(n, (bareNameCounts.get(n) || 0) + 1);
+    }
+
+    const gameEntries = games.map((e: any) => {
+      const competitors = (e.competitions && e.competitions[0] && e.competitions[0].competitors) || [];
+      const home = competitors.find((c: any) => c.homeAway === 'home');
+      const away = competitors.find((c: any) => c.homeAway === 'away');
+
+      function variantsFor(c: any) {
+        if (!c || !c.team) return null;
+        const t = c.team;
+        const bareNameIsUnique = t.location && (bareNameCounts.get(normalize(t.location)) || 0) <= 1;
+        const substringSafeNames = [bareNameIsUnique ? t.location : null, t.displayName].filter(Boolean).map(normalize);
+        const exactOnlyNames = [t.shortDisplayName, t.name, t.abbreviation].filter(Boolean).map(normalize);
+        return { substringSafeNames, exactOnlyNames };
+      }
+
+      const homeV = variantsFor(home);
+      const awayV = variantsFor(away);
+      const matchup = (home && away) ? `${away.team.displayName} @ ${home.team.displayName}` : 'unknown matchup';
+      return { variants: [homeV, awayV].filter(Boolean), matchup };
     });
 
     function findMatchingGames(teamStr: string) {
       const norm = normalize(teamStr);
       return gameEntries.filter((game: any) =>
-        game.variants.some((v: any) => v.names.some((n: string) => n === norm || n.includes(norm) || norm.includes(n)))
+        game.variants.some((v: any) =>
+          v.substringSafeNames.some((n: string) => n === norm || n.includes(norm) || norm.includes(n)) ||
+          v.exactOnlyNames.some((n: string) => n === norm)
+        )
       );
     }
 
