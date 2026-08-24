@@ -4082,8 +4082,40 @@ These are almost always the same day, so "Date entered" only fills in a starting
           c.font = TEMPLATE_INPUT_FONT;
           c.border = TEMPLATE_BORDER;
         }
-        ws.getCell(row, 1).numberFormat = '@';
-        ws.getCell(row, 2).numberFormat = '@';
+        // CONFIRMED REAL BUG, caught verifying the date-format-warning fix
+        // below: ExcelJS's real property is .numFmt, not .numberFormat
+        // (the latter is openpyxl's/Python's name, not this library's --
+        // easy to cross the two). Setting .numberFormat silently created a
+        // useless extra property and did nothing; these cells were
+        // actually shipping on Excel's default General format the whole
+        // time, meaning the exact locale-dependent date risk this was
+        // built to prevent was never actually prevented. Confirmed via a
+        // real byte-exact round trip (posted the generated buffer to a
+        // local server, reopened with openpyxl) that .numFmt is the one
+        // that actually writes to the file.
+        ws.getCell(row, 1).numFmt = '@';
+        ws.getCell(row, 2).numFmt = '@';
+
+        // CONFIRMED REAL GAP, direct report 2026-08-24: typing "06012025"
+        // (no dashes) into Date/Date Entered just echoed back exactly
+        // that, since these columns are deliberately plain TEXT (not a
+        // real Excel date) -- see the numberFormat = '@' above, needed so
+        // Excel's own locale settings can never silently reformat the
+        // date when saving as CSV. A text cell does zero validation on
+        // its own, so a missing-dashes mistake was invisible until import
+        // time. This adds an actual check -- a warning popup (not a hard
+        // block, so an edge case can still be typed through) the moment
+        // the format doesn't match YYYY-MM-DD.
+        const aRef = `A${row}`, bRef = `B${row}`;
+        const dateFormatValidation = (ref) => ({
+          type: 'custom', allowBlank: true,
+          formulae: [`AND(LEN(${ref})=10,MID(${ref},5,1)="-",MID(${ref},8,1)="-",ISNUMBER(VALUE(LEFT(${ref},4))),ISNUMBER(VALUE(MID(${ref},6,2))),ISNUMBER(VALUE(RIGHT(${ref},2))))`],
+          showErrorMessage: true, errorStyle: 'warning',
+          errorTitle: 'Check the date format',
+          error: 'Dates should be typed as YYYY-MM-DD, with the dashes (e.g. 2025-06-01). What you entered doesn\'t match that -- double check it before continuing.'
+        });
+        ws.getCell(row, 1).dataValidation = dateFormatValidation(aRef);
+        ws.getCell(row, 2).dataValidation = dateFormatValidation(bRef);
 
         const cRef = `C${row}`, dRef = `D${row}`, eRef = `E${row}`, fRef = `F${row}`, mRef = `M${row}`;
 
