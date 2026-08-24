@@ -4144,6 +4144,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 5).dataValidation = { type: 'list', allowBlank: true, formulae: [`BetTypes!$A$2:$A$${BETTYPES_LAST}`] };
         ws.getCell(row, 8).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
         ws.getCell(row, 18).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
+        // CONFIRMED REAL GAP, direct report 2026-08-24: "I tried to type
+        // in Houston Astros and nothing came up for me to choose the
+        // correct one." Selection/Prop Team never got a dropdown at all --
+        // only the after-the-fact check formula (columns V/W). Added here,
+        // sourced from the SAME Teams sheet already backing that check, so
+        // there's one real list to click/autocomplete from instead of
+        // typing blind. Deliberately a WARNING, not a hard block, unlike
+        // Capper/Sport/Bet Type above -- Selection is also where a player
+        // name (Player Prop), fighter, or tennis player gets typed, none
+        // of which are teams at all, so rejecting anything off this list
+        // outright would break those rows.
+        const teamPickWarning = {
+          type: 'list', allowBlank: true, formulae: [`Teams!$A$2:$A$${TEAMS_LAST}`],
+          showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
+          error: 'This doesn\'t exactly match a registered team -- that\'s fine for a player/fighter name on a Prop, a brand-new team, or a combined "TeamA/TeamB" entry, but double check the spelling if this was meant to be a team.'
+        };
+        ws.getCell(row, 6).dataValidation = teamPickWarning;
+        ws.getCell(row, 13).dataValidation = teamPickWarning;
       }
 
       ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
