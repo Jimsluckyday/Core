@@ -1341,6 +1341,108 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- CAPPER PERFORMANCE: HOME VS AWAY (internal only) -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Capper performance: Home vs Away <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public</span>
+        <button class="ghost small" id="toggleHomeAwayBreakdownBtn">Show breakdown</button>
+      </p>
+      <div id="homeAwayBreakdownPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Min. graded picks to qualify</label>
+            <input id="haMinPicks" type="number" min="1" value="2" />
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="haSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field">
+            <label>From date</label>
+            <input id="haFrom" type="date" />
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="haTo" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="runHomeAwayBreakdownBtn">Run (new tab)</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Direct request 2026-08-23: does a capper actually call home games differently than road games? Only counts picks that carry a real home_away value -- most Player Prop and Total/Over-Under picks don't use this field at all and are silently skipped, not counted as a 0. Same qualified/unqualified min-picks split as Bet Type Breakdown -- a capper's 1-0 on the road tells you nothing yet.
+        </div>
+      </div>
+    </div>
+
+    <!-- CAPPER PERFORMANCE: FAVORITE VS UNDERDOG (internal only) -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Capper performance: Favorite vs Underdog <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public</span>
+        <button class="ghost small" id="toggleFavDogBreakdownBtn">Show breakdown</button>
+      </p>
+      <div id="favDogBreakdownPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Min. graded picks to qualify</label>
+            <input id="fdMinPicks" type="number" min="1" value="2" />
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="fdSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field">
+            <label>From date</label>
+            <input id="fdFrom" type="date" />
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="fdTo" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="runFavDogBreakdownBtn">Run (new tab)</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Direct request 2026-08-23: is a capper actually better picking favorites, or underdogs? Favorite/Underdog is read directly off the sign of opening_odds (negative = favorite, positive = underdog) -- same convention already used everywhere else in this project, no new field needed. Picks with no odds on file at all (parlays, or anything still missing odds) are skipped, not guessed.
+        </div>
+      </div>
+    </div>
+
+    <!-- CAPPER PERFORMANCE: EARLY VS LATE SLATE (internal only) -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Capper performance: Early vs Late slate <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public</span>
+        <button class="ghost small" id="toggleSlateBreakdownBtn">Show breakdown</button>
+      </p>
+      <div id="slateBreakdownPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Min. graded picks to qualify</label>
+            <input id="slMinPicks" type="number" min="1" value="2" />
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="slSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field">
+            <label>From date</label>
+            <input id="slFrom" type="date" />
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="slTo" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="runSlateBreakdownBtn">Run (new tab)</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Direct request 2026-08-23: is a capper sharper on the early slate or the late slate? Split on game_start_time at 5 PM Eastern (adjust the cutoff in code if a different split makes more sense once real data comes in) -- "Early Slate" is before 5 PM ET, "Late Slate" is 5 PM ET or later. Chose a single cutoff rather than literal "Morning" (before noon ET is a near-empty bucket for most sports -- very few games start that early) so both sides actually get meaningful volume. Only counts picks with a real game_start_time on file.
+        </div>
+      </div>
+    </div>
+
     <!-- PICK TIER PERFORMANCE (internal only) -->
     <div class="stub" data-tab="reports">
       <p class="stub-title">
@@ -3252,6 +3354,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
     bupSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     bupSportSel.value = keepBupSport;
+
+    ['haSport', 'fdSport', 'slSport'].forEach(id => {
+      const sel = $(id);
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">All sports</option>' +
+        sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+      sel.value = keep;
+    });
 
     const rqSportSel = $('rqSport');
     const keepRqSport = rqSportSel.value;
@@ -10600,6 +10710,336 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('btbTo').value = '';
     runBetTypeBreakdown();
   });
+
+  // ---------- Shared generic renderer for capper-vs-2-bucket-split
+  // breakdowns (Home/Away, Favorite/Underdog, Early/Late Slate) ----------
+  // Structurally identical to betTypeBreakdownRowsToHtml/openBetTypeBreakdownTab
+  // above (same qualified/unqualified min-picks split, same sortable-table
+  // popout) -- factored out here since three new breakdowns need the exact
+  // same shape, rather than tripling that code. Deliberately NOT also
+  // refactoring the two pre-existing popouts (Bet Type Breakdown, Pick Tier
+  // Performance) to use this -- out of scope for this change.
+  function capperSplitRowsToHtml(rows, filterSummary, minPicks, categoryLabel) {
+    const qualified = rows.filter(r => (r.wins + r.losses) >= minPicks && r.win_pct !== null && r.win_pct > 0)
+      .sort((a, b) => b.win_pct - a.win_pct);
+    const unqualified = rows.filter(r => (r.wins + r.losses) < minPicks || r.win_pct === null || r.win_pct === 0)
+      .sort((a, b) => b.total_picks - a.total_picks);
+
+    function row(r, rank) {
+      const rankVal = rank || 999999;
+      const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
+      return `<tr>
+        <td data-value="${rankVal}">${rank || '—'}</td>
+        <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
+        <td data-value="${escapeHtml(r.category_name).toLowerCase()}">${escapeHtml(r.category_name)}</td>
+        <td data-value="${r.total_picks}">${r.total_picks}</td>
+        <td data-value="${r.wins}">${r.wins}</td>
+        <td data-value="${r.losses}">${r.losses}</td>
+        <td data-value="${r.pushes}">${r.pushes}</td>
+        <td data-value="${r.pending}">${r.pending}</td>
+        <td data-value="${winPctVal}">${r.win_pct !== null && r.win_pct !== undefined ? r.win_pct + '%' : '—'}</td>
+      </tr>`;
+    }
+
+    if (!rows.length) {
+      return `<div class="empty-state">No picks match these filters yet.</div>`;
+    }
+
+    const body = qualified.map((r, i) => row(r, i + 1)).join('') + unqualified.map(r => row(r, null)).join('');
+    const cols = [
+      { label: 'Rank', type: 'num' }, { label: 'Capper', type: 'str' }, { label: categoryLabel, type: 'str' },
+      { label: 'Total picks', type: 'num' }, { label: 'Wins', type: 'num' },
+      { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' },
+      { label: 'Pending', type: 'num' }, { label: 'Win %', type: 'num' }
+    ];
+    return `
+      <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${escapeHtml(filterSummary)}</div>
+      <table class="picks-table sortable-table" id="dataTable">
+        <thead>
+          <tr class="header-row">
+            ${cols.map((c, i) => `<th data-col="${i}" data-type="${c.type}">
+              <span class="th-label">${c.label}</span>
+              <button type="button" class="filter-btn" data-col="${i}">&#9662;</button>
+            </th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+      <div style="font-size:10px;color:var(--ink-soft);margin-top:8px;">
+        Each row is one capper's record within a single ${categoryLabel.toLowerCase()} bucket. Rows below the rank line have fewer than ${minPicks} graded picks in that bucket or are at 0%, listed by volume for reference only. Click the arrow on any column to sort or filter.
+      </div>`;
+  }
+
+  function openCapperSplitTab(rows, filterSummary, minPicks, reportTitle, categoryLabel, csvPrefix) {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    const tableHtml = capperSplitRowsToHtml(rows, filterSummary, minPicks, categoryLabel);
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${escapeHtml(reportTitle)}</title>
+<style>
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
+  .picks-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; position: relative; user-select: none; }
+  .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
+  .empty-state { font-style: italic; color: #55584d; }
+  .filter-btn { border: none; background: transparent; cursor: pointer; font-size: 10px; color: #55584d; padding: 2px 4px; margin-left: 4px; border-radius: 2px; }
+  .filter-btn:hover { background: rgba(35,77,53,0.15); }
+  .filter-btn.active { color: #234d35; font-weight: bold; }
+  .filter-panel {
+    position: absolute; top: 100%; left: 0; z-index: 100; background: #fff; color: #22281f;
+    border: 1px solid #22281f; border-radius: 3px; box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+    width: 200px; font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: normal;
+  }
+  .filter-panel .sort-opt { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #eae5d6; }
+  .filter-panel .sort-opt:hover { background: #eae5d6; }
+  .filter-panel .search-box { width: calc(100% - 16px); margin: 8px; padding: 5px 6px; border: 1px solid #b9b09a; border-radius: 2px; font-family: inherit; font-size: 11px; }
+  .filter-panel .value-list { max-height: 160px; overflow-y: auto; border-top: 1px solid #eae5d6; padding: 4px 0; }
+  .filter-panel .value-item { padding: 4px 10px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .filter-panel .value-item:hover { background: #eae5d6; }
+  .filter-panel .value-item input { margin: 0; }
+  .filter-panel .panel-actions { padding: 8px 10px; border-top: 1px solid #eae5d6; display: flex; justify-content: space-between; }
+  .filter-panel .panel-actions button { font-family: inherit; font-size: 11px; padding: 5px 10px; border-radius: 2px; cursor: pointer; }
+  .filter-panel .btn-ok { background: #234d35; color: #eae5d6; border: 1px solid #234d35; }
+  .filter-panel .btn-clear { background: transparent; border: 1px solid #b9b09a; }
+</style>
+</head><body>
+  <h1>${escapeHtml(reportTitle)} <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
+  ${tableHtml}
+  ${csvExportPopoutScript(csvPrefix)}
+<script>
+(function() {
+  const table = document.getElementById('dataTable');
+  if (!table) return;
+  const tbody = table.tBodies[0];
+  const headerCells = Array.from(table.querySelectorAll('.header-row th'));
+  const columnFilters = {};
+  let openPanel = null;
+  let openPanelOwner = null;
+
+  function allRows() { return Array.from(tbody.querySelectorAll('tr')); }
+  function distinctValues(colIndex) {
+    const map = new Map();
+    allRows().forEach(row => {
+      const cell = row.children[colIndex];
+      if (!cell) return;
+      const raw = cell.getAttribute('data-value');
+      if (!map.has(raw)) map.set(raw, cell.textContent);
+    });
+    return map;
+  }
+  function applyAllFilters() {
+    allRows().forEach(row => {
+      let visible = true;
+      for (const colIndex in columnFilters) {
+        const allowed = columnFilters[colIndex];
+        if (!allowed) continue;
+        const cell = row.children[colIndex];
+        if (!cell || !allowed.has(cell.getAttribute('data-value'))) { visible = false; break; }
+      }
+      row.style.display = visible ? '' : 'none';
+    });
+  }
+  function sortByColumn(colIndex, type, dir) {
+    const rows = allRows();
+    rows.sort((a, b) => {
+      const av = a.children[colIndex].getAttribute('data-value');
+      const bv = b.children[colIndex].getAttribute('data-value');
+      const cmp = type === 'num' ? (Number(av) - Number(bv)) : String(av).localeCompare(String(bv));
+      return dir === 'asc' ? cmp : -cmp;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+  }
+  function closePanel() {
+    if (openPanel) { openPanel.remove(); openPanel = null; openPanelOwner = null; }
+  }
+  headerCells.forEach((th, colIndex) => {
+    const btn = th.querySelector('.filter-btn');
+    const type = th.getAttribute('data-type');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (openPanelOwner === colIndex) { closePanel(); return; }
+      closePanel();
+      const panel = document.createElement('div');
+      panel.className = 'filter-panel';
+      const values = distinctValues(colIndex);
+      const allowed = columnFilters[colIndex];
+      let html = `
+        <div class="sort-opt" data-sort="asc">Sort ascending</div>
+        <div class="sort-opt" data-sort="desc">Sort descending</div>
+        <input type="text" class="search-box" placeholder="Search values..." />
+        <div class="value-list">`;
+      values.forEach((text, raw) => {
+        const checked = !allowed || allowed.has(raw);
+        html += `<label class="value-item"><input type="checkbox" value="${raw.replace(/"/g, '&quot;')}" ${checked ? 'checked' : ''}/> ${text}</label>`;
+      });
+      html += `</div><div class="panel-actions"><button class="btn-clear" data-action="clear">Clear filter</button><button class="btn-ok" data-action="ok">OK</button></div>`;
+      panel.innerHTML = html;
+      th.style.position = 'relative';
+      th.appendChild(panel);
+      openPanel = panel;
+      openPanelOwner = colIndex;
+      panel.querySelectorAll('.sort-opt').forEach(opt => {
+        opt.addEventListener('click', () => { sortByColumn(colIndex, type, opt.getAttribute('data-sort')); closePanel(); });
+      });
+      const searchBox = panel.querySelector('.search-box');
+      searchBox.addEventListener('input', () => {
+        const q = searchBox.value.toLowerCase();
+        panel.querySelectorAll('.value-item').forEach(item => {
+          item.style.display = item.textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+      });
+      panel.querySelector('[data-action="clear"]').addEventListener('click', () => {
+        delete columnFilters[colIndex]; applyAllFilters(); closePanel(); btn.classList.remove('active');
+      });
+      panel.querySelector('[data-action="ok"]').addEventListener('click', () => {
+        const checked = Array.from(panel.querySelectorAll('.value-item input:checked')).map(i => i.value);
+        const allValues = Array.from(values.keys());
+        if (checked.length === allValues.length || checked.length === 0) delete columnFilters[colIndex];
+        else columnFilters[colIndex] = new Set(checked);
+        btn.classList.toggle('active', !!columnFilters[colIndex]);
+        applyAllFilters();
+        closePanel();
+      });
+    });
+  });
+  document.addEventListener('click', (e) => { if (openPanel && !openPanel.contains(e.target)) closePanel(); });
+})();
+<\/script>
+</body></html>`);
+    win.document.close();
+  }
+
+  // ---------- Capper performance: Home vs Away ----------
+  $('toggleHomeAwayBreakdownBtn').addEventListener('click', () => {
+    const panel = $('homeAwayBreakdownPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleHomeAwayBreakdownBtn').textContent = showing ? 'Show breakdown' : 'Hide breakdown';
+  });
+  async function runHomeAwayBreakdown() {
+    const minPicks = Math.max(1, Number($('haMinPicks').value) || 2);
+    const sportFilter = $('haSport').value;
+    const from = $('haFrom').value;
+    const to = $('haTo').value;
+    const sportName = sportFilter ? ($('haSport').selectedOptions[0]?.textContent || '') : 'All sports';
+    const summaryParts = [sportName, from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time'];
+    try {
+      let query = 'picks?select=capper_id,home_away,result,cappers(name)&is_parlay_leg=eq.false&home_away=not.is.null';
+      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+      if (from) query += `&event_date=gte.${from}`;
+      if (to) query += `&event_date=lte.${to}`;
+      const picks = await restAllPages(query);
+      const byGroup = {};
+      for (const p of picks) {
+        const bucket = p.home_away === 'home' ? 'Home' : 'Away';
+        const key = `${p.capper_id}::${bucket}`;
+        if (!byGroup[key]) byGroup[key] = { capper_name: p.cappers ? p.cappers.name : '—', category_name: bucket, total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0 };
+        const b = byGroup[key];
+        b.total_picks++;
+        if (p.result === 'win') b.wins++;
+        else if (p.result === 'loss') b.losses++;
+        else if (p.result === 'push') b.pushes++;
+        else b.pending++;
+      }
+      const rows = Object.values(byGroup).map(r => ({ ...r, win_pct: (r.wins + r.losses) > 0 ? Math.round((1000 * r.wins) / (r.wins + r.losses)) / 10 : null }));
+      openCapperSplitTab(rows, summaryParts.join(' · '), minPicks, 'Capper Performance: Home vs Away', 'Home/Away', 'capper-home-away');
+    } catch (e) {
+      alert('Could not run report: ' + e.message);
+    }
+  }
+  $('runHomeAwayBreakdownBtn').addEventListener('click', runHomeAwayBreakdown);
+
+  // ---------- Capper performance: Favorite vs Underdog ----------
+  $('toggleFavDogBreakdownBtn').addEventListener('click', () => {
+    const panel = $('favDogBreakdownPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleFavDogBreakdownBtn').textContent = showing ? 'Show breakdown' : 'Hide breakdown';
+  });
+  async function runFavDogBreakdown() {
+    const minPicks = Math.max(1, Number($('fdMinPicks').value) || 2);
+    const sportFilter = $('fdSport').value;
+    const from = $('fdFrom').value;
+    const to = $('fdTo').value;
+    const sportName = sportFilter ? ($('fdSport').selectedOptions[0]?.textContent || '') : 'All sports';
+    const summaryParts = [sportName, from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time'];
+    try {
+      let query = 'picks?select=capper_id,opening_odds,closing_odds,result,cappers(name)&is_parlay_leg=eq.false';
+      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+      if (from) query += `&event_date=gte.${from}`;
+      if (to) query += `&event_date=lte.${to}`;
+      const picks = await restAllPages(query);
+      const byGroup = {};
+      for (const p of picks) {
+        const oddsVal = (p.opening_odds !== null && p.opening_odds !== undefined) ? p.opening_odds
+          : ((p.closing_odds !== null && p.closing_odds !== undefined) ? p.closing_odds : null);
+        if (oddsVal === null) continue; // no odds on file at all -- skipped, never guessed
+        const bucket = oddsVal < 0 ? 'Favorite' : 'Underdog';
+        const key = `${p.capper_id}::${bucket}`;
+        if (!byGroup[key]) byGroup[key] = { capper_name: p.cappers ? p.cappers.name : '—', category_name: bucket, total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0 };
+        const b = byGroup[key];
+        b.total_picks++;
+        if (p.result === 'win') b.wins++;
+        else if (p.result === 'loss') b.losses++;
+        else if (p.result === 'push') b.pushes++;
+        else b.pending++;
+      }
+      const rows = Object.values(byGroup).map(r => ({ ...r, win_pct: (r.wins + r.losses) > 0 ? Math.round((1000 * r.wins) / (r.wins + r.losses)) / 10 : null }));
+      openCapperSplitTab(rows, summaryParts.join(' · '), minPicks, 'Capper Performance: Favorite vs Underdog', 'Favorite/Underdog', 'capper-favorite-underdog');
+    } catch (e) {
+      alert('Could not run report: ' + e.message);
+    }
+  }
+  $('runFavDogBreakdownBtn').addEventListener('click', runFavDogBreakdown);
+
+  // ---------- Capper performance: Early vs Late slate ----------
+  $('toggleSlateBreakdownBtn').addEventListener('click', () => {
+    const panel = $('slateBreakdownPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleSlateBreakdownBtn').textContent = showing ? 'Show breakdown' : 'Hide breakdown';
+  });
+  async function runSlateBreakdown() {
+    const minPicks = Math.max(1, Number($('slMinPicks').value) || 2);
+    const sportFilter = $('slSport').value;
+    const from = $('slFrom').value;
+    const to = $('slTo').value;
+    const sportName = sportFilter ? ($('slSport').selectedOptions[0]?.textContent || '') : 'All sports';
+    const summaryParts = [sportName, from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time'];
+    try {
+      let query = 'picks?select=capper_id,game_start_time,result,cappers(name)&is_parlay_leg=eq.false&game_start_time=not.is.null';
+      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+      if (from) query += `&event_date=gte.${from}`;
+      if (to) query += `&event_date=lte.${to}`;
+      const picks = await restAllPages(query);
+      const byGroup = {};
+      for (const p of picks) {
+        // ET hour-of-day, via Intl so DST is handled automatically rather
+        // than a hardcoded UTC offset -- same reasoning as elsewhere in
+        // this project (avoid manual timezone math wherever a real API
+        // exists to do it correctly).
+        const hourEt = Number(new Date(p.game_start_time).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+        const bucket = hourEt < 17 ? 'Early Slate (before 5 PM ET)' : 'Late Slate (5 PM ET or later)';
+        const key = `${p.capper_id}::${bucket}`;
+        if (!byGroup[key]) byGroup[key] = { capper_name: p.cappers ? p.cappers.name : '—', category_name: bucket, total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0 };
+        const b = byGroup[key];
+        b.total_picks++;
+        if (p.result === 'win') b.wins++;
+        else if (p.result === 'loss') b.losses++;
+        else if (p.result === 'push') b.pushes++;
+        else b.pending++;
+      }
+      const rows = Object.values(byGroup).map(r => ({ ...r, win_pct: (r.wins + r.losses) > 0 ? Math.round((1000 * r.wins) / (r.wins + r.losses)) / 10 : null }));
+      openCapperSplitTab(rows, summaryParts.join(' · '), minPicks, 'Capper Performance: Early vs Late Slate', 'Slate', 'capper-early-late-slate');
+    } catch (e) {
+      alert('Could not run report: ' + e.message);
+    }
+  }
+  $('runSlateBreakdownBtn').addEventListener('click', runSlateBreakdown);
 
   // ---------- Pick of the Day performance ----------
   $('togglePotdPerfBtn').addEventListener('click', () => {
