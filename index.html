@@ -4144,6 +4144,39 @@ These are almost always the same day, so "Date entered" only fills in a starting
       ws.getCell(2, 20).border = TEMPLATE_BORDER;
       ws.getCell(2, 21).border = TEMPLATE_BORDER;
 
+      // CONFIRMED REAL BUG, direct report 2026-08-25: "the drop downs are
+      // gone from most of the fields." Root cause: this M/D/YYYY format
+      // check was being built fresh per row with THAT row's own cell
+      // address baked into the formula text (e.g. row 5 got a formula
+      // literally checking "A5", row 6 got one checking "A6"). Since every
+      // row's rule was therefore textually different, ExcelJS could never
+      // recognize them as the same rule and consolidate them the way it
+      // already does for the Capper/Sport/Team/etc dropdowns below (those
+      // use one FIXED formula on every row, so ExcelJS merges all 498 rows
+      // into a single validation spanning the whole column). The result
+      // was two columns (A and B) each getting their OWN dataValidation
+      // entry on EVERY row -- 996 separate rules crammed into one sheet,
+      // confirmed directly by unzipping the generated .xlsx and counting
+      // them. A worksheet with ~1,000 individual validation rules is well
+      // past what Excel reliably handles; it's a documented way for Excel
+      // to start silently misbehaving with validations, up to and
+      // including dropdowns elsewhere on the same sheet just not
+      // rendering. Fixed the same way Excel itself handles a formula
+      // filled down a column: anchor the formula to ONE fixed cell (the
+      // first data row) and let Excel's own relative-reference handling
+      // adjust it per row, exactly like the dropdowns already do -- this
+      // is defined ONCE, outside the row loop, and the SAME object is
+      // reused on every row so ExcelJS consolidates it into one rule.
+      const dateFormatValidation = (anchorRef) => ({
+        type: 'custom', allowBlank: true,
+        formulae: [`AND(LEN(${anchorRef})>=8,LEN(${anchorRef})<=10,LEN(${anchorRef})-LEN(SUBSTITUTE(${anchorRef},"/",""))=2,ISNUMBER(VALUE(RIGHT(${anchorRef},4))))`],
+        showErrorMessage: true, errorStyle: 'warning',
+        errorTitle: 'Check the date format',
+        error: 'Dates should be typed as M/D/YYYY, with the slashes (e.g. 06/01/2025). What you entered doesn\'t match that -- double check it before continuing.'
+      });
+      const dateEntryValidation = dateFormatValidation('A3');
+      const eventDateValidation = dateFormatValidation('B3');
+
       const LAST_DATA_ROW = 500;
       for (let row = 3; row <= LAST_DATA_ROW; row++) {
         for (let col = 1; col <= 19; col++) {
@@ -4178,18 +4211,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // normalizeDateStr's own tolerance), but still catches the real
         // mistake this guards against: typing digits with no separators
         // at all (e.g. "06012025") has zero slashes and fails the
-        // slash-count check immediately.
-        const dateFormatValidation = (ref) => ({
-          type: 'custom', allowBlank: true,
-          formulae: [`AND(LEN(${ref})>=8,LEN(${ref})<=10,LEN(${ref})-LEN(SUBSTITUTE(${ref},"/",""))=2,ISNUMBER(VALUE(RIGHT(${ref},4))))`],
-          showErrorMessage: true, errorStyle: 'warning',
-          errorTitle: 'Check the date format',
-          error: 'Dates should be typed as M/D/YYYY, with the slashes (e.g. 06/01/2025). What you entered doesn\'t match that -- double check it before continuing.'
-        });
+        // slash-count check immediately. Same shared object on every row
+        // (defined once above) -- see the comment above the loop for why.
         const entryAddr = ws.getCell(row, 1).address, eventDateOverrideAddr = ws.getCell(row, 2).address,
           prevDateEnteredAddr = ws.getCell(row - 1, 20).address;
-        ws.getCell(row, 1).dataValidation = dateFormatValidation(entryAddr);
-        ws.getCell(row, 2).dataValidation = dateFormatValidation(eventDateOverrideAddr);
+        ws.getCell(row, 1).dataValidation = dateEntryValidation;
+        ws.getCell(row, 2).dataValidation = eventDateValidation;
 
         const capperAddr = ws.getCell(row, 3).address, sportAddr = ws.getCell(row, 4).address,
           betTypeAddr = ws.getCell(row, 5).address, team1Addr = ws.getCell(row, 6).address,
