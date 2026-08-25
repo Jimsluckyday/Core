@@ -3980,6 +3980,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
     msg.innerHTML = '';
     try {
       await ensureExcelJsLoaded();
+      // CONFIRMED REAL BUG, direct report 2026-08-25: "team 2 is blank
+      // from the drop down" -- traced to the actual downloaded file
+      // having formulas like "Cappers!$A$2:$A$1" for EVERY dropdown
+      // (Capper/Sport/Bet Type/Team/Prop Team), not just Team 2. That's a
+      // backwards range (start row after end row), which Excel treats as
+      // empty -- it happens when CAPPERS_LAST/SPORTS_LAST/etc end up as 1
+      // because the global cappers/sports/betTypes/teams arrays were
+      // still at their empty startup value when this ran, i.e. the
+      // button was clickable before the page's initial data load had
+      // actually finished (or any other reason those arrays were stale).
+      // Team 1 happened to look fine only because whoever hit this typed
+      // straight from memory and never opened its dropdown to notice it
+      // was equally empty. Fixed by re-fetching all four lists fresh
+      // every time this runs, instead of trusting whatever the globals
+      // already happened to hold -- makes the Instructions sheet's own
+      // claim ("Cappers/Sports/Bet Types/Teams are exactly what's in
+      // Setup right now") actually true unconditionally, not just when
+      // the timing happened to work out.
+      btn.textContent = 'Loading current cappers/sports/bet types/teams...';
+      await Promise.all([refreshCappers(), refreshSports(), refreshBetTypes(), refreshTeams()]);
       btn.textContent = 'Building...';
 
       // Live data, deduped/sorted -- never a stale snapshot. Same
@@ -4064,8 +4084,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       writeRefSheet(wb, 'Sports', ['Sport'], sportNames);
       writeRefSheet(wb, 'BetTypes', ['Bet Type'], betTypeNames);
       writeRefSheet(wb, 'Teams', ['Team', 'Sport'], teamRows);
-      const CAPPERS_LAST = capperNames.length + 1, SPORTS_LAST = sportNames.length + 1,
-        BETTYPES_LAST = betTypeNames.length + 1, TEAMS_LAST = teamRows.length + 1;
+      // Math.max(..., 2) as a second line of defense alongside the
+      // refresh-before-building fix above: if a list is ever genuinely
+      // empty (0 items -- e.g. truly nothing registered yet, not just a
+      // stale fetch), length+1 alone would produce "$A$2:$A$1", a
+      // backwards range Excel treats as broken. Floors it at row 2 so the
+      // range is always at least "$A$2:$A$2" -- a valid, merely-empty
+      // one-cell range -- instead of an inverted one.
+      const CAPPERS_LAST = Math.max(capperNames.length + 1, 2), SPORTS_LAST = Math.max(sportNames.length + 1, 2),
+        BETTYPES_LAST = Math.max(betTypeNames.length + 1, 2), TEAMS_LAST = Math.max(teamRows.length + 1, 2);
 
       // ---- Picks sheet ----
       // REBUILT 2026-08-25 (third pass), direct reports:
