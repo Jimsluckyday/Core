@@ -18186,6 +18186,24 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return d[m][n];
   }
 
+  // Same fuzzy-match idea as checkTeamName's own suggestion logic, just
+  // generalized for a flat named list (Cappers/Sports/Bet Types have no
+  // per-sport scoping or "ambiguous" concept the way Teams do). Used only
+  // to warn "this looks like it might be a typo of X" before Bulk
+  // Import's new-item panel lets someone one-click-create something that
+  // was actually just a misspelling of an existing entry -- direct
+  // concern 2026-08-25: "we will end up with misspelled Milwaukee picks
+  // again" if adding a new item is ever allowed to happen automatically.
+  function suggestSimilarName(rawName, list) {
+    const norm = normalizeForMatch(rawName);
+    let closest = null, closestDist = Infinity;
+    for (const item of list) {
+      const dist = levenshtein(norm, normalizeForMatch(item.name));
+      if (dist < closestDist) { closestDist = dist; closest = item.name; }
+    }
+    return closestDist <= Math.max(2, Math.ceil(norm.length * 0.3)) ? closest : null;
+  }
+
   // Checks one team-name-shaped string against the registered teams list
   // for a sport. Exact match first (always unambiguous by definition).
   // Then substring matching (same generous approach as schedule-sync's own
@@ -18343,6 +18361,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // review, same fields Missing Data and Teams/Tournaments already
     // surface) or held back like a hard error until fixed and re-pasted.
     const warnings = [];
+    // Direct request 2026-08-25: "a years worth of data... lots of new
+    // items such as College Football/Basketball etc." A capper/sport/bet
+    // type Bulk Import doesn't recognize is still a hard error below (an
+    // unresolvable row can't be inserted), but the RAW name is captured
+    // here too so the preview can offer a one-click "add this as new"
+    // action instead of forcing a trip to Setup and a re-paste for every
+    // new item a full year of history turns up. See collectNewItemCandidates.
+    const missing = {};
+    // Same idea for team names -- checkTeamName below already runs a
+    // soft/warning-only check per team-shaped field; this just keeps a
+    // structured record of what it found (name, sport, any typo
+    // suggestion) alongside the existing free-text warning message.
+    const teamNameChecks = [];
     const date = row.date || '';
     if (!date || isNaN(Date.parse(date))) errors.push('missing/invalid date');
     // Used everywhere downstream that needs to compare against Supabase's
@@ -18363,13 +18394,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       : normalizedDate;
 
     const capper = findByNameCI(cappers, row.capper);
-    if (!capper) errors.push(`capper "${row.capper || ''}" not found`);
+    if (!capper) {
+      errors.push(`capper "${row.capper || ''}" not found`);
+      if ((row.capper || '').trim()) missing.capper = row.capper.trim();
+    }
 
     const sport = findByNameCI(sports, row.sport);
-    if (!sport) errors.push(`sport "${row.sport || ''}" not found`);
+    if (!sport) {
+      errors.push(`sport "${row.sport || ''}" not found`);
+      if ((row.sport || '').trim()) missing.sport = row.sport.trim();
+    }
 
     const betType = findByNameCI(betTypes, row.bet_type || row.bettype);
-    if (!betType) errors.push(`bet type "${row.bet_type || row.bettype || ''}" not found`);
+    if (!betType) {
+      errors.push(`bet type "${row.bet_type || row.bettype || ''}" not found`);
+      const rawBetType = (row.bet_type || row.bettype || '').trim();
+      if (rawBetType) missing.bet_type = rawBetType;
+    }
 
     if (!row.selection) errors.push('missing selection');
 
@@ -18408,12 +18449,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       for (const teamName of teamNames) {
         const check = checkTeamName(teamName, sport.id);
         if (check) {
+          teamNameChecks.push({ rawName: check.rawName, sportId: sport.id, sportName: sport.name, ambiguous: !!check.ambiguous, suggestion: check.suggestion || null });
           if (check.ambiguous) {
             warnings.push(`team name "${check.rawName}" is ambiguous for ${sport.name} -- matches multiple registered teams (${check.matches.join(', ')}). Use the full team name to specify which one.`);
           } else {
             warnings.push(check.suggestion
               ? `team name "${check.rawName}" not recognized for ${sport.name} -- did you mean "${check.suggestion}"?`
-              : `team name "${check.rawName}" not recognized for ${sport.name} -- if this is a genuinely new/correct team, add it in Setup first`);
+              : `team name "${check.rawName}" not recognized for ${sport.name} -- if this is a genuinely new/correct team, add it below or in Setup`);
           }
         }
       }
@@ -18446,6 +18488,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       raw: row,
       errors,
       warnings,
+      missing,
+      teamNameChecks,
       parlayNumber, // working field only -- never sent to the DB directly, see processParlayGroups()
       resolved: errors.length === 0 ? {
         event_date: normalizedDate,
@@ -18610,6 +18654,120 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return [...validated, ...summaries];
   }
 
+  // Direct request 2026-08-25: "a years worth of data... lots of new
+  // items such as College Football/Basketball." Groups every unrecognized
+  // capper/sport/bet type/team ACROSS THE WHOLE PASTE into one entry per
+  // distinct name -- a new sport with 50 rows needs exactly one approval,
+  // not 50. Cappers/Sports/Bet Types come from each row's `missing`
+  // (structural, hard-blocking); Teams come from `teamNameChecks` (soft
+  // warning, ambiguous ones excluded since "add as new" can't resolve a
+  // genuinely ambiguous name -- that needs the full team name typed
+  // instead). Bet Type also gets its 3 behavior flags inferred from
+  // whatever the affected rows actually contain (Line filled in, a prop
+  // stat given, a two-team "A/B" selection) so the one-click add still
+  // gets a reasonable starting guess instead of blank defaults.
+  function collectNewItemCandidates(validated) {
+    const cappersMap = new Map(), sportsMap = new Map(), betTypesMap = new Map(), teamsMap = new Map();
+    for (const v of validated) {
+      const m = v.missing || {};
+      if (m.capper) {
+        const key = m.capper.toLowerCase();
+        if (!cappersMap.has(key)) cappersMap.set(key, { name: m.capper, count: 0 });
+        cappersMap.get(key).count++;
+      }
+      if (m.sport) {
+        const key = m.sport.toLowerCase();
+        if (!sportsMap.has(key)) sportsMap.set(key, { name: m.sport, count: 0 });
+        sportsMap.get(key).count++;
+      }
+      if (m.bet_type) {
+        const key = m.bet_type.toLowerCase();
+        if (!betTypesMap.has(key)) betTypesMap.set(key, { name: m.bet_type, count: 0, hasLine: false, hasPropStat: false, hasTwoTeams: false });
+        const entry = betTypesMap.get(key);
+        entry.count++;
+        if ((v.raw.line || '').trim()) entry.hasLine = true;
+        if ((v.raw.prop_stat || v.raw.stat || '').trim()) entry.hasPropStat = true;
+        if ((v.raw.selection || '').includes('/')) entry.hasTwoTeams = true;
+      }
+      for (const tc of (v.teamNameChecks || [])) {
+        if (tc.ambiguous) continue;
+        const key = tc.sportId + '||' + tc.rawName.toLowerCase();
+        if (!teamsMap.has(key)) teamsMap.set(key, { name: tc.rawName, sportId: tc.sportId, sportName: tc.sportName, suggestion: tc.suggestion, count: 0 });
+        teamsMap.get(key).count++;
+      }
+    }
+    return {
+      cappers: [...cappersMap.values()].map(c => ({ ...c, suggestion: suggestSimilarName(c.name, cappers) })),
+      sports: [...sportsMap.values()].map(s => ({ ...s, suggestion: suggestSimilarName(s.name, sports) })),
+      betTypes: [...betTypesMap.values()].map(b => ({ ...b, suggestion: suggestSimilarName(b.name, betTypes) })),
+      teams: [...teamsMap.values()]
+    };
+  }
+
+  // Renders the "add as new" panel above the Bulk Import results table.
+  // Team's suggestion already came from checkTeamName inside
+  // validateBulkRow (it needs the sport-scoped teams list); Capper/Sport/
+  // Bet Type get theirs here via suggestSimilarName since those lists
+  // aren't sport-scoped. A suggestion never blocks the button -- it's a
+  // visible warning plus a confirm() prompt on click, not a hard stop, so
+  // a genuinely new item that just happens to resemble an existing one
+  // (e.g. two unrelated cappers with similar handles) isn't locked out.
+  function renderNewItemsPanel(candidates) {
+    const total = candidates.cappers.length + candidates.sports.length + candidates.betTypes.length + candidates.teams.length;
+    if (!total) return '';
+    const suggestionNote = (name) => name
+      ? `<div style="color:var(--stamp-amber);font-weight:bold;">&#9888; Did you mean "${escapeHtml(name)}"? Double check before adding -- if this is a typo, fix your pasted data and click Parse &amp; preview again instead.</div>` : '';
+    const rows = [];
+    candidates.cappers.forEach(c => rows.push(`
+      <tr>
+        <td>Capper</td>
+        <td>${escapeHtml(c.name)}</td>
+        <td>${c.count}</td>
+        <td style="font-size:11px;">${suggestionNote(c.suggestion)}</td>
+        <td><button class="addNewItemBtn" data-kind="capper" data-name="${escapeHtml(c.name)}" ${c.suggestion ? `data-suggestion="${escapeHtml(c.suggestion)}"` : ''}>Add as new</button></td>
+      </tr>`));
+    candidates.sports.forEach(s => rows.push(`
+      <tr>
+        <td>Sport</td>
+        <td>${escapeHtml(s.name)}</td>
+        <td>${s.count}</td>
+        <td style="font-size:11px;">${suggestionNote(s.suggestion)}</td>
+        <td><button class="addNewItemBtn" data-kind="sport" data-name="${escapeHtml(s.name)}" ${s.suggestion ? `data-suggestion="${escapeHtml(s.suggestion)}"` : ''}>Add as new</button></td>
+      </tr>`));
+    candidates.betTypes.forEach(b => rows.push(`
+      <tr>
+        <td>Bet Type</td>
+        <td>${escapeHtml(b.name)}</td>
+        <td>${b.count}</td>
+        <td style="font-size:11px;">
+          ${suggestionNote(b.suggestion)}
+          <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_line" ${b.hasLine ? 'checked' : ''}/> Uses a line (spread/total)</label>
+          <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_prop_fields" ${b.hasPropStat ? 'checked' : ''}/> Player Prop (uses prop fields)</label>
+          <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_matchup_fields" ${b.hasTwoTeams ? 'checked' : ''}/> Two-team matchup</label>
+        </td>
+        <td><button class="addNewItemBtn" data-kind="bet_type" data-name="${escapeHtml(b.name)}" ${b.suggestion ? `data-suggestion="${escapeHtml(b.suggestion)}"` : ''}>Add as new</button></td>
+      </tr>`));
+    candidates.teams.forEach(t => rows.push(`
+      <tr>
+        <td>Team</td>
+        <td>${escapeHtml(t.name)} <span style="color:var(--ink-soft);">(${escapeHtml(t.sportName)})</span></td>
+        <td>${t.count}</td>
+        <td style="font-size:11px;">${suggestionNote(t.suggestion)}</td>
+        <td><button class="addNewItemBtn" data-kind="team" data-name="${escapeHtml(t.name)}" data-sport-id="${t.sportId}" ${t.suggestion ? `data-suggestion="${escapeHtml(t.suggestion)}"` : ''}>Add as new</button></td>
+      </tr>`));
+    return `
+      <div style="margin-bottom:14px;border:2px solid var(--stamp-amber);border-radius:4px;padding:10px;">
+        <div style="font-weight:bold;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">New cappers / sports / bet types / teams found in this paste (${total})</div>
+        <table class="picks-table">
+          <thead><tr><th>Type</th><th>Name</th><th>Rows</th><th>Check before adding</th><th></th></tr></thead>
+          <tbody>${rows.join('')}</tbody>
+        </table>
+        <div style="font-size:10px;color:var(--ink-soft);margin-top:6px;">
+          Rows using one of these are held back below until you either add it here or fix a typo in your pasted data and click "Parse &amp; preview" again. Clicking "Add as new" creates it for real immediately and re-checks every row in this paste against it -- no need to re-paste.
+        </div>
+      </div>`;
+  }
+
   // Direct request 2026-08-22: "1% of the data shouldn't hold up an
   // entire upload." A row is only ever excluded outright for a HARD,
   // structural problem (v.errors -- missing capper/sport/bet type/date/
@@ -18632,6 +18790,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const valid = validated.filter(v => isBulkRowSelectable(v, allowWarnings));
     const invalid = validated.filter(v => !isBulkRowSelectable(v, allowWarnings));
     const dupCount = valid.filter(v => v.dupWarning).length;
+    const newItemsHtml = renderNewItemsPanel(collectNewItemCandidates(validated));
 
     // Made visible deliberately -- if the live schedule check couldn't
     // even run (TheRundown down, rate-limited, or timing out), that's
@@ -18722,6 +18881,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const hardInvalidCount = invalid.filter(v => v.errors.length > 0).length;
     const needsReviewCount = invalid.length - hardInvalidCount;
     wrap.innerHTML = `
+      ${newItemsHtml}
       ${scheduleWarningHtml}
       <div style="font-size:12px;margin:10px 0;">
         <strong>${valid.length}</strong> ready to import, <strong style="color:var(--stamp-red);">${hardInvalidCount}</strong> flagged as invalid
@@ -18734,8 +18894,58 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </table>
       <button id="importValidRowsBtn" style="margin-top:10px;" ${valid.length === 0 ? 'disabled' : ''}>Import selected picks</button>
       <div style="font-size:10px;color:var(--ink-soft);margin-top:6px;">
-        Flagged-invalid rows (red ✗) are skipped entirely — fix the name (add the missing capper/sport/bet type above, or correct a typo) and paste again. Unconfirmed rows (amber ⚠) only failed a soft check (team name, player name, or tournament date not confirmed) — check "Import rows with unresolved validation warnings anyway" above to import them now instead; they're saved with a schedule-sync flag noting exactly what wasn't confirmed, so they show up later in Missing Data ("Schedule sync flagged") or the "Find &amp; Update Teams / Tournaments" automation tool for a proper look, instead of being dug up from the original source now. Possible-duplicate rows are matched on the same capper, date, sport, bet type, selection, and line (and player/stat for props) — either against another row in this same paste, or against a pick already saved in the database. They're left unchecked on purpose so a re-imported file or two people entering the same picks doesn't silently double up your data — check the box for any that are genuinely intentional (e.g. a capper really did pick the same team twice for different reasons).
+        Flagged-invalid rows (red ✗) are skipped entirely — either click "Add as new" in the panel above for a genuinely new capper/sport/bet type (every row using it re-checks itself automatically, no re-paste needed), or if it's actually a typo, fix the spelling in your pasted data and click "Parse &amp; preview" again. Unconfirmed rows (amber ⚠) only failed a soft check (team name, player name, or tournament date not confirmed) — check "Import rows with unresolved validation warnings anyway" above to import them now instead; they're saved with a schedule-sync flag noting exactly what wasn't confirmed, so they show up later in Missing Data ("Schedule sync flagged") or the "Find &amp; Update Teams / Tournaments" automation tool for a proper look, instead of being dug up from the original source now. Possible-duplicate rows are matched on the same capper, date, sport, bet type, selection, and line (and player/stat for props) — either against another row in this same paste, or against a pick already saved in the database. They're left unchecked on purpose so a re-imported file or two people entering the same picks doesn't silently double up your data — check the box for any that are genuinely intentional (e.g. a capper really did pick the same team twice for different reasons).
       </div>`;
+
+    // "Add as new" wiring for the panel prepended above -- one handler per
+    // button, re-attached every render since wrap.innerHTML was just
+    // rebuilt from scratch. A flagged typo suggestion (data-suggestion)
+    // gets an extra confirm() before anything is created, on top of the
+    // already-visible amber warning -- the one-click "Add as new" button
+    // otherwise makes it just as easy to create a typo as a real new item,
+    // which is the exact failure mode (misspelled team names) this whole
+    // feature has to guard against.
+    wrap.querySelectorAll('.addNewItemBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const kind = btn.getAttribute('data-kind');
+        const name = btn.getAttribute('data-name');
+        const suggestion = btn.getAttribute('data-suggestion');
+        if (suggestion && !confirm(`"${name}" looks like it might be a typo of the existing "${suggestion}". Add it as a genuinely new, separate ${kind.replace('_', ' ')} anyway?`)) {
+          return;
+        }
+        const tr = btn.closest('tr');
+        btn.disabled = true;
+        btn.textContent = 'Adding...';
+        try {
+          if (kind === 'capper') {
+            await rest('cappers', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ name }]) });
+            await refreshCappers();
+          } else if (kind === 'sport') {
+            await rest('sports', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ name }]) });
+            await refreshSports();
+          } else if (kind === 'bet_type') {
+            const uses_line = tr.querySelector('[data-flag="uses_line"]').checked;
+            const uses_prop_fields = tr.querySelector('[data-flag="uses_prop_fields"]').checked;
+            const uses_matchup_fields = tr.querySelector('[data-flag="uses_matchup_fields"]').checked;
+            await rest('bet_types', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ name, uses_line, uses_prop_fields, uses_matchup_fields }]) });
+            await refreshBetTypes();
+          } else if (kind === 'team') {
+            const sportId = btn.getAttribute('data-sport-id');
+            await rest('teams', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ name, sport_id: sportId }]) });
+            await refreshTeams();
+          }
+          // Re-runs the whole parse/validate/check pipeline against the
+          // SAME pasted text (still sitting in the textarea, untouched) --
+          // now that the item genuinely exists, every row that referenced
+          // it flips from blocked/flagged to ready on its own. No re-paste.
+          await runBulkImportParse();
+        } catch (e) {
+          alert('Could not add: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = 'Add as new';
+        }
+      });
+    });
 
     if (valid.length > 0) {
       $('importValidRowsBtn').addEventListener('click', async () => {
@@ -19010,7 +19220,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   });
 
-  $('parseBulkImportBtn').addEventListener('click', async () => {
+  // Pulled out of the Parse button's own click handler, direct request
+  // 2026-08-25, so the "Add as new" buttons in renderNewItemsPanel can
+  // re-run this exact same pipeline against the SAME already-pasted text
+  // once a missing capper/sport/bet type/team has just been created --
+  // without that, every new item would need a manual re-click of Parse
+  // (or worse, a full re-paste) to actually take effect.
+  async function runBulkImportParse() {
     const text = $('bulkImportText').value;
     const { rows } = parseBulkImportText(text);
     if (!rows.length) {
@@ -19027,7 +19243,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const mlbCheckFailures = await checkMlbPlayers(validated);
     bulkImportParsedRows = validated;
     renderBulkImportPreview(validated, [...scheduleCheckFailures, ...mlbCheckFailures]);
-  });
+  }
+
+  $('parseBulkImportBtn').addEventListener('click', runBulkImportParse);
 
   // ---------- init ----------
   let mainAppInited = false;
