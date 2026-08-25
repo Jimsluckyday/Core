@@ -4041,7 +4041,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['Team 1 / Player -- the team, player, or side picked. See TWO-SIDED BETS above.', false, 10],
         ['Team 2 / Opponent -- the other side, ONLY for two-sided bets (Over/Under, Tennis, etc). Leave blank otherwise.', false, 10],
         ['Event Name -- tournament/event name, mainly for Tennis/Golf/MMA/Soccer.', false, 10],
-        ['Line -- the spread/total/prop number, if any. Leave blank if not applicable.', false, 10],
+        ['Line -- the spread/total/prop number, if any. Leave blank if not applicable. Typed as a plain number, same as Odds -- the cell displays a "+" for a positive line automatically (e.g. a +7.5 spread), and for a Player Prop, remember this project\'s own convention: a NEGATIVE line means Over, positive/unsigned means Under.', false, 10],
         ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
         ['Odds -- the American odds at the time of the pick (e.g. -110, +150). Typed as a plain number -- the cell displays a "+" for a positive price automatically, even if you type just "150". See PARLAYS above for combined-parlay odds specifically.', false, 10],
         ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only.', false, 10],
@@ -4127,6 +4127,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       });
       ws.getCell(2, 1).numFmt = '@';
       ws.getCell(2, 2).numFmt = '@';
+      ws.getCell(2, 9).numFmt = '+0.##;-0.##;0';
       ws.getCell(2, 11).numFmt = '+0;-0';
       // The example row's own Date Entered / Date (columns 20/21) need a
       // real resolved value too, even though it's a literal here instead
@@ -4164,6 +4165,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // Purely a display format on a real number -- doesn't change the
         // value itself or how Bulk Import reads it.
         ws.getCell(row, 11).numFmt = '+0;-0';
+        // Same fix, direct report 2026-08-25: Line carries a real sign too
+        // (a spread like +7.5/-7.5, or -- per this project's own prop
+        // convention -- a negative prop line means Over, positive/unsigned
+        // means Under), so dropping a typed "+" here is the same cosmetic
+        // gap as Odds. "#" (not "0") for the decimal digits so a whole
+        // number like 7 still shows as "+7" instead of a padded "+7.0".
+        ws.getCell(row, 9).numFmt = '+0.##;-0.##;0';
 
         // M/D/YYYY (or M/D/YY) format check -- looser than a fixed-width
         // check since the month/day can be 1 or 2 digits (matches
