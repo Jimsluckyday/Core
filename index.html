@@ -4011,23 +4011,31 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['Generated ' + new Date().toISOString().slice(0, 10) + ' from live data -- Cappers/Sports/Bet Types/Teams are exactly what\'s in Setup right now.', false, 10],
         ['', false, 10],
         ['HOW TO USE', true, 12],
-        ['1. Go to the "Picks" tab. Row 3 is a filled-in EXAMPLE -- copy its format, then delete it before importing.', false, 10],
-        ['2. Type data starting in row 4 (or overwrite the example row once you understand the format).', false, 10],
+        ['1. Go to the "Picks" tab. Row 2 is a filled-in EXAMPLE -- copy its format, then delete it before importing.', false, 10],
+        ['2. Type data starting in row 3 (or overwrite the example row once you understand the format).', false, 10],
         ['3. Capper / Sport / Bet Type have dropdowns -- click the cell and use the arrow, or start typing and Excel jumps to matches.', false, 10],
         ['4. Team 1 / Player and Team 2 / Opponent also have dropdowns pulled from your registered Teams -- see TWO-SIDED BETS below for when to use Team 2.', false, 10],
-        ['5. Columns near the right (grey, italic) are AUTOMATIC CHECKS -- don\'t type in them. OK = matches something on file. NEW? = doesn\'t match anything on file -- either a typo, or genuinely new (add it in Setup first). n/a = this check doesn\'t apply to this row.', false, 10],
-        ['6. The "Selection" column (also grey) is COMPUTED, not typed -- it combines Team 1 + Team 2 into the exact format Bulk Import expects. Leave it alone; it fills itself in.', false, 10],
-        ['7. These checks are a simple sanity aid, not a full replica of the real validation. The real, thorough check still runs automatically when you paste into Bulk Import.', false, 10],
-        ['8. When ready to upload: File -> Save As -> CSV (Comma delimited) -- Bulk Import only accepts .csv/.tsv/.txt, not .xlsx directly. The extra check columns are harmless to leave in.', false, 10],
-        ['9. Paste or upload that CSV into Data Tools -> Bulk Import, same as any other batch.', false, 10],
+        ['5. "Date entry" only needs typing when the date CHANGES -- see DATE AUTO-FILL below.', false, 10],
+        ['6. Columns near the right (grey, italic) are AUTOMATIC CHECKS -- don\'t type in them. OK = matches something on file. NEW? = doesn\'t match anything on file -- either a typo, or genuinely new (add it in Setup first). n/a = this check doesn\'t apply to this row.', false, 10],
+        ['7. "Date" and "Selection" (also grey) are COMPUTED, not typed -- Date fills itself in from "Date entry" (see below), Selection combines Team 1 + Team 2 into the exact format Bulk Import expects. Leave both alone; they fill themselves in.', false, 10],
+        ['8. These checks are a simple sanity aid, not a full replica of the real validation. The real, thorough check still runs automatically when you paste into Bulk Import.', false, 10],
+        ['9. When ready to upload: File -> Save As -> CSV (Comma delimited) -- Bulk Import only accepts .csv/.tsv/.txt, not .xlsx directly. The extra check columns are harmless to leave in.', false, 10],
+        ['10. Paste or upload that CSV into Data Tools -> Bulk Import, same as any other batch.', false, 10],
+        ['', false, 10],
+        ['DATE AUTO-FILL', true, 12],
+        ['Direct request 2026-08-25: most of a day\'s batch shares the same event date, so retyping it every single row was pure friction. Type the date only in "Date entry" -- leave it BLANK on every following row and the real "Date" column automatically repeats whatever date was last typed, however many rows back that was. Move on to a new date by typing it once in "Date entry" on the first row of that new date -- everything below keeps following THAT date until you type a new one again.', false, 10],
+        ['This only applies to "Date entry" / "Date" -- "Date Entered" (the day the capper actually POSTED the pick, only different for late-night Tennis/KBO-style picks) is typed separately per row as before, and still defaults to matching that row\'s own Date when left blank.', false, 10],
         ['', false, 10],
         ['TWO-SIDED BETS (Over/Under, Tennis, and anything else with two sides)', true, 12],
         ['CONFIRMED REAL GAP, direct report 2026-08-24: earlier versions of this template had only ONE team/player field, so an Over/Under pick (which genuinely needs both teams) or a Tennis match (needs both players) had nowhere to put the second one -- forcing it into Notes instead, which nothing downstream actually reads.', false, 10],
         ['Put the side you\'d naturally lead with in "Team 1 / Player" (e.g. the team whose total you\'re tracking, or the player you\'re picking). Put the other side in "Team 2 / Opponent". Leave Team 2 BLANK for anything one-sided -- Moneyline, Spread, a single-team Team Total, or a Player Prop.', false, 10],
         ['Example -- Yankees/Dodgers Over 8.5: Team 1 = "New York Yankees", Team 2 = "Los Angeles Dodgers". Example -- Tennis, Rune vs an opponent: Team 1 = "Holger Rune", Team 2 = the opponent\'s name (Tennis has no registered team list, so both will show "n/a" on the check column -- that\'s expected, not an error).', false, 10],
         ['', false, 10],
+        ['PARLAYS -- a note on odds', true, 12],
+        ['You\'re already doing the main thing right: every leg of the SAME parlay gets the SAME number in the "Parlay" column. One more thing that matters for a parlay\'s COMBINED odds (e.g. a big multi-leg payout) to be recognized correctly: put that SAME combined odds number on EVERY leg of that parlay, not just one of them -- the system only treats it as the parlay\'s shared price when every leg agrees. If only one leg has odds and the rest are blank, it won\'t be recognized as the parlay\'s price.', false, 10],
+        ['', false, 10],
         ['COLUMN GUIDE', true, 12],
-        ['Date -- the REAL date of the event, as YYYY-MM-DD. Type it exactly this way to avoid any month/day ambiguity.', false, 10],
+        ['Date entry -- type the REAL date of the event, as M/D/YYYY (e.g. 6/1/2025 or 06/01/2025). Leave BLANK to repeat the date from the row above -- see DATE AUTO-FILL above.', false, 10],
         ['Date Entered -- the day the capper actually posted the pick, if different from Date. Leave blank if same as Date.', false, 10],
         ['Capper / Sport / Bet Type -- must match an existing one exactly (or flag as NEW in Setup first).', false, 10],
         ['Team 1 / Player -- the team, player, or side picked. See TWO-SIDED BETS above.', false, 10],
@@ -4035,14 +4043,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['Event Name -- tournament/event name, mainly for Tennis/Golf/MMA/Soccer.', false, 10],
         ['Line -- the spread/total/prop number, if any. Leave blank if not applicable.', false, 10],
         ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
-        ['Odds -- the American odds at the time of the pick (e.g. -110, +150).', false, 10],
+        ['Odds -- the American odds at the time of the pick (e.g. -110, +150). See PARLAYS above for combined-parlay odds specifically.', false, 10],
         ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only.', false, 10],
         ['Raw Unit Size -- type EXACTLY what you see in the capper\'s own message (e.g. "3 units", "Lock of the Day"). Don\'t convert this to a tier yourself.', false, 10],
         ['Confidence -- only if the capper gives an explicit numeric confidence score. Usually blank.', false, 10],
         ['Notes -- anything else worth keeping about this pick.', false, 10],
         ['Parlay -- leave blank for a straight bet. Give every leg of the SAME parlay the same number.', false, 10],
         ['Published -- "yes" or "no". Leave blank unless intentionally publishing on entry.', false, 10],
-        ['Selection (computed, near the right) -- the real value Bulk Import reads. Don\'t type here; it\'s built automatically from Team 1 + Team 2.', false, 10],
+        ['Date / Selection (computed, near the right) -- the real values Bulk Import reads. Don\'t type in either; Date is built from "Date entry", Selection is built from Team 1 + Team 2.', false, 10],
       ];
       instructionLines.forEach(([text, bold, size], i) => {
         const c = wsI.getCell(i + 1, 1);
@@ -4060,27 +4068,42 @@ These are almost always the same day, so "Date entered" only fills in a starting
         BETTYPES_LAST = betTypeNames.length + 1, TEAMS_LAST = teamRows.length + 1;
 
       // ---- Picks sheet ----
-      // REBUILT 2026-08-25, direct report after real use: "not having
-      // multiple team selections... made it hard to update the over/under
-      // bets" and "couldn't really enter Tennis matches properly" -- both
-      // traced to the SAME root cause, confirmed directly against the
-      // user's actual filled-in file: a two-sided bet (Over/Under needs
-      // both teams, Tennis needs both players) only had one slot, so the
-      // second side got stuffed into Notes, which nothing downstream
-      // reads. Split into "Team 1 / Player" (always) and "Team 2 /
-      // Opponent" (optional, two-sided bets only) -- a computed "Selection"
-      // column combines them into the exact "TeamA/TeamB" shape Bulk
-      // Import already expects when Team 2 is filled in, otherwise it's
-      // just Team 1 alone. Column order also regrouped by entry flow
-      // (identity -> matchup -> numbers -> prop detail -> extras), direct
-      // request, rather than mirroring Bulk Import's own raw column order --
-      // export still works off HEADER NAMES, not position, so this is
-      // purely an editing-ergonomics change with no import-side effect.
+      // REBUILT 2026-08-25 (second pass). Two fixes to what shipped a day
+      // earlier, both direct requests:
+      // 1. CONFIRMED REAL BUG: the computed column was headered "Selection
+      //    (computed)" -- Bulk Import matches columns by exact header text
+      //    (only whitespace gets normalized, not punctuation), so
+      //    "(computed)" meant it was NEVER recognized as "selection" at
+      //    all. Every row would have failed with "missing selection" the
+      //    moment this got uploaded. Fixed by renaming the real column
+      //    back to exactly "Selection" and relying on styling/position/
+      //    Instructions to signal "computed, don't type here" instead of
+      //    the header text.
+      // 2. Added Date auto-fill-down, direct request: type a date once,
+      //    leave it blank on every following row to repeat it, change one
+      //    row to roll onto a new date and everything below keeps
+      //    following THAT date going forward. Same architecture as
+      //    Selection -- a typed helper column ("Date entry") the user
+      //    actually fills in, and a real computed "Date" column (the one
+      //    Bulk Import reads) that chains off the row above:
+      //    IF(this row's entry is blank, use the row above's resolved
+      //    Date, else use what was typed). Date Entered deliberately does
+      //    NOT get this same treatment -- it already has its own
+      //    per-row "blank means same as this row's Date" default inside
+      //    Bulk Import itself, and carrying its own value down from a
+      //    DIFFERENT row could silently fight that existing behavior.
+      // Also switched Date/Date Entered's expected typed format from
+      // YYYY-MM-DD to the natural North American M/D/YYYY (e.g.
+      // 06/01/2025), direct request -- confirmed this is genuinely safe:
+      // Bulk Import's own normalizeDateStr() already explicitly parses
+      // M/D/YYYY (or M/D/YY), and these columns stay plain TEXT either
+      // way (numFmt '@'), so there was never a real reason to require the
+      // less-familiar ISO format here.
       const ws = wb.addWorksheet('Picks');
-      const HEADERS = ['Date', 'Date Entered', 'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent',
-        'Event Name', 'Line', 'Home/Away', 'Odds', 'Prop Player', 'Prop Stat', 'Prop Team', 'Raw Unit Size', 'Confidence',
-        'Notes', 'Parlay', 'Published',
-        'Selection (computed)', 'Capper Check', 'Sport Check', 'Bet Type Check', 'Team 1 Check', 'Team 2 Check', 'Prop Team Check'];
+      const HEADERS = ['Date entry (blank = repeat the date above)', 'Date', 'Date Entered', 'Capper', 'Sport', 'Bet Type',
+        'Team 1 / Player', 'Team 2 / Opponent', 'Event Name', 'Line', 'Home/Away', 'Odds', 'Prop Player', 'Prop Stat',
+        'Prop Team', 'Raw Unit Size', 'Confidence', 'Notes', 'Parlay', 'Published',
+        'Selection', 'Capper Check', 'Sport Check', 'Bet Type Check', 'Team 1 Check', 'Team 2 Check', 'Prop Team Check'];
       HEADERS.forEach((h, i) => {
         const c = ws.getCell(1, i + 1);
         c.value = h;
@@ -4089,23 +4112,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
         c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         c.border = TEMPLATE_BORDER;
       });
-      const WIDTHS = [12, 13, 20, 10, 16, 20, 20, 16, 8, 10, 8, 16, 14, 16, 16, 11, 24, 8, 10, 20, 14, 12, 14, 14, 14, 16];
+      const WIDTHS = [16, 12, 13, 20, 10, 16, 20, 20, 16, 8, 10, 8, 16, 14, 16, 16, 11, 24, 8, 10, 20, 14, 12, 14, 14, 14, 16];
       WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
-      // Example illustrates a real two-sided Over/Under (Team 2 filled in)
-      // so the pattern is visible immediately, not just described in text.
-      const exampleRow = ['2025-06-01', '', 'Duck Investments', 'MLB', 'Over/Under', 'Milwaukee Brewers', 'Chicago Cubs',
-        '', '8.5', '', '-110', '', '', '', '3 units', '', 'Series opener', '', 'no'];
+      // Example illustrates both the Date entry -> Date fill-down AND a
+      // real two-sided Over/Under (Team 2 filled in) so both patterns are
+      // visible immediately, not just described in text.
+      const exampleRow = ['06/01/2025', '06/01/2025', '', 'Duck Investments', 'MLB', 'Over/Under', 'Milwaukee Brewers',
+        'Chicago Cubs', '', '8.5', '', '-110', '', '', '', '3 units', '', 'Series opener', '', 'no'];
       exampleRow.forEach((v, i) => {
         const c = ws.getCell(2, i + 1);
         c.value = v;
         c.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
         c.border = TEMPLATE_BORDER;
       });
+      ws.getCell(2, 1).numFmt = '@';
+      ws.getCell(2, 2).numFmt = '@';
 
       const LAST_DATA_ROW = 500;
       for (let row = 3; row <= LAST_DATA_ROW; row++) {
-        for (let col = 1; col <= 19; col++) {
+        for (let col = 1; col <= 20; col++) {
           const c = ws.getCell(row, col);
           c.font = TEMPLATE_INPUT_FONT;
           c.border = TEMPLATE_BORDER;
@@ -4118,56 +4144,74 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // the date on CSV export).
         ws.getCell(row, 1).numFmt = '@';
         ws.getCell(row, 2).numFmt = '@';
+        ws.getCell(row, 3).numFmt = '@';
 
-        const aRef = `A${row}`, bRef = `B${row}`;
+        // M/D/YYYY (or M/D/YY) format check -- looser than the old fixed-
+        // width YYYY-MM-DD check since the month/day can be 1 or 2 digits
+        // (matches normalizeDateStr's own tolerance), but still catches
+        // the real mistake this is guarding against: typing digits with
+        // no separators at all (e.g. "06012025") has zero slashes and
+        // fails the slash-count check immediately.
         const dateFormatValidation = (ref) => ({
           type: 'custom', allowBlank: true,
-          formulae: [`AND(LEN(${ref})=10,MID(${ref},5,1)="-",MID(${ref},8,1)="-",ISNUMBER(VALUE(LEFT(${ref},4))),ISNUMBER(VALUE(MID(${ref},6,2))),ISNUMBER(VALUE(RIGHT(${ref},2))))`],
+          formulae: [`AND(LEN(${ref})>=8,LEN(${ref})<=10,LEN(${ref})-LEN(SUBSTITUTE(${ref},"/",""))=2,ISNUMBER(VALUE(RIGHT(${ref},4))))`],
           showErrorMessage: true, errorStyle: 'warning',
           errorTitle: 'Check the date format',
-          error: 'Dates should be typed as YYYY-MM-DD, with the dashes (e.g. 2025-06-01). What you entered doesn\'t match that -- double check it before continuing.'
+          error: 'Dates should be typed as M/D/YYYY, with the slashes (e.g. 06/01/2025). What you entered doesn\'t match that -- double check it before continuing.'
         });
-        ws.getCell(row, 1).dataValidation = dateFormatValidation(aRef);
-        ws.getCell(row, 2).dataValidation = dateFormatValidation(bRef);
+        const entryAddr = ws.getCell(row, 1).address, dateAddr = ws.getCell(row, 2).address,
+          dateEnteredAddr = ws.getCell(row, 3).address, prevDateAddr = ws.getCell(row - 1, 2).address;
+        ws.getCell(row, 1).dataValidation = dateFormatValidation(entryAddr);
+        ws.getCell(row, 3).dataValidation = dateFormatValidation(dateEnteredAddr);
 
-        const cRef = `C${row}`, dRef = `D${row}`, eRef = `E${row}`, fRef = `F${row}`, gRef = `G${row}`, nRef = `N${row}`;
+        // Date (computed) -- the real value Bulk Import reads. Blank
+        // "Date entry" on this row means "same as the row above," chained
+        // through the PREVIOUS row's own resolved Date (not its raw typed
+        // entry), so a whole block of rows correctly keeps following
+        // whatever date was last actually typed, however many rows back
+        // that was.
+        ws.getCell(row, 2).value = { formula: `IF(${entryAddr}="",${prevDateAddr},${entryAddr})` };
 
-        // Selection (computed) -- the real value Bulk Import reads. Team 1
-        // alone when Team 2 is blank (the overwhelmingly common one-sided
-        // case); "Team1/Team2" when both are given, matching the exact
-        // combined format the app's own team-name matching already parses
-        // elsewhere (checkTeamName's own "/" split).
-        ws.getCell(row, 20).value = { formula: `IF(${fRef}="","",IF(${gRef}="",${fRef},${fRef}&"/"&${gRef}))` };
+        const capperAddr = ws.getCell(row, 4).address, sportAddr = ws.getCell(row, 5).address,
+          betTypeAddr = ws.getCell(row, 6).address, team1Addr = ws.getCell(row, 7).address,
+          team2Addr = ws.getCell(row, 8).address, propTeamAddr = ws.getCell(row, 15).address;
 
-        ws.getCell(row, 21).value = { formula: `IF(${cRef}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${cRef})>0,"OK","NEW? add in Setup"))` };
-        ws.getCell(row, 22).value = { formula: `IF(${dRef}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${dRef})>0,"OK","NEW? add in Setup"))` };
-        ws.getCell(row, 23).value = { formula: `IF(${eRef}="","",IF(COUNTIF(BetTypes!$A$2:$A$${BETTYPES_LAST},${eRef})>0,"OK","NEW? add in Setup"))` };
-        // Team 1 / Team 2 checks -- no more "combo" special case needed
-        // now that the two sides are genuinely separate fields; each one
-        // is always a single name, never a "TeamA/TeamB" string itself.
+        // Selection (computed) -- Team 1 alone when Team 2 is blank (the
+        // overwhelmingly common one-sided case); "Team1/Team2" when both
+        // are given, matching the exact combined format the app's own
+        // team-name matching already parses elsewhere (checkTeamName's
+        // own "/" split).
+        ws.getCell(row, 21).value = { formula: `IF(${team1Addr}="","",IF(${team2Addr}="",${team1Addr},${team1Addr}&"/"&${team2Addr}))` };
+
+        ws.getCell(row, 22).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 23).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 24).value = { formula: `IF(${betTypeAddr}="","",IF(COUNTIF(BetTypes!$A$2:$A$${BETTYPES_LAST},${betTypeAddr})>0,"OK","NEW? add in Setup"))` };
+        // Team 1 / Team 2 checks -- no "combo" special case needed now
+        // that the two sides are genuinely separate fields; each one is
+        // always a single name, never a "TeamA/TeamB" string itself.
         const teamCheckFormula = (ref) =>
           `IF(${ref}="","",` +
-          `IF(OR(${eRef}="Player Prop",${eRef}="Parlay"),"n/a (prop/parlay)",` +
-          `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${dRef})=0,"n/a (no team list for this sport)",` +
+          `IF(OR(${betTypeAddr}="Player Prop",${betTypeAddr}="Parlay"),"n/a (prop/parlay)",` +
+          `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${sportAddr})=0,"n/a (no team list for this sport)",` +
           `IF(COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${ref})>0,"OK","NEW? check spelling/Setup"))))`;
-        ws.getCell(row, 24).value = { formula: teamCheckFormula(fRef) };
-        ws.getCell(row, 25).value = { formula: teamCheckFormula(gRef) };
-        ws.getCell(row, 26).value = { formula:
-          `IF(${nRef}="","",` +
-          `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${dRef})=0,"n/a (no team list for this sport)",` +
-          `IF(COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${nRef})>0,"OK","NEW? check spelling/Setup")))` };
-        for (let col = 20; col <= 26; col++) {
+        ws.getCell(row, 25).value = { formula: teamCheckFormula(team1Addr) };
+        ws.getCell(row, 26).value = { formula: teamCheckFormula(team2Addr) };
+        ws.getCell(row, 27).value = { formula:
+          `IF(${propTeamAddr}="","",` +
+          `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${sportAddr})=0,"n/a (no team list for this sport)",` +
+          `IF(COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${propTeamAddr})>0,"OK","NEW? check spelling/Setup")))` };
+        for (let col = 21; col <= 27; col++) {
           const c = ws.getCell(row, col);
           c.font = TEMPLATE_CHECK_FONT;
           c.border = TEMPLATE_BORDER;
           c.alignment = { horizontal: 'center' };
         }
 
-        ws.getCell(row, 3).dataValidation = { type: 'list', allowBlank: true, formulae: [`Cappers!$A$2:$A$${CAPPERS_LAST}`] };
-        ws.getCell(row, 4).dataValidation = { type: 'list', allowBlank: true, formulae: [`Sports!$A$2:$A$${SPORTS_LAST}`] };
-        ws.getCell(row, 5).dataValidation = { type: 'list', allowBlank: true, formulae: [`BetTypes!$A$2:$A$${BETTYPES_LAST}`] };
-        ws.getCell(row, 10).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
-        ws.getCell(row, 19).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
+        ws.getCell(row, 4).dataValidation = { type: 'list', allowBlank: true, formulae: [`Cappers!$A$2:$A$${CAPPERS_LAST}`] };
+        ws.getCell(row, 5).dataValidation = { type: 'list', allowBlank: true, formulae: [`Sports!$A$2:$A$${SPORTS_LAST}`] };
+        ws.getCell(row, 6).dataValidation = { type: 'list', allowBlank: true, formulae: [`BetTypes!$A$2:$A$${BETTYPES_LAST}`] };
+        ws.getCell(row, 11).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
+        ws.getCell(row, 20).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
         // Soft (warning, not blocking) team-name dropdown -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
         // typed for non-team bets, so rejecting anything off the list
@@ -4177,9 +4221,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
           showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
           error: 'This doesn\'t exactly match a registered team -- that\'s fine for a player/fighter name on a Prop, a brand-new team, or a Tennis/individual matchup, but double check the spelling if this was meant to be a team.'
         };
-        ws.getCell(row, 6).dataValidation = teamPickWarning;
         ws.getCell(row, 7).dataValidation = teamPickWarning;
-        ws.getCell(row, 14).dataValidation = teamPickWarning;
+        ws.getCell(row, 8).dataValidation = teamPickWarning;
+        ws.getCell(row, 15).dataValidation = teamPickWarning;
       }
 
       ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
