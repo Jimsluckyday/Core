@@ -19328,7 +19328,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // day's schedule would always and incorrectly fail. Same reasoning
       // as excluding prop bets just below.
       const isParlayBetType = betType && normalizeForMatch(betType.name) === 'parlay';
-      if (!sport || (betType && betType.uses_prop_fields) || isParlayBetType || !v.raw.selection) continue;
+      // CONFIRMED REAL BUG, direct report 2026-08-26: "these aren't
+      // playing on this day as these are future bets" -- a long-term
+      // futures pick (Series/Championship/Tournament Winner, Season Win
+      // Total, Award Winner) was never excluded here, so "Cade Klubnik
+      // Heisman" or "Clemson ACC Champs" got checked against that day's
+      // real schedule exactly like a Moneyline pick, and obviously never
+      // matched since a futures bet was never tied to a game on the date
+      // it was PLACED in the first place -- same root cause the whole
+      // is_futures flag exists to name. Excluded the same way Player
+      // Prop/Parlay already are.
+      if (!sport || (betType && (betType.uses_prop_fields || betType.is_futures)) || isParlayBetType || !v.raw.selection) continue;
       const key = `${v.resolved.event_date}|${sport.name}`;
       if (!groups.has(key)) groups.set(key, { date: v.resolved.event_date, sport: sport.name, items: [] });
       const [teamA, teamB] = v.raw.selection.includes('/')
@@ -19608,7 +19618,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 342; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 343; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
