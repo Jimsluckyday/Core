@@ -4121,7 +4121,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['1. Go to the "Picks" tab. Row 2 is a filled-in EXAMPLE -- copy its format, then delete it before importing.', false, 10],
         ['2. Type data starting in row 3 (or overwrite the example row once you understand the format).', false, 10],
         ['3. Capper / Sport / Bet Type have dropdowns -- click the cell and use the arrow, or start typing and Excel jumps to matches. For Capper or Team specifically, the SEARCH column (next to Event Date) is usually faster -- see SEARCH COLUMN below.', false, 10],
-        ['4. Team 1 / Player and Team 2 / Opponent also have dropdowns pulled from your registered Teams -- see TWO-SIDED BETS below for when to use Team 2.', false, 10],
+        ['4. Team 1 / Player and Team 2 / Opponent check against your registered Teams (use the Search column to look one up) and warn on a genuine mismatch -- but only for sports that actually have a team list, so a Tennis/Golf/individual name never gets flagged. See TWO-SIDED BETS below for when to use Team 2.', false, 10],
         ['5. "Date entry" only needs typing when the POSTED date changes -- see DATE AUTO-FILL below. "Event Date" is only for the rare pick where the event happened on a different day than it was posted.', false, 10],
         ['6. Columns near the right (grey, italic) are AUTOMATIC CHECKS -- don\'t type in them. OK = matches something on file. NEW? = doesn\'t match anything on file -- either a typo, or genuinely new (add it in Setup first). n/a = this check doesn\'t apply to this row.', false, 10],
         ['7. "Date Entered", "Date", and "Selection" (also grey) are COMPUTED, not typed -- Date Entered fills itself in from "Date entry" (see below), Date defaults to Date Entered unless "Event Date" overrides it, and Selection combines Team 1 + Team 2 into the exact format Bulk Import expects. Leave all three alone; they fill themselves in.', false, 10],
@@ -4342,6 +4342,41 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const dateEntryValidation = dateFormatValidation('A3');
       const eventDateValidation = dateFormatValidation('B3');
 
+      // CONFIRMED REAL BUG, direct report 2026-08-26: "I am trying to enter
+      // a tennis player that is not a prop bet so any moneyline bet for a
+      // Tennis player/Golf will throw an error." Root cause: the Check
+      // column (below) already knows to show "n/a (no team list for this
+      // sport)" whenever a sport has zero registered teams -- exactly the
+      // case for Tennis/Golf, where "teams" are really individual names --
+      // but the actual pop-up WARNING on Team 1/Team 2/Prop Team was a flat
+      // list checked against EVERY team from EVERY sport, with no idea
+      // which sport that row was even for. A tennis player's name will
+      // essentially never coincidentally match a team from some other
+      // sport, so it nagged on every single one. Rebuilt as a 'custom'
+      // validation mirroring the Check column's own logic exactly: skip
+      // the warning entirely when the bet type is Player Prop/Parlay OR
+      // when this row's sport has no registered teams at all, otherwise
+      // warn only on a genuine non-match. Trades away the dropdown arrow
+      // (a 'custom' rule can't show one, only 'list' can) -- an acceptable
+      // trade since the Search column added the same day now covers that
+      // lookup need anyway. Anchored to row 3 and reused across every row,
+      // same fix as the earlier date-format-validation bug, so ExcelJS
+      // consolidates this into one rule per column instead of one per row.
+      const teamPickValidation = (teamAnchor) => ({
+        type: 'custom', allowBlank: true,
+        formulae: [`OR(F3="Player Prop",F3="Parlay",COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},E3)=0,COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${teamAnchor})>0)`],
+        showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
+        error: 'This doesn\'t exactly match a registered team -- that\'s fine for a player/fighter name on a Prop, a brand-new team, or a Tennis/individual matchup (this warning already skips itself once a sport has no registered team list at all), but double check the spelling if this was meant to be a team.'
+      });
+      const team1PickValidation = teamPickValidation('G3');
+      const team2PickValidation = teamPickValidation('H3');
+      const propTeamPickValidation = {
+        type: 'custom', allowBlank: true,
+        formulae: [`OR(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},E3)=0,COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},N3)>0)`],
+        showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
+        error: 'This doesn\'t exactly match a registered team -- that\'s fine if it\'s genuinely new, but double check the spelling if this was meant to be an existing one.'
+      };
+
       const LAST_DATA_ROW = 500;
       for (let row = 3; row <= LAST_DATA_ROW; row++) {
         for (let col = 1; col <= 20; col++) {
@@ -4474,18 +4509,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 6).dataValidation = newEntryWarning('BetTypes', BETTYPES_LAST, 'bet type');
         ws.getCell(row, 10).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
         ws.getCell(row, 20).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
-        // Soft (warning, not blocking) team-name dropdown -- Team 1/2 and
+        // Soft (warning, not blocking) team-name check -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
         // typed for non-team bets, so rejecting anything off the list
-        // outright would break those rows.
-        const teamPickWarning = {
-          type: 'list', allowBlank: true, formulae: [`Teams!$A$2:$A$${TEAMS_LAST}`],
-          showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
-          error: 'This doesn\'t exactly match a registered team -- that\'s fine for a player/fighter name on a Prop, a brand-new team, or a Tennis/individual matchup, but double check the spelling if this was meant to be a team.'
-        };
-        ws.getCell(row, 7).dataValidation = teamPickWarning;
-        ws.getCell(row, 8).dataValidation = teamPickWarning;
-        ws.getCell(row, 14).dataValidation = teamPickWarning;
+        // outright would break those rows. See teamPickValidation above
+        // for why this is sport-aware now instead of a flat list.
+        ws.getCell(row, 7).dataValidation = team1PickValidation;
+        ws.getCell(row, 8).dataValidation = team2PickValidation;
+        ws.getCell(row, 14).dataValidation = propTeamPickValidation;
         // Same soft-warning treatment for Prop Stat -- direct request
         // 2026-08-26, see propStatRows comment above for why this exists
         // now (previously zero guardrails at all on this column).
@@ -19872,7 +19903,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 348; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 349; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
