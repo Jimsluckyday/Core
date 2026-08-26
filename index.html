@@ -18729,6 +18729,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         // history maps this to a real pick_tier elsewhere) -- never
         // guessed or computed here, just passed through as typed.
         raw_unit_size: (row.raw_unit_size || row.unit_size || row.tier || '').trim() || null,
+        // CONFIRMED REAL GAP, direct report 2026-08-26: "it put 5 whale as
+        // a tier 0... we would never know the tier levels [from a live
+        // transcription]... the time to set each tier manually isn't an
+        // acceptable tradeoff." This starts every row at the same neutral
+        // default the rest of the app already uses for "no signal"
+        // (pick_tier ?? 0 shows as "None given"/Tier 0 everywhere else) --
+        // applyTierFromHistory() below overrides it with a real number
+        // whenever this exact capper has used this exact raw_unit_size
+        // phrase before with one single, consistent tier on file. See
+        // that function for why a genuinely new or historically
+        // inconsistent phrase deliberately stays at this default instead
+        // of guessing.
+        pick_tier: 0,
         // CONFIRMED REAL BUG, direct report 2026-08-22: "Import failed:
         // All object keys must match." PostgREST's bulk insert builds
         // one INSERT from the FIRST object's keys -- every row in the
@@ -19003,6 +19016,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const valid = validated.filter(v => isBulkRowSelectable(v, allowWarnings));
     const invalid = validated.filter(v => !isBulkRowSelectable(v, allowWarnings));
     const dupCount = valid.filter(v => v.dupWarning).length;
+    const tierAutoFilledCount = validated.filter(v => v.tierAutoFilled).length;
+    const tierNeedsReviewCount = validated.filter(v => v.tierNeedsReview).length;
     const newItemsHtml = renderNewItemsPanel(collectNewItemCandidates(validated));
 
     // Made visible deliberately -- if the live schedule check couldn't
@@ -19054,6 +19069,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const dupNote = v.dupWarning
         ? `<div style="color:var(--stamp-amber);font-weight:bold;">⚠ ${escapeHtml(v.dupWarning)}${v.parlayMemberships ? ' -- checked by default: this is a parlay leg, and the import step already reuses the existing pick instead of duplicating it, so unchecking this would only drop it from the parlay' : ''}</div>`
         : '';
+      // Informational only, deliberately NOT styled as a warning and NOT
+      // added to v.warnings -- see applyTierFromHistory's own comment for
+      // why: the whole point was for a row that can't be confidently
+      // auto-tiered to still import cleanly at Tier 0, not trade "click a
+      // duplicate checkbox" for "click a tier checkbox" instead.
+      const tierNote = v.tierAutoFilled
+        ? `<div style="color:var(--ink-soft);font-style:italic;">Tier ${v.resolved.pick_tier} auto-filled from this capper's own history for "${escapeHtml(v.resolved.raw_unit_size)}".</div>`
+        : (v.tierNeedsReview
+          ? `<div style="color:var(--ink-soft);font-style:italic;">Tier left at 0 -- ${escapeHtml(v.tierNeedsReview)}.</div>`
+          : '');
       // Shown for every warning, selectable or not -- a warning-only row
       // that IS currently selectable (because the checkbox above is on)
       // still deserves the same visible flag, since it's about to be
@@ -19089,7 +19114,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${escapeHtml(v.raw.selection || '')}</td>
         <td>${escapeHtml(v.raw.line || '')}</td>
         <td>${eventDisplay}</td>
-        <td style="font-size:11px;">${v.errors.length ? `<span style="color:var(--stamp-red);">${v.errors.join('; ')}</span>` : ''}${warnNote}${dupNote}${summaryNote}</td>
+        <td style="font-size:11px;">${v.errors.length ? `<span style="color:var(--stamp-red);">${v.errors.join('; ')}</span>` : ''}${warnNote}${dupNote}${tierNote}${summaryNote}</td>
       </tr>`;
     }
 
@@ -19119,6 +19144,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         ${needsReviewCount > 0 ? `, <strong style="color:var(--stamp-amber);">${needsReviewCount}</strong> unconfirmed (check "Import rows with unresolved validation warnings anyway" above to include ${needsReviewCount === 1 ? 'it' : 'them'} now instead of fixing first)` : ''}
         ${dupCount > 0 ? `, <strong style="color:var(--stamp-amber);">${dupCount}</strong> possible duplicate${dupCount === 1 ? '' : 's'} (unchecked by default — review and check the box if it's intentional)` : ''}
       </div>
+      ${(tierAutoFilledCount > 0 || tierNeedsReviewCount > 0) ? `<div style="font-size:11px;color:var(--ink-soft);margin:0 0 10px;">
+        ${tierAutoFilledCount > 0 ? `<strong>${tierAutoFilledCount}</strong> row${tierAutoFilledCount === 1 ? '' : 's'} auto-tiered from this capper's own history.` : ''}
+        ${tierNeedsReviewCount > 0 ? `<strong>${tierNeedsReviewCount}</strong> row${tierNeedsReviewCount === 1 ? '' : 's'} left at Tier 0 (new phrase or inconsistent history) -- these still import normally; see Reports &gt; Tier Consistency whenever you want to review them, no need to fix before importing.` : ''}
+      </div>` : ''}
       <table class="picks-table">
         <thead><tr><th></th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Event</th><th>Issue</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
@@ -19266,6 +19295,76 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         }
       });
     }
+  }
+
+  // Direct request 2026-08-26: "it put 5 whale as a tier 0... we would
+  // never know the tier levels [from a live transcription or manual
+  // entry alike]... the time to set each tier manually isn't an
+  // acceptable tradeoff." Real automation, not a manual reference panel
+  // (that already existed via showTierHistoryBtn and never auto-filled
+  // anything) -- reuses the EXACT SAME per-capper (raw_unit_size ->
+  // pick_tier) history the Tier Consistency tool already builds,
+  // including its normalizeUnitSize normalization ("1.5U"/"1.5u"/"1.5"
+  // all the same signal). A capper's own phrase for a given tier is
+  // usually consistent ("5 Whale" always means their Tier 5), so once a
+  // human has tiered it correctly even once before, every future
+  // occurrence of that exact phrase from that exact capper tiers itself.
+  //
+  // Deliberately does NOT guess in the two cases where guessing would be
+  // actively wrong: a phrase this capper has NEVER used before (nothing
+  // to infer from -- exactly the case the user themselves named, a raw
+  // transcription alone can't reveal what a brand-new phrase means) or a
+  // phrase this capper has used INCONSISTENTLY (more than one tier on
+  // file for it) -- that's precisely the data problem the Tier
+  // Consistency tool exists to catch and let a human resolve, not
+  // something to silently paper over with a pick here. Both cases are
+  // left at the neutral pick_tier=0 default set above and flagged with
+  // v.tierNeedsReview (informational only -- NOT pushed into
+  // v.warnings, so it never blocks import or requires a checkbox; the
+  // whole point was to stop needing manual attention per row, not move
+  // it to a different checkbox).
+  async function applyTierFromHistory(validated) {
+    const candidates = validated.filter(v => v.errors.length === 0 && v.resolved && v.resolved.raw_unit_size && !v.resolved.is_parlay_leg);
+    if (!candidates.length) return;
+
+    const capperIds = Array.from(new Set(candidates.map(v => v.resolved.capper_id).filter(id => id !== null && id !== undefined)));
+    if (!capperIds.length) return;
+
+    let history;
+    try {
+      history = await restAllPages(
+        `picks?select=capper_id,pick_tier,raw_unit_size&capper_id=in.(${capperIds.join(',')})&is_parlay_leg=eq.false&pick_tier=not.is.null&raw_unit_size=not.is.null`
+      );
+    } catch (e) {
+      // Never blocks import over this -- worst case, rows simply keep
+      // the Tier 0 default they already started with.
+      console.warn('Could not load tier history for auto-tiering:', e.message);
+      return;
+    }
+
+    const tiersByKey = new Map();
+    history.forEach(p => {
+      const norm = normalizeUnitSize((p.raw_unit_size || '').trim()).trim().toLowerCase();
+      if (!norm) return;
+      const key = `${p.capper_id}::${norm}`;
+      if (!tiersByKey.has(key)) tiersByKey.set(key, new Set());
+      tiersByKey.get(key).add(Number(p.pick_tier));
+    });
+
+    candidates.forEach(v => {
+      const norm = normalizeUnitSize(v.resolved.raw_unit_size).trim().toLowerCase();
+      if (!norm) return;
+      const key = `${v.resolved.capper_id}::${norm}`;
+      const tiers = tiersByKey.get(key);
+      if (tiers && tiers.size === 1) {
+        v.resolved.pick_tier = [...tiers][0];
+        v.tierAutoFilled = true;
+      } else {
+        v.tierNeedsReview = tiers
+          ? `"${v.resolved.raw_unit_size}" has mapped to more than one tier for this capper before (${[...tiers].sort((a, b) => a - b).join(', ')}) -- left at Tier 0 rather than guess; check Reports -> Tier Consistency`
+          : `first time seeing "${v.resolved.raw_unit_size}" from this capper -- left at Tier 0, nothing on file yet to match against`;
+      }
+    });
   }
 
   // Flags rows that look like duplicates -- either repeated within the same
@@ -19497,6 +19596,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     let validated = meaningfulRows.map(validateBulkRow);
     validated = processParlayGroups(validated);
+    $('bulkImportPreview').innerHTML = '<div class="empty-state">Matching unit sizes to each capper\'s tier history...</div>';
+    await applyTierFromHistory(validated);
     $('bulkImportPreview').innerHTML = '<div class="empty-state">Checking for duplicates...</div>';
     await checkForDuplicates(validated);
     $('bulkImportPreview').innerHTML = '<div class="empty-state">Checking today\'s actual schedule for team-based picks...</div>';
@@ -19618,7 +19719,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 343; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 344; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
