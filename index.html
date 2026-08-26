@@ -4097,13 +4097,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const propStatRows = propStats
         .map(p => [p.name, sportNameById[String(p.sport_id)] || '—'])
         .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
-      // Direct request 2026-08-26: single toggle Search column (Capper vs
-      // Team) needs one combined, type-tagged list to filter against --
-      // see the SearchIndex sheet and the dedicated column-3 block below.
-      const searchIndexRows = [
-        ...capperNames.map(n => [n, 'Capper']),
-        ...teamRows.map(t => [t[0], 'Team'])
-      ];
 
       const wb = new ExcelJS.Workbook();
       wb.creator = 'Core Betting Solutions';
@@ -4120,8 +4113,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['HOW TO USE', true, 12],
         ['1. Go to the "Picks" tab. Row 2 is a filled-in EXAMPLE -- copy its format, then delete it before importing.', false, 10],
         ['2. Type data starting in row 3 (or overwrite the example row once you understand the format).', false, 10],
-        ['3. Capper / Sport / Bet Type have dropdowns -- click the cell and use the arrow, or start typing and Excel jumps to matches. For Capper or Team specifically, the SEARCH column (next to Event Date) is usually faster -- see SEARCH COLUMN below.', false, 10],
-        ['4. Team 1 / Player and Team 2 / Opponent check against your registered Teams (use the Search column to look one up) and warn on a genuine mismatch -- but only for sports that actually have a team list, so a Tennis/Golf/individual name never gets flagged. See TWO-SIDED BETS below for when to use Team 2.', false, 10],
+        ['3. Capper / Sport / Bet Type have dropdowns -- click the cell and use the arrow, or start typing and Excel jumps to matches.', false, 10],
+        ['4. Team 1 / Player and Team 2 / Opponent check against your registered Teams and warn on a genuine mismatch -- but only for sports that actually have a team list, so a Tennis/Golf/individual name never gets flagged. See TWO-SIDED BETS below for when to use Team 2.', false, 10],
         ['5. "Date entry" only needs typing when the POSTED date changes -- see DATE AUTO-FILL below. "Event Date" is only for the rare pick where the event happened on a different day than it was posted.', false, 10],
         ['6. Columns near the right (grey, italic) are AUTOMATIC CHECKS -- don\'t type in them. OK = matches something on file. NEW? = doesn\'t match anything on file -- either a typo, or genuinely new (add it in Setup first). n/a = this check doesn\'t apply to this row.', false, 10],
         ['7. "Date Entered", "Date", and "Selection" (also grey) are COMPUTED, not typed -- Date Entered fills itself in from "Date entry" (see below), Date defaults to Date Entered unless "Event Date" overrides it, and Selection combines Team 1 + Team 2 into the exact format Bulk Import expects. Leave all three alone; they fill themselves in.', false, 10],
@@ -4132,11 +4125,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['DATE AUTO-FILL', true, 12],
         ['Direct request 2026-08-25: most of a day\'s batch shares the same POSTED date, so retyping it every single row was pure friction. Type the date only in "Date entry" -- leave it BLANK on every following row and the real "Date Entered" column automatically repeats whatever date was last typed, however many rows back that was. Move on to a new date by typing it once in "Date entry" on the first row of that new date -- everything below keeps following THAT date until you type a new one again.', false, 10],
         ['Direct request 2026-08-25: "Date entry" (the 1st column) is the date the pick was POSTED -- almost always the same across a whole batch, which is what auto-fill above is for. "Event Date" (the 2nd column) is only for the rare pick where the event itself happened on a different calendar day than it was posted -- a late-night Tennis/KBO-style pick crossing midnight. Leave "Event Date" BLANK in the common case; the real "Date" column then just matches "Date Entered" automatically. Only type something there when the two genuinely differ.', false, 10],
-        ['', false, 10],
-        ['SEARCH COLUMN -- find a Capper or Team without scrolling', true, 12],
-        ['Direct request 2026-08-26: with 130+ cappers, Excel\'s own dropdown can\'t filter as you type (a genuine Excel/LibreOffice limitation, confirmed) -- scrolling the full list or typing a full name from memory was too slow. The narrow "Search" column (right after Event Date, frozen so it stays on screen no matter how far you scroll) is a faster lookup instead.', false, 10],
-        ['How to use it: row 3 is a toggle -- pick "Capper" or "Team" from its dropdown. Row 4 is where you type a few letters. Rows below immediately show every matching name (up to 14) for whichever type is toggled -- copy/paste whichever one you need into the real Capper, Team 1, or Team 2 cell for that row. Leave Row 4 blank to just browse the first 14 names alphabetically.', false, 10],
-        ['This is a lookup aid only -- it doesn\'t fill in any other cell for you, and it\'s shared/reused for every row (it isn\'t "per row" of data). Typing over the toggle or search text is normal and expected as you look up different names.', false, 10],
         ['', false, 10],
         ['TWO-SIDED BETS (Over/Under, Tennis, and anything else with two sides)', true, 12],
         ['CONFIRMED REAL GAP, direct report 2026-08-24: earlier versions of this template had only ONE team/player field, so an Over/Under pick (which genuinely needs both teams) or a Tennis match (needs both players) had nowhere to put the second one -- forcing it into Notes instead, which nothing downstream actually reads.', false, 10],
@@ -4156,7 +4144,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['COLUMN GUIDE', true, 12],
         ['Date entry -- type the date the pick was POSTED, as M/D/YYYY (e.g. 6/1/2025 or 06/01/2025). Leave BLANK to repeat the date from the row above -- see DATE AUTO-FILL above.', false, 10],
         ['Event Date -- ONLY if the event happened on a different calendar day than it was posted (e.g. a late-night pick crossing midnight). Leave BLANK otherwise -- see DATE AUTO-FILL above.', false, 10],
-        ['Search -- a lookup aid, not a data column for any one row. Toggle Capper/Team, type a few letters, copy a matching result into the real Capper/Team 1/Team 2 cell. See SEARCH COLUMN above.', false, 10],
         ['Capper / Sport / Bet Type -- must match an existing one exactly (or flag as NEW in Setup first).', false, 10],
         ['Team 1 / Player -- the team, player, or side picked. See TWO-SIDED BETS above.', false, 10],
         ['Team 2 / Opponent -- the other side, ONLY for two-sided bets (Over/Under, Tennis, etc). Leave blank otherwise.', false, 10],
@@ -4190,7 +4177,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
       writeRefSheet(wb, 'BetTypes', ['Bet Type'], betTypeNames);
       writeRefSheet(wb, 'Teams', ['Team', 'Sport'], teamRows);
       writeRefSheet(wb, 'PropStats', ['Prop Stat', 'Sport'], propStatRows);
-      writeRefSheet(wb, 'SearchIndex', ['Name', 'Type'], searchIndexRows);
       // Math.max(..., 2) as a second line of defense alongside the
       // refresh-before-building fix above: if a list is ever genuinely
       // empty (0 items -- e.g. truly nothing registered yet, not just a
@@ -4200,8 +4186,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // one-cell range -- instead of an inverted one.
       const CAPPERS_LAST = Math.max(capperNames.length + 1, 2), SPORTS_LAST = Math.max(sportNames.length + 1, 2),
         BETTYPES_LAST = Math.max(betTypeNames.length + 1, 2), TEAMS_LAST = Math.max(teamRows.length + 1, 2),
-        PROPSTATS_LAST = Math.max(propStatRows.length + 1, 2),
-        SEARCHINDEX_LAST = Math.max(searchIndexRows.length + 1, 2);
+        PROPSTATS_LAST = Math.max(propStatRows.length + 1, 2);
 
       // ---- Picks sheet ----
       // REBUILT 2026-08-25 (third pass), direct reports:
@@ -4239,30 +4224,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // Tennis/Golf picks which are a much lower volume." Moved out of the
       // frequently-typed columns near the front and re-anchored right
       // before Notes instead.
-      // Second direct request, same day: a "Search" column, toggled
-      // between Capper/Team, so typing a couple letters shows every
-      // matching name instead of scrolling a 130-capper dropdown or
-      // typing the full name from memory. Excel's own list-validation
-      // dropdown genuinely can't filter live as you type (confirmed, not
-      // a limitation of this file specifically), and a real VBA combo box
-      // isn't achievable either -- this tool (ExcelJS) can't write macros
-      // at all, and separately the user is on LibreOffice, where VBA
-      // doesn't reliably run anyway. FILTER() was tested directly and
-      // confirmed unsupported in this LibreOffice install (#NAME?), so
-      // this uses the older, universally-supported INDEX/SMALL/IF array-
-      // formula technique instead -- verified working via the actual
-      // ExcelJS-generated file (not just a Python-authored test), see
-      // the SearchIndex sheet and the dedicated column-3 block below.
-      // Lives right after Event Date (not at the very front, so it
-      // doesn't disrupt the columns already muscle-memorized) and is
-      // frozen in place with the header rows (ws.views below) so it's
-      // visible no matter how far the sheet is scrolled in either
-      // direction. Not a true live-filtering dropdown -- it's a copy/
-      // paste-the-match workflow: toggle Capper or Team, type a few
-      // letters, copy whichever result row matches into the real entry
-      // cell.
+      // A "Search" column (toggle Capper/Team, type a few letters, see
+      // matches) was tried here the same day and then REMOVED, direct
+      // report 2026-08-26: it caused an unresolved LibreOffice-side issue
+      // where the Capper cell in row 3 would change while typing in the
+      // search box, AND -- independent of that bug -- it permanently
+      // reserved column 3 on EVERY row even though the toggle/search/
+      // results widget only ever occupied rows 3-18. Every real row past
+      // 18 had a dead, purposeless cell sitting between Event Date and
+      // Capper, disrupting the normal left-to-right tab-through-a-row
+      // entry flow for the other ~480 rows. Not worth the tradeoff -- see
+      // git history (commit "Add single-toggle Search column...") if this
+      // is ever revisited with a design that doesn't share row numbers
+      // with real per-pick data at all.
       const HEADERS = ['Date entry (posted date -- blank = repeat above)', 'Event Date (only if different from above)',
-        'Search', 'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent', 'Line', 'Home/Away', 'Odds',
+        'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent', 'Line', 'Home/Away', 'Odds',
         'Prop Player', 'Prop Stat', 'Prop Team', 'Raw Unit Size', 'Confidence', 'Event Name', 'Notes', 'Parlay', 'Published',
         'Date Entered', 'Date', 'Selection', 'Capper Check', 'Sport Check', 'Bet Type Check', 'Team 1 Check', 'Team 2 Check', 'Prop Team Check'];
       HEADERS.forEach((h, i) => {
@@ -4273,16 +4249,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         c.border = TEMPLATE_BORDER;
       });
-      const WIDTHS = [16, 18, 18, 20, 10, 16, 20, 20, 8, 10, 8, 16, 14, 16, 16, 11, 16, 24, 8, 10, 13, 12, 20, 14, 12, 14, 14, 14, 16];
+      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 8, 10, 8, 16, 14, 16, 16, 11, 16, 24, 8, 10, 13, 12, 20, 14, 12, 14, 14, 14, 16];
       WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
       // Example illustrates the posted-date fill-down AND a real two-sided
       // Over/Under (Team 2 filled in) so both patterns are visible
       // immediately, not just described in text. Event Date left blank --
       // the overwhelmingly common case where it matches the posted date.
-      // Search (column 3) is deliberately blank here -- its own dedicated
-      // rows 3-18 are set up separately below, not as normal example data.
-      const exampleRow = ['06/01/2025', '', '', 'Duck Investments', 'MLB', 'Over/Under', 'Milwaukee Brewers',
+      const exampleRow = ['06/01/2025', '', 'Duck Investments', 'MLB', 'Over/Under', 'Milwaukee Brewers',
         'Chicago Cubs', '8.5', '', '-110', '', '', '', '3 units', '', '', 'Series opener', '', 'no'];
       exampleRow.forEach((v, i) => {
         const c = ws.getCell(2, i + 1);
@@ -4292,22 +4266,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
       });
       ws.getCell(2, 1).numFmt = '@';
       ws.getCell(2, 2).numFmt = '@';
-      ws.getCell(2, 9).numFmt = '+0.##;-0.##;0';
-      ws.getCell(2, 11).numFmt = '+0;-0';
-      // The example row's own Date Entered / Date (columns 21/22) need a
+      ws.getCell(2, 8).numFmt = '+0.##;-0.##;0';
+      ws.getCell(2, 10).numFmt = '+0;-0';
+      // The example row's own Date Entered / Date (columns 20/21) need a
       // real resolved value too, even though it's a literal here instead
       // of a formula (the formula loop below only covers row 3+) --
       // row 3's own fill-down formula chains through THIS cell when its
       // "Date entry" is left blank (the example's whole point), so leaving
       // it genuinely empty would break the very pattern being demonstrated.
+      ws.getCell(2, 20).value = '06/01/2025';
       ws.getCell(2, 21).value = '06/01/2025';
-      ws.getCell(2, 22).value = '06/01/2025';
+      ws.getCell(2, 20).numFmt = '@';
       ws.getCell(2, 21).numFmt = '@';
-      ws.getCell(2, 22).numFmt = '@';
+      ws.getCell(2, 20).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
       ws.getCell(2, 21).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
-      ws.getCell(2, 22).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+      ws.getCell(2, 20).border = TEMPLATE_BORDER;
       ws.getCell(2, 21).border = TEMPLATE_BORDER;
-      ws.getCell(2, 22).border = TEMPLATE_BORDER;
 
       // CONFIRMED REAL BUG, direct report 2026-08-25: "the drop downs are
       // gone from most of the fields." Root cause: this M/D/YYYY format
@@ -4357,29 +4331,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // the warning entirely when the bet type is Player Prop/Parlay OR
       // when this row's sport has no registered teams at all, otherwise
       // warn only on a genuine non-match. Trades away the dropdown arrow
-      // (a 'custom' rule can't show one, only 'list' can) -- an acceptable
-      // trade since the Search column added the same day now covers that
-      // lookup need anyway. Anchored to row 3 and reused across every row,
-      // same fix as the earlier date-format-validation bug, so ExcelJS
-      // consolidates this into one rule per column instead of one per row.
+      // (a 'custom' rule can't show one, only 'list' can) -- accepted as
+      // worth it to stop the false-positive nagging on every Tennis/Golf
+      // row. Anchored to row 3 and reused across every row, same fix as
+      // the earlier date-format-validation bug, so ExcelJS consolidates
+      // this into one rule per column instead of one per row.
       const teamPickValidation = (teamAnchor) => ({
         type: 'custom', allowBlank: true,
-        formulae: [`OR(F3="Player Prop",F3="Parlay",COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},E3)=0,COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${teamAnchor})>0)`],
+        formulae: [`OR(E3="Player Prop",E3="Parlay",COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},D3)=0,COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${teamAnchor})>0)`],
         showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
         error: 'This doesn\'t exactly match a registered team -- that\'s fine for a player/fighter name on a Prop, a brand-new team, or a Tennis/individual matchup (this warning already skips itself once a sport has no registered team list at all), but double check the spelling if this was meant to be a team.'
       });
-      const team1PickValidation = teamPickValidation('G3');
-      const team2PickValidation = teamPickValidation('H3');
+      const team1PickValidation = teamPickValidation('F3');
+      const team2PickValidation = teamPickValidation('G3');
       const propTeamPickValidation = {
         type: 'custom', allowBlank: true,
-        formulae: [`OR(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},E3)=0,COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},N3)>0)`],
+        formulae: [`OR(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},D3)=0,COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},M3)>0)`],
         showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
         error: 'This doesn\'t exactly match a registered team -- that\'s fine if it\'s genuinely new, but double check the spelling if this was meant to be an existing one.'
       };
 
       const LAST_DATA_ROW = 500;
       for (let row = 3; row <= LAST_DATA_ROW; row++) {
-        for (let col = 1; col <= 20; col++) {
+        for (let col = 1; col <= 19; col++) {
           const c = ws.getCell(row, col);
           c.font = TEMPLATE_INPUT_FONT;
           c.border = TEMPLATE_BORDER;
@@ -4397,14 +4371,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // matching how odds are shown everywhere else in this project.
         // Purely a display format on a real number -- doesn't change the
         // value itself or how Bulk Import reads it.
-        ws.getCell(row, 11).numFmt = '+0;-0';
+        ws.getCell(row, 10).numFmt = '+0;-0';
         // Same fix, direct report 2026-08-25: Line carries a real sign too
         // (a spread like +7.5/-7.5, or -- per this project's own prop
         // convention -- a negative prop line means Over, positive/unsigned
         // means Under), so dropping a typed "+" here is the same cosmetic
         // gap as Odds. "#" (not "0") for the decimal digits so a whole
         // number like 7 still shows as "+7" instead of a padded "+7.0".
-        ws.getCell(row, 9).numFmt = '+0.##;-0.##;0';
+        ws.getCell(row, 8).numFmt = '+0.##;-0.##;0';
 
         // M/D/YYYY (or M/D/YY) format check -- looser than a fixed-width
         // check since the month/day can be 1 or 2 digits (matches
@@ -4414,14 +4388,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // slash-count check immediately. Same shared object on every row
         // (defined once above) -- see the comment above the loop for why.
         const entryAddr = ws.getCell(row, 1).address, eventDateOverrideAddr = ws.getCell(row, 2).address,
-          prevDateEnteredAddr = ws.getCell(row - 1, 21).address;
+          prevDateEnteredAddr = ws.getCell(row - 1, 20).address;
         ws.getCell(row, 1).dataValidation = dateEntryValidation;
         ws.getCell(row, 2).dataValidation = eventDateValidation;
 
-        const capperAddr = ws.getCell(row, 4).address, sportAddr = ws.getCell(row, 5).address,
-          betTypeAddr = ws.getCell(row, 6).address, team1Addr = ws.getCell(row, 7).address,
-          team2Addr = ws.getCell(row, 8).address, lineAddr = ws.getCell(row, 9).address,
-          propStatAddr = ws.getCell(row, 13).address, propTeamAddr = ws.getCell(row, 14).address;
+        const capperAddr = ws.getCell(row, 3).address, sportAddr = ws.getCell(row, 4).address,
+          betTypeAddr = ws.getCell(row, 5).address, team1Addr = ws.getCell(row, 6).address,
+          team2Addr = ws.getCell(row, 7).address, lineAddr = ws.getCell(row, 8).address,
+          propStatAddr = ws.getCell(row, 12).address, propTeamAddr = ws.getCell(row, 13).address;
 
         // Date Entered (computed) -- the real posted date. Blank "Date
         // entry" on this row means "same as the row above," chained
@@ -4429,13 +4403,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // raw typed entry), so a whole block of rows correctly keeps
         // following whatever date was last actually typed, however many
         // rows back that was.
-        const dateEnteredAddr = ws.getCell(row, 21).address;
-        ws.getCell(row, 21).value = { formula: `IF(${entryAddr}="",${prevDateEnteredAddr},${entryAddr})` };
+        const dateEnteredAddr = ws.getCell(row, 20).address;
+        ws.getCell(row, 20).value = { formula: `IF(${entryAddr}="",${prevDateEnteredAddr},${entryAddr})` };
         // Date (computed) -- the real event date Bulk Import reads.
         // Defaults to THIS row's own resolved Date Entered (the common
         // same-day case); the Event Date column overrides it only when
         // typed, for the genuinely-different late-night-crossing case.
-        ws.getCell(row, 22).value = { formula: `IF(${eventDateOverrideAddr}="",${dateEnteredAddr},${eventDateOverrideAddr})` };
+        ws.getCell(row, 21).value = { formula: `IF(${eventDateOverrideAddr}="",${dateEnteredAddr},${eventDateOverrideAddr})` };
 
         // CONFIRMED REAL BUG, direct report 2026-08-26: every "Player
         // Prop" row computed Selection as blank (Team 1/2 are correctly
@@ -4456,16 +4430,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
         //    (negative = Over, positive = Under).
         // Non-prop bet types keep the original Team 1(/Team 2) logic,
         // completely untouched.
-        ws.getCell(row, 23).value = { formula:
+        ws.getCell(row, 22).value = { formula:
           `IF(${betTypeAddr}<>"Player Prop",` +
           `IF(${team1Addr}="","",IF(${team2Addr}="",${team1Addr},${team1Addr}&"/"&${team2Addr})),` +
           `IF(OR(${propStatAddr}="Tournament Winner",${propStatAddr}="Round Winner"),"To Win",` +
           `IF(OR(${propStatAddr}="Round Matchup",${propStatAddr}="Tournament Matchup"),${team1Addr},` +
           `IF(${lineAddr}="","",IF(${lineAddr}<0,"Over","Under")))))` };
 
-        ws.getCell(row, 24).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
-        ws.getCell(row, 25).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
-        ws.getCell(row, 26).value = { formula: `IF(${betTypeAddr}="","",IF(COUNTIF(BetTypes!$A$2:$A$${BETTYPES_LAST},${betTypeAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 23).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 24).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 25).value = { formula: `IF(${betTypeAddr}="","",IF(COUNTIF(BetTypes!$A$2:$A$${BETTYPES_LAST},${betTypeAddr})>0,"OK","NEW? add in Setup"))` };
         // Team 1 / Team 2 checks -- no "combo" special case needed now
         // that the two sides are genuinely separate fields; each one is
         // always a single name, never a "TeamA/TeamB" string itself.
@@ -4474,20 +4448,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
           `IF(OR(${betTypeAddr}="Player Prop",${betTypeAddr}="Parlay"),"n/a (prop/parlay)",` +
           `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${sportAddr})=0,"n/a (no team list for this sport)",` +
           `IF(COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${ref})>0,"OK","NEW? check spelling/Setup"))))`;
-        ws.getCell(row, 27).value = { formula: teamCheckFormula(team1Addr) };
-        ws.getCell(row, 28).value = { formula: teamCheckFormula(team2Addr) };
-        ws.getCell(row, 29).value = { formula:
+        ws.getCell(row, 26).value = { formula: teamCheckFormula(team1Addr) };
+        ws.getCell(row, 27).value = { formula: teamCheckFormula(team2Addr) };
+        ws.getCell(row, 28).value = { formula:
           `IF(${propTeamAddr}="","",` +
           `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${sportAddr})=0,"n/a (no team list for this sport)",` +
           `IF(COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${propTeamAddr})>0,"OK","NEW? check spelling/Setup")))` };
-        for (let col = 21; col <= 29; col++) {
+        for (let col = 20; col <= 28; col++) {
           const c = ws.getCell(row, col);
           c.font = TEMPLATE_CHECK_FONT;
           c.border = TEMPLATE_BORDER;
           c.alignment = { horizontal: 'center' };
         }
+        ws.getCell(row, 20).numFmt = '@';
         ws.getCell(row, 21).numFmt = '@';
-        ws.getCell(row, 22).numFmt = '@';
 
         // CONFIRMED REAL BUG, direct report 2026-08-26: "I went to type in
         // Mojo... the field goes blank and doesn't update." Capper/Sport/
@@ -4504,69 +4478,30 @@ These are almost always the same day, so "Date entered" only fills in a starting
           showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
           error: `This doesn't exactly match a registered ${label} -- that's fine if it's genuinely new (the Check column will flag it as NEW so you remember to add it in Setup), but double check the spelling if this was meant to be an existing one.`
         });
-        ws.getCell(row, 4).dataValidation = newEntryWarning('Cappers', CAPPERS_LAST, 'capper');
-        ws.getCell(row, 5).dataValidation = newEntryWarning('Sports', SPORTS_LAST, 'sport');
-        ws.getCell(row, 6).dataValidation = newEntryWarning('BetTypes', BETTYPES_LAST, 'bet type');
-        ws.getCell(row, 10).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
-        ws.getCell(row, 20).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
+        ws.getCell(row, 3).dataValidation = newEntryWarning('Cappers', CAPPERS_LAST, 'capper');
+        ws.getCell(row, 4).dataValidation = newEntryWarning('Sports', SPORTS_LAST, 'sport');
+        ws.getCell(row, 5).dataValidation = newEntryWarning('BetTypes', BETTYPES_LAST, 'bet type');
+        ws.getCell(row, 9).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
+        ws.getCell(row, 19).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
         // Soft (warning, not blocking) team-name check -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
         // typed for non-team bets, so rejecting anything off the list
         // outright would break those rows. See teamPickValidation above
         // for why this is sport-aware now instead of a flat list.
-        ws.getCell(row, 7).dataValidation = team1PickValidation;
-        ws.getCell(row, 8).dataValidation = team2PickValidation;
-        ws.getCell(row, 14).dataValidation = propTeamPickValidation;
+        ws.getCell(row, 6).dataValidation = team1PickValidation;
+        ws.getCell(row, 7).dataValidation = team2PickValidation;
+        ws.getCell(row, 13).dataValidation = propTeamPickValidation;
         // Same soft-warning treatment for Prop Stat -- direct request
         // 2026-08-26, see propStatRows comment above for why this exists
         // now (previously zero guardrails at all on this column).
-        ws.getCell(row, 13).dataValidation = {
+        ws.getCell(row, 12).dataValidation = {
           type: 'list', allowBlank: true, formulae: [`PropStats!$A$2:$A$${PROPSTATS_LAST}`],
           showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
           error: 'This doesn\'t exactly match a registered prop stat -- that\'s fine if it\'s genuinely new, but double check the spelling if this was meant to be an existing one (especially "Round Winner" / "Round Matchup" / "Tournament Matchup" / "Tournament Winner" for Golf -- these exact names are what Selection and grading both key off of).'
         };
       }
 
-      // ---- Search column (column 3) -- toggle + search text + up to 14
-      // filtered results, searching the combined Cappers+Teams index
-      // (SearchIndex sheet, written below) by whichever type is toggled.
-      // Deliberately runs AFTER the per-row loop above, not inside it --
-      // that loop applies a generic input-style font/border to columns
-      // 1-20 on every row including column 3, so setting this block's own
-      // check-style result font any earlier would just get overwritten
-      // the moment the loop reached those same rows.
-      ws.getCell(3, 3).value = 'Capper';
-      ws.getCell(3, 3).dataValidation = { type: 'list', allowBlank: false, formulae: ['"Capper,Team"'] };
-      ws.getCell(4, 3).value = '';
-      [3, 4].forEach(row => {
-        const c = ws.getCell(row, 3);
-        c.font = TEMPLATE_INPUT_FONT;
-        c.border = TEMPLATE_BORDER;
-        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-      });
-      const SEARCH_RESULTS_START = 5, SEARCH_RESULTS_COUNT = 14;
-      for (let i = 0; i < SEARCH_RESULTS_COUNT; i++) {
-        const row = SEARCH_RESULTS_START + i;
-        const n = i + 1;
-        // $C$3 / $C$4 are the toggle and search-text cells set up just
-        // above -- hardcoded rather than built from .address since this
-        // column's position (3) is fixed by design, not something that
-        // varies per row the way the pick-data formulas above do.
-        const formula = `IFERROR(INDEX(SearchIndex!$A$2:$A$${SEARCHINDEX_LAST},` +
-          `SMALL(IF((SearchIndex!$B$2:$B$${SEARCHINDEX_LAST}=$C$3)*ISNUMBER(SEARCH($C$4,SearchIndex!$A$2:$A$${SEARCHINDEX_LAST})),` +
-          `ROW(SearchIndex!$A$2:$A$${SEARCHINDEX_LAST})-ROW(SearchIndex!$A$2)+1),${n})),"")`;
-        const c = ws.getCell(row, 3);
-        c.value = { formula, result: null, shareType: 'array', ref: `C${row}` };
-        c.font = TEMPLATE_CHECK_FONT;
-        c.border = TEMPLATE_BORDER;
-      }
-
-      // xSplit:3 keeps Date entry/Event Date/Search pinned on the left no
-      // matter how far right you scroll; ySplit:18 keeps the header,
-      // example, AND the whole Search block pinned at the top no matter
-      // how far down you scroll -- direct request: "stays visible as I
-      // scroll so it's easier to access."
-      ws.views = [{ state: 'frozen', xSplit: 3, ySplit: 18, showGridLines: false }];
+      ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
 
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -19903,7 +19838,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 349; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 350; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
