@@ -4148,20 +4148,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['Team 1 / Player -- the team, player, or side picked. See TWO-SIDED BETS above.', false, 10],
         ['Team 2 / Opponent -- the other side, ONLY for two-sided bets (Over/Under, Tennis, etc). Leave blank otherwise.', false, 10],
         ['Line -- the spread/total/prop number, if any. Leave blank if not applicable. Typed as a plain number, same as Odds -- the cell displays a "+" for a positive line automatically (e.g. a +7.5 spread), and for a Player Prop, remember this project\'s own convention: a NEGATIVE line means Over, positive/unsigned means Under.', false, 10],
-        ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
         ['Odds -- the American odds at the time of the pick (e.g. -110, +150). Typed as a plain number -- the cell displays a "+" for a positive price automatically, even if you type just "150". See PARLAYS above for combined-parlay odds specifically.', false, 10],
-        ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only. Prop Stat has a dropdown -- see PLAYER PROPS above for exactly how it drives Selection.', false, 10],
         ['Raw Unit Size -- type EXACTLY what you see in the capper\'s own message (e.g. "3 units", "Lock of the Day"). Don\'t convert this to a tier yourself.', false, 10],
-        ['Confidence -- only if the capper gives an explicit numeric confidence score. Usually blank.', false, 10],
-        // Direct request 2026-08-26: moved down here (next to Notes) from
-        // its old spot right after Team 2 -- it's only ever typed for
-        // Tennis/Golf/MMA/Soccer, a much lower-volume slice of entries
-        // than everything else on this row, so it no longer sits in the
-        // middle of the columns actually used on every row.
-        ['Event Name -- tournament/event name, mainly for Tennis/Golf/MMA/Soccer. Moved next to Notes since it\'s only used for a small slice of picks.', false, 10],
-        ['Notes -- anything else worth keeping about this pick.', false, 10],
+        ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only. Prop Stat has a dropdown -- see PLAYER PROPS above for exactly how it drives Selection.', false, 10],
         ['Parlay -- leave blank for a straight bet. Give every leg of the SAME parlay the same number.', false, 10],
-        ['Published -- "yes" or "no". Leave blank unless intentionally publishing on entry.', false, 10],
+        ['Event Name -- tournament/event name, mainly for Tennis/Golf/MMA/Soccer.', false, 10],
+        ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
+        ['Notes -- anything else worth keeping about this pick.', false, 10],
         ['Date Entered / Date / Selection (computed, near the right) -- the real values Bulk Import reads. Don\'t type in any of them; Date Entered is built from "Date entry", Date defaults to Date Entered unless "Event Date" overrides it, and Selection is built from Team 1 + Team 2 for everything except Player Props, which have their own rules -- see PLAYER PROPS above.', false, 10],
       ];
       instructionLines.forEach(([text, bold, size], i) => {
@@ -4237,9 +4230,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // git history (commit "Add single-toggle Search column...") if this
       // is ever revisited with a design that doesn't share row numbers
       // with real per-pick data at all.
+      // Direct request 2026-08-26 (third reorder this feature has had):
+      // Confidence removed outright -- "we would have little to no idea of
+      // the actual confidence of the pick." Published removed outright too
+      // -- "it will be implied it's not [published] if we have the file
+      // open" (Bulk Import already defaults is_published to false when this
+      // column is simply absent, so nothing downstream needed to change).
+      // The remaining columns reordered so the ones actually typed on every
+      // row (through Raw Unit Size) come first, with the low-volume ones
+      // (Parlay, Event Name, Home/Away, Notes) grouped after the Player
+      // Prop fields instead of interrupting the frequently-typed columns.
       const HEADERS = ['Date entry (posted date -- blank = repeat above)', 'Event Date (only if different from above)',
-        'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent', 'Line', 'Home/Away', 'Odds',
-        'Prop Player', 'Prop Stat', 'Prop Team', 'Raw Unit Size', 'Confidence', 'Event Name', 'Notes', 'Parlay', 'Published',
+        'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent', 'Line', 'Odds', 'Raw Unit Size',
+        'Prop Player', 'Prop Stat', 'Prop Team', 'Parlay', 'Event Name', 'Home/Away', 'Notes',
         'Date Entered', 'Date', 'Selection', 'Capper Check', 'Sport Check', 'Bet Type Check', 'Team 1 Check', 'Team 2 Check', 'Prop Team Check'];
       HEADERS.forEach((h, i) => {
         const c = ws.getCell(1, i + 1);
@@ -4249,7 +4252,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         c.border = TEMPLATE_BORDER;
       });
-      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 8, 10, 8, 16, 14, 16, 16, 11, 16, 24, 8, 10, 13, 12, 20, 14, 12, 14, 14, 14, 16];
+      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 8, 8, 16, 16, 14, 16, 8, 16, 10, 24, 13, 12, 20, 14, 12, 14, 14, 14, 16];
       WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
       // Example illustrates the posted-date fill-down AND a real two-sided
@@ -4257,7 +4260,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // immediately, not just described in text. Event Date left blank --
       // the overwhelmingly common case where it matches the posted date.
       const exampleRow = ['06/01/2025', '', 'Duck Investments', 'MLB', 'Over/Under', 'Milwaukee Brewers',
-        'Chicago Cubs', '8.5', '', '-110', '', '', '', '3 units', '', '', 'Series opener', '', 'no'];
+        'Chicago Cubs', '8.5', '-110', '3 units', '', '', '', '', '', '', 'Series opener'];
       exampleRow.forEach((v, i) => {
         const c = ws.getCell(2, i + 1);
         c.value = v;
@@ -4267,21 +4270,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
       ws.getCell(2, 1).numFmt = '@';
       ws.getCell(2, 2).numFmt = '@';
       ws.getCell(2, 8).numFmt = '+0.##;-0.##;0';
-      ws.getCell(2, 10).numFmt = '+0;-0';
-      // The example row's own Date Entered / Date (columns 20/21) need a
+      ws.getCell(2, 9).numFmt = '+0;-0';
+      // The example row's own Date Entered / Date (columns 18/19) need a
       // real resolved value too, even though it's a literal here instead
       // of a formula (the formula loop below only covers row 3+) --
       // row 3's own fill-down formula chains through THIS cell when its
       // "Date entry" is left blank (the example's whole point), so leaving
       // it genuinely empty would break the very pattern being demonstrated.
-      ws.getCell(2, 20).value = '06/01/2025';
-      ws.getCell(2, 21).value = '06/01/2025';
-      ws.getCell(2, 20).numFmt = '@';
-      ws.getCell(2, 21).numFmt = '@';
-      ws.getCell(2, 20).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
-      ws.getCell(2, 21).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
-      ws.getCell(2, 20).border = TEMPLATE_BORDER;
-      ws.getCell(2, 21).border = TEMPLATE_BORDER;
+      ws.getCell(2, 18).value = '06/01/2025';
+      ws.getCell(2, 19).value = '06/01/2025';
+      ws.getCell(2, 18).numFmt = '@';
+      ws.getCell(2, 19).numFmt = '@';
+      ws.getCell(2, 18).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+      ws.getCell(2, 19).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+      ws.getCell(2, 18).border = TEMPLATE_BORDER;
+      ws.getCell(2, 19).border = TEMPLATE_BORDER;
 
       // CONFIRMED REAL BUG, direct report 2026-08-25: "the drop downs are
       // gone from most of the fields." Root cause: this M/D/YYYY format
@@ -4353,7 +4356,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
       const LAST_DATA_ROW = 500;
       for (let row = 3; row <= LAST_DATA_ROW; row++) {
-        for (let col = 1; col <= 19; col++) {
+        for (let col = 1; col <= 17; col++) {
           const c = ws.getCell(row, col);
           c.font = TEMPLATE_INPUT_FONT;
           c.border = TEMPLATE_BORDER;
@@ -4371,7 +4374,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // matching how odds are shown everywhere else in this project.
         // Purely a display format on a real number -- doesn't change the
         // value itself or how Bulk Import reads it.
-        ws.getCell(row, 10).numFmt = '+0;-0';
+        ws.getCell(row, 9).numFmt = '+0;-0';
         // Same fix, direct report 2026-08-25: Line carries a real sign too
         // (a spread like +7.5/-7.5, or -- per this project's own prop
         // convention -- a negative prop line means Over, positive/unsigned
@@ -4388,7 +4391,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // slash-count check immediately. Same shared object on every row
         // (defined once above) -- see the comment above the loop for why.
         const entryAddr = ws.getCell(row, 1).address, eventDateOverrideAddr = ws.getCell(row, 2).address,
-          prevDateEnteredAddr = ws.getCell(row - 1, 20).address;
+          prevDateEnteredAddr = ws.getCell(row - 1, 18).address;
         ws.getCell(row, 1).dataValidation = dateEntryValidation;
         ws.getCell(row, 2).dataValidation = eventDateValidation;
 
@@ -4403,13 +4406,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // raw typed entry), so a whole block of rows correctly keeps
         // following whatever date was last actually typed, however many
         // rows back that was.
-        const dateEnteredAddr = ws.getCell(row, 20).address;
-        ws.getCell(row, 20).value = { formula: `IF(${entryAddr}="",${prevDateEnteredAddr},${entryAddr})` };
+        const dateEnteredAddr = ws.getCell(row, 18).address;
+        ws.getCell(row, 18).value = { formula: `IF(${entryAddr}="",${prevDateEnteredAddr},${entryAddr})` };
         // Date (computed) -- the real event date Bulk Import reads.
         // Defaults to THIS row's own resolved Date Entered (the common
         // same-day case); the Event Date column overrides it only when
         // typed, for the genuinely-different late-night-crossing case.
-        ws.getCell(row, 21).value = { formula: `IF(${eventDateOverrideAddr}="",${dateEnteredAddr},${eventDateOverrideAddr})` };
+        ws.getCell(row, 19).value = { formula: `IF(${eventDateOverrideAddr}="",${dateEnteredAddr},${eventDateOverrideAddr})` };
 
         // CONFIRMED REAL BUG, direct report 2026-08-26: every "Player
         // Prop" row computed Selection as blank (Team 1/2 are correctly
@@ -4430,16 +4433,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
         //    (negative = Over, positive = Under).
         // Non-prop bet types keep the original Team 1(/Team 2) logic,
         // completely untouched.
-        ws.getCell(row, 22).value = { formula:
+        ws.getCell(row, 20).value = { formula:
           `IF(${betTypeAddr}<>"Player Prop",` +
           `IF(${team1Addr}="","",IF(${team2Addr}="",${team1Addr},${team1Addr}&"/"&${team2Addr})),` +
           `IF(OR(${propStatAddr}="Tournament Winner",${propStatAddr}="Round Winner"),"To Win",` +
           `IF(OR(${propStatAddr}="Round Matchup",${propStatAddr}="Tournament Matchup"),${team1Addr},` +
           `IF(${lineAddr}="","",IF(${lineAddr}<0,"Over","Under")))))` };
 
-        ws.getCell(row, 23).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
-        ws.getCell(row, 24).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
-        ws.getCell(row, 25).value = { formula: `IF(${betTypeAddr}="","",IF(COUNTIF(BetTypes!$A$2:$A$${BETTYPES_LAST},${betTypeAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 21).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 22).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 23).value = { formula: `IF(${betTypeAddr}="","",IF(COUNTIF(BetTypes!$A$2:$A$${BETTYPES_LAST},${betTypeAddr})>0,"OK","NEW? add in Setup"))` };
         // Team 1 / Team 2 checks -- no "combo" special case needed now
         // that the two sides are genuinely separate fields; each one is
         // always a single name, never a "TeamA/TeamB" string itself.
@@ -4448,20 +4451,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
           `IF(OR(${betTypeAddr}="Player Prop",${betTypeAddr}="Parlay"),"n/a (prop/parlay)",` +
           `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${sportAddr})=0,"n/a (no team list for this sport)",` +
           `IF(COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${ref})>0,"OK","NEW? check spelling/Setup"))))`;
-        ws.getCell(row, 26).value = { formula: teamCheckFormula(team1Addr) };
-        ws.getCell(row, 27).value = { formula: teamCheckFormula(team2Addr) };
-        ws.getCell(row, 28).value = { formula:
+        ws.getCell(row, 24).value = { formula: teamCheckFormula(team1Addr) };
+        ws.getCell(row, 25).value = { formula: teamCheckFormula(team2Addr) };
+        ws.getCell(row, 26).value = { formula:
           `IF(${propTeamAddr}="","",` +
           `IF(COUNTIF(Teams!$B$2:$B$${TEAMS_LAST},${sportAddr})=0,"n/a (no team list for this sport)",` +
           `IF(COUNTIF(Teams!$A$2:$A$${TEAMS_LAST},${propTeamAddr})>0,"OK","NEW? check spelling/Setup")))` };
-        for (let col = 20; col <= 28; col++) {
+        for (let col = 18; col <= 26; col++) {
           const c = ws.getCell(row, col);
           c.font = TEMPLATE_CHECK_FONT;
           c.border = TEMPLATE_BORDER;
           c.alignment = { horizontal: 'center' };
         }
-        ws.getCell(row, 20).numFmt = '@';
-        ws.getCell(row, 21).numFmt = '@';
+        ws.getCell(row, 18).numFmt = '@';
+        ws.getCell(row, 19).numFmt = '@';
 
         // CONFIRMED REAL BUG, direct report 2026-08-26: "I went to type in
         // Mojo... the field goes blank and doesn't update." Capper/Sport/
@@ -4481,8 +4484,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 3).dataValidation = newEntryWarning('Cappers', CAPPERS_LAST, 'capper');
         ws.getCell(row, 4).dataValidation = newEntryWarning('Sports', SPORTS_LAST, 'sport');
         ws.getCell(row, 5).dataValidation = newEntryWarning('BetTypes', BETTYPES_LAST, 'bet type');
-        ws.getCell(row, 9).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
-        ws.getCell(row, 19).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
+        ws.getCell(row, 16).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
         // Soft (warning, not blocking) team-name check -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
         // typed for non-team bets, so rejecting anything off the list
@@ -19838,7 +19840,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 350; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 351; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
