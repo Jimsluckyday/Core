@@ -4147,13 +4147,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['Capper / Sport / Bet Type -- must match an existing one exactly (or flag as NEW in Setup first).', false, 10],
         ['Team 1 / Player -- the team, player, or side picked. See TWO-SIDED BETS above.', false, 10],
         ['Team 2 / Opponent -- the other side, ONLY for two-sided bets (Over/Under, Tennis, etc). Leave blank otherwise.', false, 10],
-        ['Event Name -- tournament/event name, mainly for Tennis/Golf/MMA/Soccer.', false, 10],
         ['Line -- the spread/total/prop number, if any. Leave blank if not applicable. Typed as a plain number, same as Odds -- the cell displays a "+" for a positive line automatically (e.g. a +7.5 spread), and for a Player Prop, remember this project\'s own convention: a NEGATIVE line means Over, positive/unsigned means Under.', false, 10],
         ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
         ['Odds -- the American odds at the time of the pick (e.g. -110, +150). Typed as a plain number -- the cell displays a "+" for a positive price automatically, even if you type just "150". See PARLAYS above for combined-parlay odds specifically.', false, 10],
         ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only. Prop Stat has a dropdown -- see PLAYER PROPS above for exactly how it drives Selection.', false, 10],
         ['Raw Unit Size -- type EXACTLY what you see in the capper\'s own message (e.g. "3 units", "Lock of the Day"). Don\'t convert this to a tier yourself.', false, 10],
         ['Confidence -- only if the capper gives an explicit numeric confidence score. Usually blank.', false, 10],
+        // Direct request 2026-08-26: moved down here (next to Notes) from
+        // its old spot right after Team 2 -- it's only ever typed for
+        // Tennis/Golf/MMA/Soccer, a much lower-volume slice of entries
+        // than everything else on this row, so it no longer sits in the
+        // middle of the columns actually used on every row.
+        ['Event Name -- tournament/event name, mainly for Tennis/Golf/MMA/Soccer. Moved next to Notes since it\'s only used for a small slice of picks.', false, 10],
         ['Notes -- anything else worth keeping about this pick.', false, 10],
         ['Parlay -- leave blank for a straight bet. Give every leg of the SAME parlay the same number.', false, 10],
         ['Published -- "yes" or "no". Leave blank unless intentionally publishing on entry.', false, 10],
@@ -4214,9 +4219,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
       //    cell with a custom DISPLAY format (+0;-0) added so it reads
       //    correctly while editing, not a change to what gets stored.
       const ws = wb.addWorksheet('Picks');
+      // Direct request 2026-08-26: "move the Event name to the end of the
+      // file to the left of notes as it's something I enter but only for
+      // Tennis/Golf picks which are a much lower volume." Moved out of the
+      // frequently-typed columns near the front and re-anchored right
+      // before Notes instead.
       const HEADERS = ['Date entry (posted date -- blank = repeat above)', 'Event Date (only if different from above)',
-        'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent', 'Event Name', 'Line', 'Home/Away', 'Odds',
-        'Prop Player', 'Prop Stat', 'Prop Team', 'Raw Unit Size', 'Confidence', 'Notes', 'Parlay', 'Published',
+        'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent', 'Line', 'Home/Away', 'Odds',
+        'Prop Player', 'Prop Stat', 'Prop Team', 'Raw Unit Size', 'Confidence', 'Event Name', 'Notes', 'Parlay', 'Published',
         'Date Entered', 'Date', 'Selection', 'Capper Check', 'Sport Check', 'Bet Type Check', 'Team 1 Check', 'Team 2 Check', 'Prop Team Check'];
       HEADERS.forEach((h, i) => {
         const c = ws.getCell(1, i + 1);
@@ -4226,7 +4236,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         c.border = TEMPLATE_BORDER;
       });
-      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 16, 8, 10, 8, 16, 14, 16, 16, 11, 24, 8, 10, 13, 12, 20, 14, 12, 14, 14, 14, 16];
+      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 8, 10, 8, 16, 14, 16, 16, 11, 16, 24, 8, 10, 13, 12, 20, 14, 12, 14, 14, 14, 16];
       WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
       // Example illustrates the posted-date fill-down AND a real two-sided
@@ -4234,7 +4244,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // immediately, not just described in text. Event Date left blank --
       // the overwhelmingly common case where it matches the posted date.
       const exampleRow = ['06/01/2025', '', 'Duck Investments', 'MLB', 'Over/Under', 'Milwaukee Brewers',
-        'Chicago Cubs', '', '8.5', '', '-110', '', '', '', '3 units', '', 'Series opener', '', 'no'];
+        'Chicago Cubs', '8.5', '', '-110', '', '', '', '3 units', '', '', 'Series opener', '', 'no'];
       exampleRow.forEach((v, i) => {
         const c = ws.getCell(2, i + 1);
         c.value = v;
@@ -4243,8 +4253,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
       });
       ws.getCell(2, 1).numFmt = '@';
       ws.getCell(2, 2).numFmt = '@';
-      ws.getCell(2, 9).numFmt = '+0.##;-0.##;0';
-      ws.getCell(2, 11).numFmt = '+0;-0';
+      ws.getCell(2, 8).numFmt = '+0.##;-0.##;0';
+      ws.getCell(2, 10).numFmt = '+0;-0';
       // The example row's own Date Entered / Date (columns 20/21) need a
       // real resolved value too, even though it's a literal here instead
       // of a formula (the formula loop below only covers row 3+) --
@@ -4313,14 +4323,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // matching how odds are shown everywhere else in this project.
         // Purely a display format on a real number -- doesn't change the
         // value itself or how Bulk Import reads it.
-        ws.getCell(row, 11).numFmt = '+0;-0';
+        ws.getCell(row, 10).numFmt = '+0;-0';
         // Same fix, direct report 2026-08-25: Line carries a real sign too
         // (a spread like +7.5/-7.5, or -- per this project's own prop
         // convention -- a negative prop line means Over, positive/unsigned
         // means Under), so dropping a typed "+" here is the same cosmetic
         // gap as Odds. "#" (not "0") for the decimal digits so a whole
         // number like 7 still shows as "+7" instead of a padded "+7.0".
-        ws.getCell(row, 9).numFmt = '+0.##;-0.##;0';
+        ws.getCell(row, 8).numFmt = '+0.##;-0.##;0';
 
         // M/D/YYYY (or M/D/YY) format check -- looser than a fixed-width
         // check since the month/day can be 1 or 2 digits (matches
@@ -4336,8 +4346,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
         const capperAddr = ws.getCell(row, 3).address, sportAddr = ws.getCell(row, 4).address,
           betTypeAddr = ws.getCell(row, 5).address, team1Addr = ws.getCell(row, 6).address,
-          team2Addr = ws.getCell(row, 7).address, lineAddr = ws.getCell(row, 9).address,
-          propStatAddr = ws.getCell(row, 13).address, propTeamAddr = ws.getCell(row, 14).address;
+          team2Addr = ws.getCell(row, 7).address, lineAddr = ws.getCell(row, 8).address,
+          propStatAddr = ws.getCell(row, 12).address, propTeamAddr = ws.getCell(row, 13).address;
 
         // Date Entered (computed) -- the real posted date. Blank "Date
         // entry" on this row means "same as the row above," chained
@@ -4423,7 +4433,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 3).dataValidation = newEntryWarning('Cappers', CAPPERS_LAST, 'capper');
         ws.getCell(row, 4).dataValidation = newEntryWarning('Sports', SPORTS_LAST, 'sport');
         ws.getCell(row, 5).dataValidation = newEntryWarning('BetTypes', BETTYPES_LAST, 'bet type');
-        ws.getCell(row, 10).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
+        ws.getCell(row, 9).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
         ws.getCell(row, 19).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
         // Soft (warning, not blocking) team-name dropdown -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
@@ -4436,11 +4446,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
         };
         ws.getCell(row, 6).dataValidation = teamPickWarning;
         ws.getCell(row, 7).dataValidation = teamPickWarning;
-        ws.getCell(row, 14).dataValidation = teamPickWarning;
+        ws.getCell(row, 13).dataValidation = teamPickWarning;
         // Same soft-warning treatment for Prop Stat -- direct request
         // 2026-08-26, see propStatRows comment above for why this exists
         // now (previously zero guardrails at all on this column).
-        ws.getCell(row, 13).dataValidation = {
+        ws.getCell(row, 12).dataValidation = {
           type: 'list', allowBlank: true, formulae: [`PropStats!$A$2:$A$${PROPSTATS_LAST}`],
           showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
           error: 'This doesn\'t exactly match a registered prop stat -- that\'s fine if it\'s genuinely new, but double check the spelling if this was meant to be an existing one (especially "Round Winner" / "Round Matchup" / "Tournament Matchup" / "Tournament Winner" for Golf -- these exact names are what Selection and grading both key off of).'
@@ -19784,7 +19794,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 346; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 347; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
