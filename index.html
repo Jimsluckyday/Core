@@ -4066,7 +4066,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // Setup right now") actually true unconditionally, not just when
       // the timing happened to work out.
       btn.textContent = 'Loading current cappers/sports/bet types/teams...';
-      await Promise.all([refreshCappers(), refreshSports(), refreshBetTypes(), refreshTeams()]);
+      await Promise.all([refreshCappers(), refreshSports(), refreshBetTypes(), refreshTeams(), refreshPropStats()]);
       btn.textContent = 'Building...';
 
       // Live data, deduped/sorted -- never a stale snapshot. Same
@@ -4084,6 +4084,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const teamRows = teams
         .map(t => [t.name, sportNameById[String(t.sport_id)] || '—'])
         .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+      // Direct request 2026-08-26: Prop Stat had NO dropdown at all before
+      // this -- pure free typing, which is exactly how "Round 4 Winner"
+      // (not a real recognized stat) ended up typed instead of the actual
+      // "Round Winner" category, with nothing catching the mismatch until
+      // it silently failed to import. Same soft/warning dropdown pattern
+      // as Teams -- a genuinely new stat is still typeable, just flagged.
+      const propStatRows = propStats
+        .map(p => [p.name, sportNameById[String(p.sport_id)] || '—'])
+        .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
 
       const wb = new ExcelJS.Workbook();
       wb.creator = 'Core Betting Solutions';
@@ -4095,7 +4104,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       wsI.views = [{ showGridLines: false }];
       const instructionLines = [
         ['Core Betting Solutions -- Historical Backfill Entry Template', true, 14],
-        ['Generated ' + new Date().toISOString().slice(0, 10) + ' from live data -- Cappers/Sports/Bet Types/Teams are exactly what\'s in Setup right now.', false, 10],
+        ['Generated ' + new Date().toISOString().slice(0, 10) + ' from live data -- Cappers/Sports/Bet Types/Teams/Prop Stats are exactly what\'s in Setup right now.', false, 10],
         ['', false, 10],
         ['HOW TO USE', true, 12],
         ['1. Go to the "Picks" tab. Row 2 is a filled-in EXAMPLE -- copy its format, then delete it before importing.', false, 10],
@@ -4121,6 +4130,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['PARLAYS -- a note on odds', true, 12],
         ['You\'re already doing the main thing right: every leg of the SAME parlay gets the SAME number in the "Parlay" column. One more thing that matters for a parlay\'s COMBINED odds (e.g. a big multi-leg payout) to be recognized correctly: put that SAME combined odds number on EVERY leg of that parlay, not just one of them -- the system only treats it as the parlay\'s shared price when every leg agrees. If only one leg has odds and the rest are blank, it won\'t be recognized as the parlay\'s price.', false, 10],
         ['', false, 10],
+        ['PLAYER PROPS -- Selection is NOT Team 1/Team 2 here', true, 12],
+        ['CONFIRMED REAL BUG, direct report 2026-08-26: every Player Prop row used to compute a BLANK Selection (Team 1/2 are correctly left empty for props -- the player\'s identity belongs in "Prop Player" instead), and a blank Selection gets the whole row REJECTED on upload, no matter how complete everything else is. Selection is now computed differently for Player Prop rows specifically, based on Prop Stat and Line -- leave Team 1/Team 2 blank for props exactly as before, this is handled automatically:', false, 10],
+        ['-- A real stat-line prop (Strikeouts, Points, HR, Rebounds, etc.): Selection becomes "Over" or "Under" automatically from the sign of "Line" -- NEGATIVE = Over, positive/unsigned = Under (this project\'s standard convention). Just fill in Line with the correct sign and Selection takes care of itself.', false, 10],
+        ['-- Golf "Round Matchup" or "Tournament Matchup" (head-to-head): Selection becomes the OPPONENT -- type the opponent\'s name into "Team 1 / Player" (yes, that reads oddly against the column name; Prop Player holds the golfer you\'re actually backing to win). Leave Line blank.', false, 10],
+        ['-- Golf "Tournament Winner" or "Round Winner" (outright, no opponent at all): Selection is automatically the fixed text "To Win". Leave Team 1/Team 2 AND Line both blank -- "Round Winner" added 2026-08-26 specifically so a round-outright pick never needs an opponent you don\'t have handy; just Prop Player + Prop Stat = "Round Winner" is a complete, correct row.', false, 10],
+        ['Prop Stat now has its own dropdown (pulled from Setup, same soft-warning style as Team 1/2) -- for the 4 golf stats above, the exact spelling matters since Selection\'s formula and the real grading automation both key off it literally. "Round 4 Winner" or similar variants will NOT be recognized as "Round Winner" -- use the dropdown to get the exact registered name.', false, 10],
+        ['', false, 10],
         ['COLUMN GUIDE', true, 12],
         ['Date entry -- type the date the pick was POSTED, as M/D/YYYY (e.g. 6/1/2025 or 06/01/2025). Leave BLANK to repeat the date from the row above -- see DATE AUTO-FILL above.', false, 10],
         ['Event Date -- ONLY if the event happened on a different calendar day than it was posted (e.g. a late-night pick crossing midnight). Leave BLANK otherwise -- see DATE AUTO-FILL above.', false, 10],
@@ -4131,13 +4147,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['Line -- the spread/total/prop number, if any. Leave blank if not applicable. Typed as a plain number, same as Odds -- the cell displays a "+" for a positive line automatically (e.g. a +7.5 spread), and for a Player Prop, remember this project\'s own convention: a NEGATIVE line means Over, positive/unsigned means Under.', false, 10],
         ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
         ['Odds -- the American odds at the time of the pick (e.g. -110, +150). Typed as a plain number -- the cell displays a "+" for a positive price automatically, even if you type just "150". See PARLAYS above for combined-parlay odds specifically.', false, 10],
-        ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only.', false, 10],
+        ['Prop Player / Prop Stat / Prop Team -- Player Prop bets only. Prop Stat has a dropdown -- see PLAYER PROPS above for exactly how it drives Selection.', false, 10],
         ['Raw Unit Size -- type EXACTLY what you see in the capper\'s own message (e.g. "3 units", "Lock of the Day"). Don\'t convert this to a tier yourself.', false, 10],
         ['Confidence -- only if the capper gives an explicit numeric confidence score. Usually blank.', false, 10],
         ['Notes -- anything else worth keeping about this pick.', false, 10],
         ['Parlay -- leave blank for a straight bet. Give every leg of the SAME parlay the same number.', false, 10],
         ['Published -- "yes" or "no". Leave blank unless intentionally publishing on entry.', false, 10],
-        ['Date Entered / Date / Selection (computed, near the right) -- the real values Bulk Import reads. Don\'t type in any of them; Date Entered is built from "Date entry", Date defaults to Date Entered unless "Event Date" overrides it, and Selection is built from Team 1 + Team 2.', false, 10],
+        ['Date Entered / Date / Selection (computed, near the right) -- the real values Bulk Import reads. Don\'t type in any of them; Date Entered is built from "Date entry", Date defaults to Date Entered unless "Event Date" overrides it, and Selection is built from Team 1 + Team 2 for everything except Player Props, which have their own rules -- see PLAYER PROPS above.', false, 10],
       ];
       instructionLines.forEach(([text, bold, size], i) => {
         const c = wsI.getCell(i + 1, 1);
@@ -4151,6 +4167,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       writeRefSheet(wb, 'Sports', ['Sport'], sportNames);
       writeRefSheet(wb, 'BetTypes', ['Bet Type'], betTypeNames);
       writeRefSheet(wb, 'Teams', ['Team', 'Sport'], teamRows);
+      writeRefSheet(wb, 'PropStats', ['Prop Stat', 'Sport'], propStatRows);
       // Math.max(..., 2) as a second line of defense alongside the
       // refresh-before-building fix above: if a list is ever genuinely
       // empty (0 items -- e.g. truly nothing registered yet, not just a
@@ -4159,7 +4176,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // range is always at least "$A$2:$A$2" -- a valid, merely-empty
       // one-cell range -- instead of an inverted one.
       const CAPPERS_LAST = Math.max(capperNames.length + 1, 2), SPORTS_LAST = Math.max(sportNames.length + 1, 2),
-        BETTYPES_LAST = Math.max(betTypeNames.length + 1, 2), TEAMS_LAST = Math.max(teamRows.length + 1, 2);
+        BETTYPES_LAST = Math.max(betTypeNames.length + 1, 2), TEAMS_LAST = Math.max(teamRows.length + 1, 2),
+        PROPSTATS_LAST = Math.max(propStatRows.length + 1, 2);
 
       // ---- Picks sheet ----
       // REBUILT 2026-08-25 (third pass), direct reports:
@@ -4314,7 +4332,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
         const capperAddr = ws.getCell(row, 3).address, sportAddr = ws.getCell(row, 4).address,
           betTypeAddr = ws.getCell(row, 5).address, team1Addr = ws.getCell(row, 6).address,
-          team2Addr = ws.getCell(row, 7).address, propTeamAddr = ws.getCell(row, 14).address;
+          team2Addr = ws.getCell(row, 7).address, lineAddr = ws.getCell(row, 9).address,
+          propStatAddr = ws.getCell(row, 13).address, propTeamAddr = ws.getCell(row, 14).address;
 
         // Date Entered (computed) -- the real posted date. Blank "Date
         // entry" on this row means "same as the row above," chained
@@ -4330,12 +4349,31 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // typed, for the genuinely-different late-night-crossing case.
         ws.getCell(row, 21).value = { formula: `IF(${eventDateOverrideAddr}="",${dateEnteredAddr},${eventDateOverrideAddr})` };
 
-        // Selection (computed) -- Team 1 alone when Team 2 is blank (the
-        // overwhelmingly common one-sided case); "Team1/Team2" when both
-        // are given, matching the exact combined format the app's own
-        // team-name matching already parses elsewhere (checkTeamName's
-        // own "/" split).
-        ws.getCell(row, 22).value = { formula: `IF(${team1Addr}="","",IF(${team2Addr}="",${team1Addr},${team1Addr}&"/"&${team2Addr}))` };
+        // CONFIRMED REAL BUG, direct report 2026-08-26: every "Player
+        // Prop" row computed Selection as blank (Team 1/2 are correctly
+        // left empty for props -- the player's identity lives in Prop
+        // Player instead), and Bulk Import hard-rejects any row with a
+        // blank Selection regardless of bet type -- silently dropping
+        // EVERY Player Prop row on upload. Traced against the live Add
+        // Pick form's own save logic to get the real convention right,
+        // since it's genuinely different depending on the prop:
+        //  - Tournament Winner / Round Winner (outright, no opponent):
+        //    Selection is the fixed literal "To Win".
+        //  - Round Matchup / Tournament Matchup (head-to-head): Selection
+        //    is the opponent, typed into Team 1 per the existing golf
+        //    convention (unchanged from before).
+        //  - every other Player Prop (a real stat line -- HR, Points,
+        //    etc.): Selection is "Over"/"Under", read off the sign of
+        //    Line, exactly like the live form's own isProp branch
+        //    (negative = Over, positive = Under).
+        // Non-prop bet types keep the original Team 1(/Team 2) logic,
+        // completely untouched.
+        ws.getCell(row, 22).value = { formula:
+          `IF(${betTypeAddr}<>"Player Prop",` +
+          `IF(${team1Addr}="","",IF(${team2Addr}="",${team1Addr},${team1Addr}&"/"&${team2Addr})),` +
+          `IF(OR(${propStatAddr}="Tournament Winner",${propStatAddr}="Round Winner"),"To Win",` +
+          `IF(OR(${propStatAddr}="Round Matchup",${propStatAddr}="Tournament Matchup"),${team1Addr},` +
+          `IF(${lineAddr}="","",IF(${lineAddr}<0,"Over","Under")))))` };
 
         ws.getCell(row, 23).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
         ws.getCell(row, 24).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
@@ -4395,6 +4433,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 6).dataValidation = teamPickWarning;
         ws.getCell(row, 7).dataValidation = teamPickWarning;
         ws.getCell(row, 14).dataValidation = teamPickWarning;
+        // Same soft-warning treatment for Prop Stat -- direct request
+        // 2026-08-26, see propStatRows comment above for why this exists
+        // now (previously zero guardrails at all on this column).
+        ws.getCell(row, 13).dataValidation = {
+          type: 'list', allowBlank: true, formulae: [`PropStats!$A$2:$A$${PROPSTATS_LAST}`],
+          showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
+          error: 'This doesn\'t exactly match a registered prop stat -- that\'s fine if it\'s genuinely new, but double check the spelling if this was meant to be an existing one (especially "Round Winner" / "Round Matchup" / "Tournament Matchup" / "Tournament Winner" for Golf -- these exact names are what Selection and grading both key off of).'
+        };
       }
 
       ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
@@ -5223,8 +5269,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const n = normalizeForMatch(statValue);
     return n === 'roundmatchup' || n === 'tournamentmatchup';
   }
+  // "Round Winner" added direct request 2026-08-26: a golfer to win one
+  // specific round outright -- no opponent (unlike Round Matchup, which
+  // IS head-to-head), no line, same shape as Tournament Winner just
+  // scoped to a round instead of the whole event. Real gap this closes:
+  // "I didn't have the opponent handy... left it blank figuring I'd work
+  // on that later" -- there was never SUPPOSED to be an opponent for this
+  // bet at all, the field just had nowhere to represent that until now.
   function isGolfOutrightStat(statValue) {
-    return normalizeForMatch(statValue) === 'tournamentwinner';
+    const n = normalizeForMatch(statValue);
+    return n === 'tournamentwinner' || n === 'roundwinner';
   }
   function updateGolfPropSelectionField() {
     const bt = currentBetType();
@@ -6684,7 +6738,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // values. Every OTHER Player Prop still has a real stat-line number, so
   // this only excludes these three specific stats, not Player Prop as a
   // whole.
-  const GOLF_NO_LINE_PROP_STATS = ['round matchup', 'tournament matchup', 'tournament winner'];
+  const GOLF_NO_LINE_PROP_STATS = ['round matchup', 'tournament matchup', 'tournament winner', 'round winner'];
   function betTypeUsesLine(betTypeName, usesPropFields, propStat) {
     const n = (betTypeName || '').toLowerCase();
     if (usesPropFields && GOLF_NO_LINE_PROP_STATS.includes((propStat || '').toLowerCase().trim())) return false;
@@ -19510,7 +19564,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 339; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 340; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
