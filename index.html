@@ -1843,6 +1843,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <input id="fsConfluenceCap" type="number" min="1" step="1" />
           </div>
           <div class="field">
+            <label>Confluence neutral point (%) <span style="font-weight:normal;color:var(--ink-soft);">-- win rate where an agreeing capper stops helping and starts hurting (below 50, since unproven shouldn't count as bad)</span></label>
+            <input id="fsConfluenceNeutralPoint" type="number" min="0" max="100" step="1" />
+          </div>
+          <div class="field">
             <label>Hot Pick threshold (win streak)</label>
             <input id="fsHotThreshold" type="number" min="1" step="1" />
           </div>
@@ -15832,6 +15836,26 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // reasons, while Tier -1 is an explicit statement of reduced
     // confidence in the pick itself.
     tierMinus1ConfluenceWeight: 0.25,
+    // CONFIRMED REAL BUG, direct report 2026-08-26 (found via the Jan 1
+    // 2025 backtest, where everyone starts at a neutral, unproven 50%):
+    // "the only reason someone's confluence should impact an overall
+    // score in a neutral or negative way is if they are bad at making
+    // picks... 2 equal cappers give a certain score but 2 excellent
+    // cappers agreeing are a much bigger significance... having no bump
+    // for confluence is absolutely not the way we want to go." The old
+    // formula centered its zero-point at exactly 50% win rate, so a
+    // genuinely UNPROVEN capper (0 record, not a bad one) contributed
+    // exactly zero confluence signal -- indistinguishable from a proven
+    // LOSING capper. This is the new zero-crossing point instead: below
+    // it, agreement drags the score down (a real, proven bad record);
+    // AT or above it, agreement helps, scaling up toward the strongest
+    // possible boost as the agreeing cappers' records get better. 0.4
+    // (40%) as a default: comfortably below the neutral 50% an unproven
+    // capper starts at, so "everyone's unproven" now yields a real
+    // positive baseline instead of zero, while a capper who's actually
+    // proven himself bad (well under 50%) still pulls the score down as
+    // intended. Tunable in Formula Settings like every other lever here.
+    confluenceNeutralPoint: 0.4,
     // Personal tier calibration -- see tierCalibrationPoints() below for the
     // full reasoning. Off by default (weight 0), same convention as the
     // tier bonuses above: build the lever, prove it out via Backtest before
@@ -15883,6 +15907,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           tier8BonusPoints: r.tier8_bonus_points !== null && r.tier8_bonus_points !== undefined ? Number(r.tier8_bonus_points) : 0,
           parlayLegWeight: r.parlay_leg_weight !== null && r.parlay_leg_weight !== undefined ? Number(r.parlay_leg_weight) : 0.5,
           tierMinus1ConfluenceWeight: r.tier_minus1_confluence_weight !== null && r.tier_minus1_confluence_weight !== undefined ? Number(r.tier_minus1_confluence_weight) : 0.25,
+          // Nullish-fallback like the other newer optional fields --
+          // keeps working before the matching ALTER TABLE has been run.
+          confluenceNeutralPoint: r.confluence_neutral_point !== null && r.confluence_neutral_point !== undefined ? Number(r.confluence_neutral_point) : 0.4,
           tierCalibrationWeight: r.tier_calibration_weight !== null && r.tier_calibration_weight !== undefined ? Number(r.tier_calibration_weight) : 0,
           tierCalibrationMinSample: r.tier_calibration_min_sample !== null && r.tier_calibration_min_sample !== undefined ? Number(r.tier_calibration_min_sample) : 10,
           // Nullish-fallback like the other newer optional fields above --
@@ -16075,16 +16102,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // bundled a game into a parlay wasn't confident enough to call it alone,
   // so his agreement counts for less both in how much it moves the score
   // AND in how much "headcount" it contributes (two leg-only agreements
-  // together count the same as one standalone agreement). Centered on a
-  // neutral 50%: an agreeing capper above 50% helps the score, one below
-  // 50% actively hurts it -- the worse (and larger) their losing record,
-  // the more it drags the score down, same philosophy as Streak.
-  // Multiplier reaches full strength at the configured agreeing-capper cap.
+  // together count the same as one standalone agreement).
+  //
+  // CONFIRMED REAL BUG, direct report 2026-08-26: this used to center its
+  // zero-point at exactly 50% win rate, so a genuinely UNPROVEN capper (a
+  // neutral, no-history 50%) contributed EXACTLY ZERO confluence signal --
+  // mathematically identical to a capper who's actually proven himself
+  // bad. Direct correction: "the only reason someone's confluence should
+  // impact the score in a neutral or negative way is if they are bad...
+  // 2 excellent cappers agreeing are a much bigger significance." Now
+  // centered at confluenceNeutralPoint (below 50%) instead of 50% itself
+  // -- an agreeing capper AT OR ABOVE that point (which includes a fully
+  // unproven 50%) pushes the score up, scaling toward the strongest boost
+  // as their record gets better; only a capper who's genuinely proven
+  // himself bad (below that lower point) pulls it down, same philosophy
+  // as Streak. Multiplier reaches full strength at the configured
+  // agreeing-capper cap.
+  function confluenceSignedFactor(adj) {
+    const neutral = scoringConfig.confluenceNeutralPoint;
+    return adj >= neutral ? (adj - neutral) / (1 - neutral) : (adj - neutral) / neutral; // -1 to +1
+  }
   function confluencePoints(agreeing) {
     if (!agreeing.length) return 0;
     const totalWeight = agreeing.reduce((sum, a) => sum + a.weight, 0);
     if (totalWeight <= 0) return 0;
-    const avgSignedFactor = agreeing.reduce((sum, a) => sum + (a.adj - 0.5) * 2 * a.weight, 0) / totalWeight; // -1 to +1
+    const avgSignedFactor = agreeing.reduce((sum, a) => sum + confluenceSignedFactor(a.adj) * a.weight, 0) / totalWeight;
     const countMultiplier = Math.min(totalWeight, scoringConfig.confluenceCapCappers) / scoringConfig.confluenceCapCappers;
     return avgSignedFactor * 100 * scoringConfig.confluenceWeight * countMultiplier;
   }
@@ -18202,6 +18244,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     tier5BonusPoints: 0, tier6BonusPoints: 0, tier7BonusPoints: 0, tier8BonusPoints: 0,
     parlayLegWeight: 0.5,
     tierMinus1ConfluenceWeight: 0.25,
+    confluenceNeutralPoint: 0.4,
     tierCalibrationWeight: 0, tierCalibrationMinSample: 10,
     highConsensusThreshold: 6, consensusPinThreshold: 8
   };
@@ -18214,6 +18257,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('fsSmoothingK').value = cfg.smoothingK;
     $('fsStreakCap').value = cfg.streakCapGames;
     $('fsConfluenceCap').value = cfg.confluenceCapCappers;
+    $('fsConfluenceNeutralPoint').value = Math.round(cfg.confluenceNeutralPoint * 100);
     $('fsHotThreshold').value = cfg.hotPickStreakThreshold;
     $('fsTierMinus2Bonus').value = cfg.tierMinus2BonusPoints;
     $('fsTierMinus1Bonus').value = cfg.tierMinus1BonusPoints;
@@ -18270,6 +18314,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       smoothingK: Number($('fsSmoothingK').value),
       streakCapGames: Number($('fsStreakCap').value),
       confluenceCapCappers: Number($('fsConfluenceCap').value),
+      confluenceNeutralPoint: Number($('fsConfluenceNeutralPoint').value) / 100,
       hotPickStreakThreshold: Number($('fsHotThreshold').value),
       tierMinus2BonusPoints: Number($('fsTierMinus2Bonus').value),
       tierMinus1BonusPoints: Number($('fsTierMinus1Bonus').value),
@@ -18316,6 +18361,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           smoothing_k: newCfg.smoothingK,
           streak_cap_games: newCfg.streakCapGames,
           confluence_cap_cappers: newCfg.confluenceCapCappers,
+          confluence_neutral_point: newCfg.confluenceNeutralPoint,
           hot_pick_streak_threshold: newCfg.hotPickStreakThreshold,
           tier_minus2_bonus_points: newCfg.tierMinus2BonusPoints,
           tier_minus1_bonus_points: newCfg.tierMinus1BonusPoints,
@@ -19738,7 +19784,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 345; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 346; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
