@@ -447,6 +447,19 @@
       <button type="button" class="tab-btn" data-tab="oldtools">Old Tools</button>
     </div>
 
+    <!-- Direct request 2026-08-26: "we may see more of these [long-term
+    futures bets]... I won't remember to go check until I get irritated."
+    A Series Winner/Awards/other futures-style pick's event_date is
+    whenever it was PLACED, not whenever it actually resolves, so no
+    date-scoped grading run ever revisits it on its own -- the existing
+    Grading Exceptions blank-date sweep already finds these, but only if
+    someone remembers to go run it. This banner is the actual fix for
+    "remembering": visible on every tab (it lives outside the per-tab
+    .stub sections switchTab shows/hides), refreshed whenever the picks
+    list changes, so the reminder is part of just using the app instead
+    of a separate tool to remember to open. -->
+    <div id="futuresBanner" style="display:none;"></div>
+
     <!-- ADD CAPPER / SPORT / BET TYPE -->
     <div class="stub" data-tab="setup">
       <p class="stub-title">Cappers, sports &amp; bet types</p>
@@ -492,10 +505,24 @@
           <label>&nbsp;</label>
           <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesMatchup" /><label for="newBetTypeUsesMatchup">Two-team matchup <span style="color:var(--ink-soft);font-weight:normal;">(Over/Under-style -- no single side picked)</span></label></div>
         </div>
+        <div class="field" style="flex:0 0 auto;">
+          <label>&nbsp;</label>
+          <div class="checkbox-row"><input type="checkbox" id="newBetTypeIsFutures" /><label for="newBetTypeIsFutures">Long-term futures <span style="color:var(--ink-soft);font-weight:normal;">(resolves whenever the event concludes, not a specific date -- e.g. Series Winner, Awards)</span></label></div>
+        </div>
         <div style="align-self:flex-end;">
           <button id="addBetTypeBtn">Add bet type</button>
         </div>
       </div>
+
+      <!-- Direct request 2026-08-26: lets an EXISTING bet type be marked
+      (or unmarked) as long-term futures at any time, without SQL --
+      needed since "Series Winner"/"Awards"-style bet types were already
+      registered before this flag existed, and because future new ones
+      might get added without remembering to check this box up front. -->
+      <div style="font-size:10px;color:var(--ink-soft);margin:10px 0 4px;">
+        Long-term futures bet types (checked = tracked by the pending-futures banner above the tabs):
+      </div>
+      <div id="betTypeFuturesListWrap"></div>
 
       <p class="stub-title" style="margin-top:24px;">Teams</p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
@@ -3492,7 +3519,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
   // ---------- Main app: bet types ----------
   async function refreshBetTypes(selectId) {
-    betTypes = await rest('bet_types?select=id,name,uses_line,uses_prop_fields,uses_matchup_fields&order=name.asc');
+    betTypes = await rest('bet_types?select=id,name,uses_line,uses_prop_fields,uses_matchup_fields,is_futures&order=name.asc');
+    renderBetTypeFuturesList();
     const sel = $('pickType');
     const keep = selectId || sel.value;
     sel.innerHTML = betTypes.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')
@@ -3513,6 +3541,43 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (keepOmBetType && betTypes.some(b => String(b.id) === String(keepOmBetType))) omBetTypeSel.value = keepOmBetType;
   }
 
+  // Direct request 2026-08-26: a simple checklist, not a full edit UI --
+  // this is the ONLY thing about a bet type that needs changing after
+  // creation for this feature (is it long-term futures or not), so a
+  // dedicated toggle-per-row list is enough; renaming/deleting bet types
+  // already has no UI elsewhere either, and adding one is out of scope
+  // here. Same PATCH-on-toggle pattern as the Cappers "no tier" checkbox.
+  function renderBetTypeFuturesList() {
+    const wrap = $('betTypeFuturesListWrap');
+    if (!wrap) return; // guard in case this markup isn't present in some older cached page
+    if (!betTypes.length) {
+      wrap.innerHTML = '<div class="empty-state">No bet types added yet.</div>';
+      return;
+    }
+    wrap.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;">${betTypes.map(b => `
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
+        <input type="checkbox" class="bet-type-futures-toggle" data-id="${b.id}" ${b.is_futures ? 'checked' : ''} />
+        ${escapeHtml(b.name)}
+      </span>`).join('')}</div>`;
+    wrap.querySelectorAll('.bet-type-futures-toggle').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        const id = cb.getAttribute('data-id');
+        cb.disabled = true;
+        try {
+          await rest(`bet_types?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_futures: cb.checked }) });
+          const bt = betTypes.find(b => String(b.id) === String(id));
+          if (bt) bt.is_futures = cb.checked;
+          await refreshFuturesBanner();
+        } catch (e) {
+          cb.checked = !cb.checked;
+          alert('Could not save: ' + e.message);
+        } finally {
+          cb.disabled = false;
+        }
+      });
+    });
+  }
+
   $('tfBetType').addEventListener('change', () => {
     const selected = betTypes.find(b => String(b.id) === String($('tfBetType').value));
     const isMoneyline = selected && normalizeForMatch(selected.name) === 'moneyline';
@@ -3525,13 +3590,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const uses_line = $('newBetTypeUsesLine').checked;
     const uses_prop_fields = $('newBetTypeUsesProp').checked;
     const uses_matchup_fields = $('newBetTypeUsesMatchup').checked;
+    const is_futures = $('newBetTypeIsFutures').checked;
     try {
       const [created] = await rest('bet_types', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify([{ name, uses_line, uses_prop_fields, uses_matchup_fields }])
+        body: JSON.stringify([{ name, uses_line, uses_prop_fields, uses_matchup_fields, is_futures }])
       });
       $('newBetTypeName').value = '';
+      $('newBetTypeIsFutures').checked = false;
       $('newBetTypeUsesLine').checked = true;
       $('newBetTypeUsesProp').checked = false;
       $('newBetTypeUsesMatchup').checked = false;
@@ -15646,6 +15713,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           wrap.innerHTML = `<div class="msg ok">Applied ${matchedRows.length} correction${matchedRows.length === 1 ? '' : 's'}.</div>`;
           $('gradingCorrectionsInput').value = '';
           await refreshPicksList();
+          await refreshFuturesBanner();
         } catch (e) {
           alert('Could not apply all corrections: ' + e.message);
           btn.disabled = false;
@@ -18258,6 +18326,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return closestDist <= Math.max(2, Math.ceil(norm.length * 0.3)) ? closest : null;
   }
 
+  // Direct request 2026-08-26: "we may see more of these [long-term
+  // futures bets]." Just a starting-point GUESS for the new-bet-type
+  // panel's checkbox (still shown unchecked/checked, always editable
+  // before clicking Add) -- not authoritative, and never runs against an
+  // EXISTING bet type (those are only ever changed via the explicit
+  // checklist in Setup, see renderBetTypeFuturesList). A false guess here
+  // costs one click to correct; the checklist in Setup is what actually
+  // matters for tracking.
+  const FUTURES_NAME_KEYWORDS = ['winner', 'champion', 'mvp', 'award', 'futures', 'wins', 'title'];
+  function isLikelyFuturesBetTypeName(name) {
+    const n = (name || '').toLowerCase();
+    return FUTURES_NAME_KEYWORDS.some(k => n.includes(k));
+  }
+
   // Checks one team-name-shaped string against the registered teams list
   // for a sport. Exact match first (always unambiguous by definition).
   // Then substring matching (same generous approach as schedule-sync's own
@@ -18753,7 +18835,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return {
       cappers: [...cappersMap.values()].map(c => ({ ...c, suggestion: suggestSimilarName(c.name, cappers) })),
       sports: [...sportsMap.values()].map(s => ({ ...s, suggestion: suggestSimilarName(s.name, sports) })),
-      betTypes: [...betTypesMap.values()].map(b => ({ ...b, suggestion: suggestSimilarName(b.name, betTypes) })),
+      betTypes: [...betTypesMap.values()].map(b => ({ ...b, suggestion: suggestSimilarName(b.name, betTypes), isLikelyFutures: isLikelyFuturesBetTypeName(b.name) })),
       teams: [...teamsMap.values()]
     };
   }
@@ -18798,6 +18880,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_line" ${b.hasLine ? 'checked' : ''}/> Uses a line (spread/total)</label>
           <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_prop_fields" ${b.hasPropStat ? 'checked' : ''}/> Player Prop (uses prop fields)</label>
           <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_matchup_fields" ${b.hasTwoTeams ? 'checked' : ''}/> Two-team matchup</label>
+          <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="is_futures" ${b.isLikelyFutures ? 'checked' : ''}/> Long-term futures <span style="color:var(--ink-soft);">(resolves whenever the event concludes, not a date)</span></label>
         </td>
         <td><button class="addNewItemBtn" data-kind="bet_type" data-name="${escapeHtml(b.name)}" ${b.suggestion ? `data-suggestion="${escapeHtml(b.suggestion)}"` : ''}>Add as new</button></td>
       </tr>`));
@@ -18981,7 +19064,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             const uses_line = tr.querySelector('[data-flag="uses_line"]').checked;
             const uses_prop_fields = tr.querySelector('[data-flag="uses_prop_fields"]').checked;
             const uses_matchup_fields = tr.querySelector('[data-flag="uses_matchup_fields"]').checked;
-            await rest('bet_types', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ name, uses_line, uses_prop_fields, uses_matchup_fields }]) });
+            const is_futures = tr.querySelector('[data-flag="is_futures"]').checked;
+            await rest('bet_types', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ name, uses_line, uses_prop_fields, uses_matchup_fields, is_futures }]) });
             await refreshBetTypes();
           } else if (kind === 'team') {
             const sportId = btn.getAttribute('data-sport-id');
@@ -19080,6 +19164,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           $('bulkImportText').value = '';
           $('bulkImportPreview').innerHTML = '';
           await refreshPicksList();
+          await refreshFuturesBanner();
         } catch (e) {
           alert('Import failed: ' + e.message);
           btn.disabled = false;
@@ -19301,6 +19386,72 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('parseBulkImportBtn').addEventListener('click', runBulkImportParse);
 
+  // Direct request 2026-08-26: "we may see more of these [long-term
+  // futures bets]... I won't remember to go check until I get irritated
+  // and try to resolve them months later." A Series Winner/Awards-style
+  // pick's event_date is whenever it was PLACED, not whenever it
+  // actually resolves, so it sits "pending" indefinitely and no
+  // date-scoped grading run ever revisits it on its own -- the existing
+  // Grading Exceptions blank-date sweep can already find these, but only
+  // if someone remembers to go run it. This is the actual fix for
+  // "remembering": a small persistent banner (#futuresBanner, right under
+  // the tab bar in the HTML, outside the per-tab .stub sections switchTab
+  // shows/hides) that's visible no matter which tab is open, refreshed
+  // whenever the picks list changes (see call sites: initMainApp, after a
+  // successful Bulk Import, after Grading Corrections are applied).
+  let futuresBannerExpanded = false;
+  async function refreshFuturesBanner() {
+    const banner = $('futuresBanner');
+    if (!banner) return; // guard in case this markup isn't present in some older cached page
+    let rows;
+    try {
+      rows = await rest('picks?select=id,event_date,selection,cappers(name),bet_types!inner(name)&result=eq.pending&bet_types.is_futures=eq.true&order=event_date.asc');
+    } catch (e) {
+      // Never block the rest of the app over this -- if is_futures hasn't
+      // been added to bet_types yet (migration not run), PostgREST's error
+      // here is exactly the give-away, worth surfacing once rather than
+      // silently hiding forever.
+      banner.style.display = 'block';
+      banner.innerHTML = `<div style="background:var(--stamp-amber);color:#000;font-size:11px;padding:6px 12px;">Futures-bet tracking isn't set up yet (${escapeHtml(e.message)}) -- run the is_futures migration in Supabase, see the setup notes.</div>`;
+      return;
+    }
+    if (!rows.length) {
+      banner.style.display = 'none';
+      banner.innerHTML = '';
+      return;
+    }
+    const oldest = rows[0];
+    const daysAgo = Math.max(0, Math.floor((Date.now() - new Date(oldest.event_date + 'T00:00:00Z').getTime()) / 86400000));
+    const listHtml = futuresBannerExpanded ? `
+      <div style="max-height:220px;overflow-y:auto;margin-top:6px;font-size:11px;">
+        <table class="picks-table" style="width:100%;">
+          <thead><tr><th>Placed</th><th>Capper</th><th>Pick</th><th>Bet Type</th></tr></thead>
+          <tbody>${rows.map(r => `<tr>
+            <td>${escapeHtml(r.event_date)}</td>
+            <td>${escapeHtml(r.cappers ? r.cappers.name : '—')}</td>
+            <td>${escapeHtml(r.selection || '—')}</td>
+            <td>${escapeHtml(r.bet_types ? r.bet_types.name : '—')}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : '';
+    banner.style.display = 'block';
+    banner.innerHTML = `
+      <div style="background:var(--stamp-amber);color:#000;font-size:12px;padding:6px 12px;">
+        <span style="cursor:pointer;font-weight:bold;" id="futuresBannerToggle">&#9888; ${rows.length} long-term futures bet${rows.length === 1 ? '' : 's'} still open -- oldest placed ${escapeHtml(oldest.event_date)} (${daysAgo} day${daysAgo === 1 ? '' : 's'} ago) ${futuresBannerExpanded ? '&#9650;' : '&#9660;'}</span>
+        <button id="futuresBannerGoBtn" style="margin-left:10px;font-size:11px;padding:1px 8px;">Review in Grading Exceptions</button>
+        ${listHtml}
+      </div>`;
+    $('futuresBannerToggle').addEventListener('click', () => {
+      futuresBannerExpanded = !futuresBannerExpanded;
+      refreshFuturesBanner();
+    });
+    $('futuresBannerGoBtn').addEventListener('click', () => {
+      switchTab('reports');
+      const target = $('findGradingExceptionsBtn');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+
   // ---------- init ----------
   let mainAppInited = false;
   async function initMainApp() {
@@ -19328,10 +19479,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     await refreshPropStats();
     await refreshTournaments();
     await refreshPicksList();
+    await refreshFuturesBanner();
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 336; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 337; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
