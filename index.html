@@ -18403,7 +18403,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // checklist in Setup, see renderBetTypeFuturesList). A false guess here
   // costs one click to correct; the checklist in Setup is what actually
   // matters for tracking.
-  const FUTURES_NAME_KEYWORDS = ['winner', 'champion', 'mvp', 'award', 'futures', 'wins', 'title'];
+  // "win" (not just "wins") added direct report 2026-08-26: "Season Win
+  // Total" didn't match the plural-only "wins" keyword, so it defaulted
+  // unchecked despite being exactly the kind of season-long, no-fixed-
+  // date bet this whole flag exists for. Checked against every other
+  // known bet type name for false positives before widening it -- none
+  // of Moneyline/Spread/Over/Under/Team Total/Both Teams To Score/Parlay/
+  // Player Prop contain "win" as a substring.
+  const FUTURES_NAME_KEYWORDS = ['winner', 'champion', 'mvp', 'award', 'futures', 'win', 'title'];
   function isLikelyFuturesBetTypeName(name) {
     const n = (name || '').toLowerCase();
     return FUTURES_NAME_KEYWORDS.some(k => n.includes(k));
@@ -19441,7 +19448,26 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       $('bulkImportPreview').innerHTML = '<div class="empty-state">Nothing to parse — paste headers plus at least one row.</div>';
       return;
     }
-    let validated = rows.map(validateBulkRow);
+    // CONFIRMED REAL BUG, direct report 2026-08-26: "I'm getting a lot of
+    // these errors capper "" not found; sport "" not found; bet type ""
+    // not found; missing selection." Traced to the entry template's own
+    // Date auto-fill-down: it computes a real Date Entered/Date value all
+    // the way down to row 500 regardless of whether a row has any real
+    // pick in it, so a genuinely untouched trailing template row is NOT
+    // a blank CSV line once exported -- it still has text in those two
+    // columns. parseBulkImportText's blank-line filter only catches
+    // lines with NOTHING at all, so every one of those ~100 leftover
+    // rows came through as a "row" to validate, each failing the same 4
+    // checks at once. Skips a row here (silently, not even shown in the
+    // preview) only when capper/sport/bet_type are ALL blank -- no real
+    // pick could ever be missing all three, so this can't hide a
+    // genuine partial entry, just the template's own residual rows.
+    const meaningfulRows = rows.filter(r => (r.capper || '').trim() || (r.sport || '').trim() || (r.bet_type || r.bettype || '').trim());
+    if (!meaningfulRows.length) {
+      $('bulkImportPreview').innerHTML = '<div class="empty-state">Nothing to parse — paste headers plus at least one row.</div>';
+      return;
+    }
+    let validated = meaningfulRows.map(validateBulkRow);
     validated = processParlayGroups(validated);
     $('bulkImportPreview').innerHTML = '<div class="empty-state">Checking for duplicates...</div>';
     await checkForDuplicates(validated);
@@ -19564,7 +19590,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 340; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 341; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
