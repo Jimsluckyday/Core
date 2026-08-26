@@ -4363,9 +4363,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 20).numFmt = '@';
         ws.getCell(row, 21).numFmt = '@';
 
-        ws.getCell(row, 3).dataValidation = { type: 'list', allowBlank: true, formulae: [`Cappers!$A$2:$A$${CAPPERS_LAST}`] };
-        ws.getCell(row, 4).dataValidation = { type: 'list', allowBlank: true, formulae: [`Sports!$A$2:$A$${SPORTS_LAST}`] };
-        ws.getCell(row, 5).dataValidation = { type: 'list', allowBlank: true, formulae: [`BetTypes!$A$2:$A$${BETTYPES_LAST}`] };
+        // CONFIRMED REAL BUG, direct report 2026-08-26: "I went to type in
+        // Mojo... the field goes blank and doesn't update." Capper/Sport/
+        // Bet Type never got the warning-style treatment Team 1/Team 2/
+        // Prop Team already have below -- with no errorStyle set, Excel
+        // defaults to "stop", which silently REJECTS and blanks out any
+        // typed value not already in the list. That directly contradicts
+        // the whole point of the "NEW?" check column two rows down
+        // (Instructions: "NEW? = doesn't match anything on file -- either
+        // a typo, or genuinely new") -- a genuinely new capper like "Mojo"
+        // should be typeable and just get flagged, never silently erased.
+        const newEntryWarning = (sheetName, last, label) => ({
+          type: 'list', allowBlank: true, formulae: [`${sheetName}!$A$2:$A$${last}`],
+          showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not an exact match',
+          error: `This doesn't exactly match a registered ${label} -- that's fine if it's genuinely new (the Check column will flag it as NEW so you remember to add it in Setup), but double check the spelling if this was meant to be an existing one.`
+        });
+        ws.getCell(row, 3).dataValidation = newEntryWarning('Cappers', CAPPERS_LAST, 'capper');
+        ws.getCell(row, 4).dataValidation = newEntryWarning('Sports', SPORTS_LAST, 'sport');
+        ws.getCell(row, 5).dataValidation = newEntryWarning('BetTypes', BETTYPES_LAST, 'bet type');
         ws.getCell(row, 10).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
         ws.getCell(row, 19).dataValidation = { type: 'list', allowBlank: true, formulae: ['"yes,no"'] };
         // Soft (warning, not blocking) team-name dropdown -- Team 1/2 and
@@ -19495,7 +19510,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 338; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 339; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
