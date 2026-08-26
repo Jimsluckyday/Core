@@ -19039,7 +19039,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const hasWarnings = !!(v.warnings && v.warnings.length);
       const isHardInvalid = v.errors.length > 0;
       const isSelectable = isBulkRowSelectable(v, allowWarnings);
-      const dupNote = v.dupWarning ? `<div style="color:var(--stamp-amber);font-weight:bold;">⚠ ${escapeHtml(v.dupWarning)}</div>` : '';
+      // CONFIRMED REAL BUG, direct report 2026-08-26: "I'm concerned now
+      // it's not going to build them [parlays]." A parlay leg that
+      // matches a pick already saved in the database (reused from an
+      // earlier batch, or the same bet entered standalone elsewhere) was
+      // defaulting unchecked same as any other duplicate -- but for a
+      // LEG specifically, that's not a safety net, it's a silent drop.
+      // The actual import path already has findExistingLeg() precisely
+      // for this case: it reuses the existing pick's id and links it to
+      // the new parlay number instead of inserting a second row, so
+      // checking this box can't create a real duplicate. Leaving it
+      // unchecked doesn't avoid a duplicate -- it just skips linking
+      // that leg into the parlay at all, which is the actual risk here.
+      const dupNote = v.dupWarning
+        ? `<div style="color:var(--stamp-amber);font-weight:bold;">⚠ ${escapeHtml(v.dupWarning)}${v.parlayMemberships ? ' -- checked by default: this is a parlay leg, and the import step already reuses the existing pick instead of duplicating it, so unchecking this would only drop it from the parlay' : ''}</div>`
+        : '';
       // Shown for every warning, selectable or not -- a warning-only row
       // that IS currently selectable (because the checkbox above is on)
       // still deserves the same visible flag, since it's about to be
@@ -19056,9 +19070,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // linked at import time, so checking/unchecking this box has no
       // effect. Shown unchecked and marked as informational rather than
       // offered as something to opt in or out of.
+      // See the dupNote comment just above for why parlay legs (v.
+      // parlayMemberships) are the one case where a dupWarning still
+      // defaults to CHECKED -- findExistingLeg() at import time already
+      // makes this safe, and leaving it unchecked only breaks the parlay.
       const checkboxCell = v.isSynthesizedParlaySummary
         ? '<span title="Auto-created when its legs are imported below -- nothing to check here">—</span>'
-        : (isSelectable ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${v.dupWarning ? '' : 'checked'} />`
+        : (isSelectable ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${(!v.dupWarning || v.parlayMemberships) ? 'checked' : ''} />`
           : (isHardInvalid ? '✗' : '⚠'));
       const summaryNote = v.isSynthesizedParlaySummary
         ? '<div style="color:var(--ink-soft);font-style:italic;">Preview only -- created automatically from its legs at import time.</div>' : '';
@@ -19107,7 +19125,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       </table>
       <button id="importValidRowsBtn" style="margin-top:10px;" ${valid.length === 0 ? 'disabled' : ''}>Import selected picks</button>
       <div style="font-size:10px;color:var(--ink-soft);margin-top:6px;">
-        Flagged-invalid rows (red ✗) are skipped entirely — either click "Add as new" in the panel above for a genuinely new capper/sport/bet type (every row using it re-checks itself automatically, no re-paste needed), or if it's actually a typo, fix the spelling in your pasted data and click "Parse &amp; preview" again. Unconfirmed rows (amber ⚠) only failed a soft check (team name, player name, or tournament date not confirmed) — check "Import rows with unresolved validation warnings anyway" above to import them now instead; they're saved with a schedule-sync flag noting exactly what wasn't confirmed, so they show up later in Missing Data ("Schedule sync flagged") or the "Find &amp; Update Teams / Tournaments" automation tool for a proper look, instead of being dug up from the original source now. Possible-duplicate rows are matched on the same capper, date, sport, bet type, selection, and line (and player/stat for props) — either against another row in this same paste, or against a pick already saved in the database. They're left unchecked on purpose so a re-imported file or two people entering the same picks doesn't silently double up your data — check the box for any that are genuinely intentional (e.g. a capper really did pick the same team twice for different reasons).
+        Flagged-invalid rows (red ✗) are skipped entirely — either click "Add as new" in the panel above for a genuinely new capper/sport/bet type (every row using it re-checks itself automatically, no re-paste needed), or if it's actually a typo, fix the spelling in your pasted data and click "Parse &amp; preview" again. Unconfirmed rows (amber ⚠) only failed a soft check (team name, player name, or tournament date not confirmed) — check "Import rows with unresolved validation warnings anyway" above to import them now instead; they're saved with a schedule-sync flag noting exactly what wasn't confirmed, so they show up later in Missing Data ("Schedule sync flagged") or the "Find &amp; Update Teams / Tournaments" automation tool for a proper look, instead of being dug up from the original source now. Possible-duplicate rows are matched on the same capper, date, sport, bet type, selection, and line (and player/stat for props) — either against another row in this same paste, or against a pick already saved in the database. They're left unchecked on purpose so a re-imported file or two people entering the same picks doesn't silently double up your data — check the box for any that are genuinely intentional (e.g. a capper really did pick the same team twice for different reasons). Parlay legs are the one exception: a leg that matches a pick already saved (reused from an earlier batch, or entered standalone elsewhere) is CHECKED by default, since import already reuses that existing pick and links it into the parlay instead of duplicating it -- unchecking it would only drop that leg from the parlay, not protect against a duplicate.
       </div>`;
 
     // "Add as new" wiring for the panel prepended above -- one handler per
@@ -19590,7 +19608,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 341; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 342; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
