@@ -19422,15 +19422,24 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     const oldest = rows[0];
     const daysAgo = Math.max(0, Math.floor((Date.now() - new Date(oldest.event_date + 'T00:00:00Z').getTime()) / 86400000));
+    // Direct request 2026-08-26: "I know the result, I can just change it
+    // to win/loss/push instead of having to go to different tools." The
+    // Add Picks form already has exactly that (editResult/editResultRow,
+    // shown whenever enterPickEditMode(id) loads an existing pick) -- the
+    // only thing missing was a direct link into it from here, instead of
+    // routing through Grading Exceptions' broader CSV-export workflow
+    // for what's usually just one or two picks someone already knows the
+    // outcome of.
     const listHtml = futuresBannerExpanded ? `
       <div style="max-height:220px;overflow-y:auto;margin-top:6px;font-size:11px;">
         <table class="picks-table" style="width:100%;">
-          <thead><tr><th>Placed</th><th>Capper</th><th>Pick</th><th>Bet Type</th></tr></thead>
+          <thead><tr><th>Placed</th><th>Capper</th><th>Pick</th><th>Bet Type</th><th></th></tr></thead>
           <tbody>${rows.map(r => `<tr>
             <td>${escapeHtml(r.event_date)}</td>
             <td>${escapeHtml(r.cappers ? r.cappers.name : '—')}</td>
             <td>${escapeHtml(r.selection || '—')}</td>
             <td>${escapeHtml(r.bet_types ? r.bet_types.name : '—')}</td>
+            <td><button type="button" class="futuresBannerEditBtn" data-id="${r.id}" style="font-size:11px;padding:1px 8px;">Set result</button></td>
           </tr>`).join('')}</tbody>
         </table>
       </div>` : '';
@@ -19449,6 +19458,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       switchTab('reports');
       const target = $('findGradingExceptionsBtn');
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    banner.querySelectorAll('.futuresBannerEditBtn').forEach(btn => {
+      btn.addEventListener('click', () => enterPickEditMode(btn.getAttribute('data-id')));
     });
   }
 
@@ -19483,7 +19495,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 337; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 338; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
