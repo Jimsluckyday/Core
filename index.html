@@ -16826,10 +16826,28 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     try {
       // Pass 1: every GRADED pick, across all cappers, to build each
       // capper's overall record + streak, and their record broken out by
-      // bet type. This intentionally ignores the sport/date filters below --
-      // a capper's track record should reflect their whole history, not
-      // just whatever window you're choosing pending picks from.
+      // bet type. This intentionally ignores the SPORT filter below (and
+      // the date filters too, when ranking live/today) -- a capper's
+      // track record should reflect their whole history, not just
+      // whatever sport/window you're choosing pending picks from.
       //
+      // CONFIRMED REAL BUG, direct report 2026-08-26: "on Jan 1 2025 I
+      // should have 0 days of data... yet I see Matthew P07 at the top
+      // because he has a 9 pick win streak which would be impossible on
+      // day 0." Ranking a genuinely LIVE/today batch is fine using full
+      // history with no cutoff -- but ranking a PAST date for backtesting
+      // (From set to a historical day) was still pulling graded picks
+      // from AFTER that date too, since this query never looked at `from`
+      // at all. A capper's streak/record for "as of this date" can only
+      // ever be built from results that existed BEFORE that date -- using
+      // later results is looking at the future relative to the date being
+      // tested, exactly backwards from the point of backtesting in the
+      // first place. Scoped with `lt` (strictly before), not `lte`, since
+      // a pick dated exactly `from` is presumably still pending/ungraded
+      // at the moment "as of `from`" is being evaluated, not a real result
+      // yet to count toward anyone's incoming record.  Only applies when
+      // `from` is actually set -- ranking live with no date filter keeps
+      // using full all-time history exactly as before, unchanged.
       // A parlay's own bundled result (bet_type "Parlay") never counts
       // toward OVERALL, streak, or tier -- it's the same correlated outcome
       // as its legs, just wrapped, and would double-count right alongside
@@ -16842,7 +16860,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // 1.0) -- a capper who only offered a game as part of a parlay wasn't
       // confident enough to call it standalone, so it's real evidence, just
       // weaker evidence. Straight bets count at full weight everywhere.
-      const gradedQuery = "picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at,is_parlay_leg,pick_tier,bet_types(name)&result=in.(win,loss,push)&order=id.asc";
+      let gradedQuery = "picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at,is_parlay_leg,pick_tier,bet_types(name)&result=in.(win,loss,push)&order=id.asc";
+      if (from) gradedQuery += `&event_date=lt.${from}`;
       const gradedRaw = await restAllPages(gradedQuery);
 
       const overallByCapper = {}; // capper_id -> { wins, losses, history:[] }
@@ -19719,7 +19738,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 344; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 345; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
