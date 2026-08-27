@@ -1036,7 +1036,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
         </div>
         <div class="field" id="filterDateEnteredExactField" style="display:none;">
           <label>&nbsp;</label>
-          <input id="filterDateEnteredExact" type="date" />
+          <div style="display:flex; gap:4px; align-items:center;">
+            <button class="ghost small" id="filterDateEnteredPrevBtn" type="button" title="Previous day">&larr;</button>
+            <input id="filterDateEnteredExact" type="date" />
+            <button class="ghost small" id="filterDateEnteredNextBtn" type="button" title="Next day">&rarr;</button>
+            <button class="ghost small" id="filterDateEnteredEarliestBtn" type="button" title="Jump to the earliest date-entered on any pick">Earliest</button>
+          </div>
         </div>
         <div class="field">
           <label>Capper</label>
@@ -10951,6 +10956,32 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('filterDateEnteredExactField').style.display = $('filterDateEnteredMode').value === 'exact' ? 'block' : 'none';
     refreshPicksList();
   });
+  // Direct request 2026-08-27: same prev/next/earliest navigation as the
+  // "Date of event" filter above, added to "Date entered" too -- helpful
+  // for the same reason during backfill, since this filter is what shows
+  // which picks were posted (entered) on a given day, separate from which
+  // day the event itself happened on.
+  function jumpFilterDateEnteredExactTo(dateStr) {
+    $('filterDateEnteredMode').value = 'exact';
+    $('filterDateEnteredExactField').style.display = 'block';
+    $('filterDateEnteredExact').value = dateStr;
+    refreshPicksList();
+  }
+  $('filterDateEnteredPrevBtn').addEventListener('click', () => {
+    jumpFilterDateEnteredExactTo(shiftDateStr($('filterDateEnteredExact').value || new Date().toISOString().slice(0, 10), -1));
+  });
+  $('filterDateEnteredNextBtn').addEventListener('click', () => {
+    jumpFilterDateEnteredExactTo(shiftDateStr($('filterDateEnteredExact').value || new Date().toISOString().slice(0, 10), 1));
+  });
+  $('filterDateEnteredEarliestBtn').addEventListener('click', async () => {
+    try {
+      const rows = await rest('picks?select=date_entered&order=date_entered.asc&limit=1');
+      if (!rows.length) return;
+      jumpFilterDateEnteredExactTo(rows[0].date_entered);
+    } catch (e) {
+      alert('Could not find the earliest date entered: ' + e.message);
+    }
+  });
 
   // ---------- Analytics: capper leaderboard (internal) ----------
   $('toggleAnalyticsBtn').addEventListener('click', () => {
@@ -19878,7 +19909,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 352; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 353; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
