@@ -1019,7 +1019,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
         </div>
         <div class="field" id="filterDateExactField" style="display:none;">
           <label>&nbsp;</label>
-          <input id="filterDateExact" type="date" />
+          <div style="display:flex; gap:4px; align-items:center;">
+            <button class="ghost small" id="filterDatePrevBtn" type="button" title="Previous day">&larr;</button>
+            <input id="filterDateExact" type="date" />
+            <button class="ghost small" id="filterDateNextBtn" type="button" title="Next day">&rarr;</button>
+            <button class="ghost small" id="filterDateEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+          </div>
         </div>
         <div class="field">
           <label>Date entered <span style="font-weight:normal;color:var(--ink-soft);">(when posted)</span></label>
@@ -10896,6 +10901,39 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   });
 
 
+  // Direct request 2026-08-26: "a way to go to the previous and next day
+  // as well as a way to go to the beginning" -- backfilling a full year+
+  // of history means clicking through the native date-picker's calendar
+  // month by month to reach 2025 is impractical. UTC-anchored day math,
+  // same discipline as pubProgressMondayOf, so "the next day" never
+  // shifts depending on the browser's own timezone.
+  function shiftDateStr(dateStr, days) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  function jumpFilterDateExactTo(dateStr) {
+    $('filterDateMode').value = 'exact';
+    $('filterDateExactField').style.display = 'block';
+    $('filterDateExact').value = dateStr;
+    refreshPicksList();
+  }
+  $('filterDatePrevBtn').addEventListener('click', () => {
+    jumpFilterDateExactTo(shiftDateStr($('filterDateExact').value || new Date().toISOString().slice(0, 10), -1));
+  });
+  $('filterDateNextBtn').addEventListener('click', () => {
+    jumpFilterDateExactTo(shiftDateStr($('filterDateExact').value || new Date().toISOString().slice(0, 10), 1));
+  });
+  $('filterDateEarliestBtn').addEventListener('click', async () => {
+    try {
+      const rows = await rest('picks?select=event_date&order=event_date.asc&limit=1');
+      if (!rows.length) return;
+      jumpFilterDateExactTo(rows[0].event_date);
+    } catch (e) {
+      alert('Could not find the earliest date: ' + e.message);
+    }
+  });
+
   $('filterStatus').addEventListener('change', refreshPicksList);
   $('filterCapper').addEventListener('change', refreshPicksList);
   $('filterDateExact').addEventListener('change', refreshPicksList);
@@ -19840,7 +19878,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 351; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 352; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');

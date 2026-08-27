@@ -477,8 +477,11 @@
 
 <div class="date-nav">
   <label for="viewDateInput">View a past day's results:</label>
+  <button class="back-btn" id="prevDayBtn" type="button" title="Previous day">&larr; Prev day</button>
   <input type="date" id="viewDateInput" />
   <button id="viewDateBtn">View</button>
+  <button class="back-btn" id="nextDayBtn" type="button" title="Next day">Next day &rarr;</button>
+  <button class="back-btn" id="earliestDayBtn" type="button" title="Jump to the earliest day with published picks">Earliest day</button>
   <button class="back-btn" id="backToTodayBtn" style="display:none;">Back to Today's Picks</button>
 </div>
 <div class="viewing-banner" id="viewingBanner" style="display:none;"></div>
@@ -1065,6 +1068,19 @@
     win.document.close();
   }
 
+  // Direct request 2026-08-26: "a way to go to the previous and next day
+  // as well as a way to go to the beginning so I don't have to keep
+  // trying to go through the calendar to find 2025" -- backfilling a
+  // full year+ of history makes clicking through the native date-picker
+  // month by month impractical. UTC-anchored day math, same discipline as
+  // pubProgressMondayOf elsewhere in this project, so "the next day" never
+  // shifts depending on the viewer's own timezone.
+  function shiftDateStr(dateStr, days) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
   (async function init() {
     document.getElementById('viewDateBtn').addEventListener('click', () => {
       const val = document.getElementById('viewDateInput').value;
@@ -1076,6 +1092,27 @@
       viewingDate = null;
       document.getElementById('viewDateInput').value = '';
       loadBoard();
+    });
+    document.getElementById('prevDayBtn').addEventListener('click', () => {
+      viewingDate = shiftDateStr(viewingDate || new Date().toISOString().slice(0, 10), -1);
+      document.getElementById('viewDateInput').value = viewingDate;
+      loadBoard();
+    });
+    document.getElementById('nextDayBtn').addEventListener('click', () => {
+      viewingDate = shiftDateStr(viewingDate || new Date().toISOString().slice(0, 10), 1);
+      document.getElementById('viewDateInput').value = viewingDate;
+      loadBoard();
+    });
+    document.getElementById('earliestDayBtn').addEventListener('click', async () => {
+      try {
+        const earliest = await rest('picks?select=event_date&is_published=eq.true&order=event_date.asc&limit=1');
+        if (!earliest.length) return;
+        viewingDate = earliest[0].event_date;
+        document.getElementById('viewDateInput').value = viewingDate;
+        loadBoard();
+      } catch (e) {
+        renderError(e.message);
+      }
     });
     document.getElementById('breakdownToggleBtn').addEventListener('click', () => {
       const panel = document.getElementById('breakdownPanel');
