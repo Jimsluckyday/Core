@@ -1017,9 +1017,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="exact">Specific date...</option>
           </select>
         </div>
-        <div class="field" id="filterDateExactField" style="display:none;">
+        <div class="field" id="filterDateExactField" style="display:none; flex: 0 0 auto; min-width: 270px;">
           <label>&nbsp;</label>
-          <div style="display:flex; gap:4px; align-items:center;">
+          <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
             <button class="ghost small" id="filterDatePrevBtn" type="button" title="Previous day">&larr;</button>
             <input id="filterDateExact" type="date" />
             <button class="ghost small" id="filterDateNextBtn" type="button" title="Next day">&rarr;</button>
@@ -1034,9 +1034,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="exact">Specific date...</option>
           </select>
         </div>
-        <div class="field" id="filterDateEnteredExactField" style="display:none;">
+        <div class="field" id="filterDateEnteredExactField" style="display:none; flex: 0 0 auto; min-width: 270px;">
           <label>&nbsp;</label>
-          <div style="display:flex; gap:4px; align-items:center;">
+          <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
             <button class="ghost small" id="filterDateEnteredPrevBtn" type="button" title="Previous day">&larr;</button>
             <input id="filterDateEnteredExact" type="date" />
             <button class="ghost small" id="filterDateEnteredNextBtn" type="button" title="Next day">&rarr;</button>
@@ -19909,7 +19909,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 353; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 354; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
