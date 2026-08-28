@@ -30,6 +30,14 @@
 
   * { box-sizing: border-box; }
 
+  /* Direct request 2026-08-28: Cappers/Bet Types chips carry extra controls
+     (No-tiers checkbox, edit/delete links) that made them read as noisier
+     than plain Team/Prop Stat chips -- those extras now only show on
+     hover/focus so the default view is just the name. */
+  .chip-hover-controls { display: none; align-items: center; gap: 4px; }
+  .chip-hover:hover .chip-hover-controls,
+  .chip-hover:focus-within .chip-hover-controls { display: inline-flex; }
+
   .ticket-app {
     background: var(--paper);
     background-image:
@@ -3071,6 +3079,37 @@ These are almost always the same day, so "Date entered" only fills in a starting
   let capperSearchListenerBound = false;
   let capperEditingId = null; // tracks which single capper (if any) is currently mid-edit
 
+  // Direct request 2026-08-28: a flat wall of 100+ capper chips (or 224
+  // soccer teams within one sport group) is unscannable. Splitting an
+  // over-threshold list into A-C/D-F/... letter bands keeps each visible
+  // chunk small; lists at or under the threshold render as one group with
+  // no sub-header, unchanged from before.
+  const LETTER_BANDS = ['A-C', 'D-F', 'G-I', 'J-L', 'M-O', 'P-R', 'S-U', 'V-Z'];
+  function letterBandFor(name) {
+    const c = (name || '').trim().charAt(0).toUpperCase();
+    const code = c.charCodeAt(0);
+    if (code < 65 || code > 90) return '#';
+    return LETTER_BANDS[Math.min(Math.floor((code - 65) / 3), LETTER_BANDS.length - 1)];
+  }
+  function groupByLetterBand(items, nameFn, threshold = 30) {
+    if (items.length <= threshold) return [{ label: null, items }];
+    const groups = {};
+    items.forEach(item => {
+      const band = letterBandFor(nameFn(item));
+      (groups[band] = groups[band] || []).push(item);
+    });
+    return [...LETTER_BANDS, '#']
+      .filter(b => groups[b] && groups[b].length)
+      .map(b => ({ label: b === '#' ? 'Other' : b, items: groups[b] }));
+  }
+  function letterBandGroupsHtml(items, nameFn, chipsHtmlFn) {
+    return groupByLetterBand(items, nameFn).map(g => `
+      <div style="margin-bottom:${g.label ? '8px' : '0'};">
+        ${g.label ? `<div style="font-size:10px;font-weight:bold;color:var(--ink-soft);margin-bottom:3px;">${escapeHtml(g.label)}</div>` : ''}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">${chipsHtmlFn(g.items)}</div>
+      </div>`).join('');
+  }
+
   function renderCapperList() {
     const wrap = $('capperListWrap');
     const searchInput = $('capperSearchInput');
@@ -3100,7 +3139,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       return;
     }
 
-    wrap.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;">${filtered.map(c => {
+    const capperChipHtml = c => {
       if (c.id === capperEditingId) {
         // Mid-edit: show a text input pre-filled with the current name,
         // plus Save/Cancel, instead of the normal name+buttons chip.
@@ -3120,15 +3159,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // never changes, so scoring is untouched.
       const noTierChecked = c.no_tier_signal ? ' checked' : '';
       return `
-        <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
+        <span class="chip-hover" style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;${c.no_tier_signal ? `box-shadow:inset 0 0 0 1px var(--stamp-amber);` : ''}" title="${c.no_tier_signal ? 'No tiers -- this capper never gives a confidence signal' : ''}">
           ${escapeHtml(c.name)}
-          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;text-transform:none;letter-spacing:normal;color:var(--ink);cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
-            <input type="checkbox" class="capper-no-tier-toggle" data-id="${c.id}"${noTierChecked} style="margin:0;"> No tiers
-          </label>
-          <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--ink);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
-          <button type="button" class="capper-delete-btn" data-id="${c.id}" data-name="${escapeHtml(c.name)}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
+          <span class="chip-hover-controls">
+            <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;text-transform:none;letter-spacing:normal;color:var(--ink);cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
+              <input type="checkbox" class="capper-no-tier-toggle" data-id="${c.id}"${noTierChecked} style="margin:0;"> No tiers
+            </label>
+            <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--ink);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
+            <button type="button" class="capper-delete-btn" data-id="${c.id}" data-name="${escapeHtml(c.name)}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
+          </span>
         </span>`;
-    }).join('')}</div>`;
+    };
+    wrap.innerHTML = letterBandGroupsHtml(filtered, c => c.name, items => items.map(capperChipHtml).join(''));
 
     wrap.querySelectorAll('.capper-edit-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -3616,11 +3658,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
       wrap.innerHTML = '<div class="empty-state">No bet types added yet.</div>';
       return;
     }
-    wrap.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;">${betTypes.map(b => `
-      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
-        <input type="checkbox" class="bet-type-futures-toggle" data-id="${b.id}" ${b.is_futures ? 'checked' : ''} />
+    const betTypeChipHtml = b => `
+      <span class="chip-hover" style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;${b.is_futures ? `box-shadow:inset 0 0 0 1px var(--stamp-amber);` : ''}">
         ${escapeHtml(b.name)}
-      </span>`).join('')}</div>`;
+        <span class="chip-hover-controls">
+          <input type="checkbox" class="bet-type-futures-toggle" data-id="${b.id}" ${b.is_futures ? 'checked' : ''} title="Long-term futures" />
+        </span>
+      </span>`;
+    wrap.innerHTML = letterBandGroupsHtml(betTypes, b => b.name, items => items.map(betTypeChipHtml).join(''));
     wrap.querySelectorAll('.bet-type-futures-toggle').forEach(cb => {
       cb.addEventListener('change', async () => {
         const id = cb.getAttribute('data-id');
@@ -3753,16 +3798,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const sportName = t.sports ? t.sports.name : 'Unknown sport';
       (bySport[sportName] = bySport[sportName] || []).push(t);
     });
+    const teamChipHtml = t => `
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
+        ${escapeHtml(t.name)}
+        <button type="button" class="delete-team-btn" data-id="${t.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;">&times;</button>
+      </span>`;
     wrap.innerHTML = Object.keys(bySport).sort().map(sportName => `
       <div style="margin-bottom:10px;">
         <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:4px;">${escapeHtml(sportName)} (${bySport[sportName].length})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;">
-          ${bySport[sportName].map(t => `
-            <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
-              ${escapeHtml(t.name)}
-              <button type="button" class="delete-team-btn" data-id="${t.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;">&times;</button>
-            </span>`).join('')}
-        </div>
+        ${letterBandGroupsHtml(bySport[sportName], t => t.name, items => items.map(teamChipHtml).join(''))}
       </div>`).join('');
     wrap.querySelectorAll('.delete-team-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -4695,27 +4739,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
       (bySport[sportName] = bySport[sportName] || []).push(p);
     });
 
+    const propStatChipHtml = p => {
+      if (p.id === propStatEditingId) {
+        return `
+          <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
+            <input type="text" class="propstat-edit-input" data-id="${p.id}" value="${escapeHtml(p.name)}" style="font-size:11px;padding:1px 4px;width:120px;">
+            <button type="button" class="propstat-save-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-green);cursor:pointer;font-weight:bold;padding:0;" title="Save">&#10003;</button>
+            <button type="button" class="propstat-cancel-edit-btn" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;font-weight:bold;padding:0;" title="Cancel">&times;</button>
+          </span>`;
+      }
+      return `
+        <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
+          ${escapeHtml(p.name)}
+          <button type="button" class="propstat-edit-btn" data-id="${p.id}" style="border:none;background:none;color:var(--ink);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
+          <button type="button" class="delete-propstat-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
+        </span>`;
+    };
     wrap.innerHTML = Object.keys(bySport).sort().map(sportName => `
       <div style="margin-bottom:10px;">
         <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:4px;">${escapeHtml(sportName)} (${bySport[sportName].length})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;">
-          ${bySport[sportName].map(p => {
-            if (p.id === propStatEditingId) {
-              return `
-                <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
-                  <input type="text" class="propstat-edit-input" data-id="${p.id}" value="${escapeHtml(p.name)}" style="font-size:11px;padding:1px 4px;width:120px;">
-                  <button type="button" class="propstat-save-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-green);cursor:pointer;font-weight:bold;padding:0;" title="Save">&#10003;</button>
-                  <button type="button" class="propstat-cancel-edit-btn" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;font-weight:bold;padding:0;" title="Cancel">&times;</button>
-                </span>`;
-            }
-            return `
-              <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
-                ${escapeHtml(p.name)}
-                <button type="button" class="propstat-edit-btn" data-id="${p.id}" style="border:none;background:none;color:var(--ink);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
-                <button type="button" class="delete-propstat-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
-              </span>`;
-          }).join('')}
-        </div>
+        ${letterBandGroupsHtml(bySport[sportName], p => p.name, items => items.map(propStatChipHtml).join(''))}
       </div>`).join('');
 
     wrap.querySelectorAll('.propstat-edit-btn').forEach(btn => {
@@ -20063,7 +20106,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 361; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 362; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
