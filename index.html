@@ -5145,14 +5145,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // — base pick (default)" -- so the person entering a new pick sees the
   // same expected-pattern signal at entry time, not just when reviewing
   // later. Only relabels the option text; the saved value stays 0.
+  // Direct request 2026-08-28: a capper who DOES normally give tiers on
+  // straight bets often gives no signal at all on a Parlay specifically
+  // (occasionally a reduced rate is posted on it, but usually not) -- same
+  // "expected blank, not a gap" treatment as no_tier_signal, just keyed off
+  // the pick's own Bet Type instead of the capper. A real tier typed for a
+  // parlay (options 1-8, -1, -2) is untouched either way.
   function updatePickTierZeroLabel() {
     const sel = $('pickCapper');
     const capper = cappers.find(c => String(c.id) === String(sel.value));
     const opt = $('pickTier').querySelector('option[value="0"]');
     if (!opt) return;
-    opt.textContent = (capper && capper.no_tier_signal) ? 'None given — this capper never gives a tier signal' : 'Tier 0 — base pick (default)';
+    const bt = currentBetType();
+    const isParlay = bt && (bt.name || '').toLowerCase().includes('parlay');
+    if (capper && capper.no_tier_signal) {
+      opt.textContent = 'None given — this capper never gives a tier signal';
+    } else if (isParlay) {
+      opt.textContent = 'None given — parlays often don\'t carry a tier';
+    } else {
+      opt.textContent = 'Tier 0 — base pick (default)';
+    }
   }
   $('pickCapper').addEventListener('change', updatePickTierZeroLabel);
+  $('pickType').addEventListener('change', updatePickTierZeroLabel);
 
   // ---------- Main app: pick type conditional fields ----------
   // Suggestions keyed by bet type NAME (case-insensitive) — only applies
@@ -7922,7 +7937,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // scoring is completely unaffected. Still a real dropdown (not
       // locked), since a capper who's usually blank can still send a real
       // signal on an individual pick.
-      const tierZeroLabel = (p.cappers && p.cappers.no_tier_signal) ? 'None given' : 'Tier 0';
+      // Direct request 2026-08-28: same "expected blank" treatment for any
+      // Parlay pick regardless of the capper's own no_tier_signal flag --
+      // most cappers who otherwise always give a tier still skip it on
+      // parlays specifically.
+      const tierZeroLabel = ((p.cappers && p.cappers.no_tier_signal) || betTypeName.toLowerCase() === 'parlay') ? 'None given' : 'Tier 0';
       const tierCell = `<select class="inline-tier-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;">
         <option value="-2" ${Number(p.pick_tier) === -2 ? 'selected' : ''}>Tier -2</option>
         <option value="-1" ${Number(p.pick_tier) === -1 ? 'selected' : ''}>Tier -1</option>
@@ -20106,7 +20125,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 362; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 363; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
