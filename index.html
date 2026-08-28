@@ -14805,12 +14805,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${escapeHtml(v.resolved.prop_stat || '')}</td>
       </tr>`).join('');
     // Every fully-missing parlay's REAL leg rows, each tagged with its own
-    // parlay number, scoped per-parlay via a simple incrementing counter
-    // so multiple recovered parlays in the same export never collide with
-    // each other once re-pasted together.
+    // parlay number. CONFIRMED REAL BUG, direct report 2026-08-28: "why is
+    // everything from row 55 on down look like it's part of a building set
+    // of parlays? No one has 24 parlays and it spans multiple cappers."
+    // This used to hand out a fresh i+1 counter across the WHOLE file
+    // (every capper's fully-missing parlays sharing one running total),
+    // instead of each parlay's own real, already-capper-scoped number
+    // (parlayLocalNumber, set by processParlayGroups) -- reassigning a
+    // synthetic number was not just cosmetically confusing, it risked
+    // colliding with that SAME capper's own unrelated already-existing
+    // parlay_local_number on re-import (linkLegToParlay finds-or-creates
+    // by capper+date+number alone), silently merging unrelated legs into
+    // the wrong real parlay. A capper's own real numbers can never
+    // collide with each other within one date (byNumber already groups by
+    // capper+date+number), so there was never a reason to renumber them.
     const parlayLegRows = [];
-    parlaySafe.forEach((p, i) => {
-      const localNumber = i + 1;
+    parlaySafe.forEach((p) => {
+      const localNumber = p.summary.parlayLocalNumber;
       p.legStatuses.forEach(l => {
         parlayLegRows.push({ v: l.v, parlayNumber: localNumber });
       });
@@ -20753,7 +20764,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 372; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 373; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
