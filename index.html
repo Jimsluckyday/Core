@@ -2270,6 +2270,40 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- VERIFY UPLOAD AGAINST DATABASE -->
+    <!-- Direct request 2026-08-28: "a tool where I can pick a file and
+         validate whether all the information from that file is in the
+         database for all the files I happened to save from the week long
+         uploads of data I've done." A retroactive audit for exactly the
+         Iowa Kid Pix gap -- re-reads a previously-uploaded file the same
+         way Bulk Import does (same parser, same capper/sport/bet-type
+         resolution, same parlay-leg collapsing), then checks the database
+         for a matching pick using the same identity signature the live
+         Duplicate Pick Checker already uses (dupKey), instead of
+         re-implementing a second, possibly-inconsistent notion of "same
+         pick." Entirely read-only -- nothing here inserts, updates, or
+         deletes anything. -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Verify upload against database <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— read-only audit, catches anything a past upload silently missed</span>
+        <button class="ghost small" id="toggleVerifyUploadBtn">Show tool</button>
+      </p>
+      <div id="verifyUploadPanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Paste (or upload) the exact same file you originally uploaded. This re-reads every row the same way Bulk Import does, then checks whether a matching pick already exists in the database -- it never inserts, updates, or deletes anything, so it's safe to run against any file at any time, as many times as you want. Use this to sweep the backlog of files you've already uploaded and confirm nothing else silently didn't make it in.
+        </div>
+        <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label for="verifyUploadFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a spreadsheet file directly (from this device, no copy/paste needed):</label>
+          <input type="file" id="verifyUploadFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
+        </div>
+        <textarea id="verifyUploadText" placeholder="Paste the same data you originally uploaded..." style="min-height:120px;width:100%;font-family:monospace;font-size:12px;"></textarea>
+        <div class="row" style="margin-top:8px;">
+          <button id="runVerifyUploadBtn">Check against database</button>
+        </div>
+        <div id="verifyUploadWrap" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
     <!-- UNDO GRADING (internal, testing use only) -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -4764,7 +4798,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `core-betting-entry-template-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      // Direct request 2026-08-28: same customizable-export-name request
+      // applied here too, for consistency with every other download in
+      // this app -- Cancel or a blank entry keeps this default name.
+      const defaultTemplateName = `core-betting-entry-template-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const chosenTemplateName = (prompt('Save this template as:', defaultTemplateName) || '').trim();
+      a.download = chosenTemplateName ? (chosenTemplateName.toLowerCase().endsWith('.xlsx') ? chosenTemplateName : chosenTemplateName + '.xlsx') : defaultTemplateName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -10022,7 +10061,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'picks-export-' + new Date().toISOString().split('T')[0] + '.csv';
+      // Direct request 2026-08-28: "everything gets saved as Pick Export
+      // with today's date stamp... I had to re-name all my files." Cancel
+      // or a blank entry keeps this same default, so this can never block
+      // or lose an export, only optionally rename it.
+      const defaultExportName = 'picks-export-' + new Date().toISOString().split('T')[0] + '.csv';
+      const chosenExportName = (prompt('Save this export as:', defaultExportName) || '').trim();
+      a.download = chosenExportName ? (chosenExportName.toLowerCase().slice(-4) === '.csv' ? chosenExportName : chosenExportName + '.csv') : defaultExportName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -10125,6 +10170,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     return new Date(naiveUtc.getTime() + offsetMs).toISOString();
   }
 
+  // Direct request 2026-08-28: "everything gets saved as Pick Export with
+  // today's date stamp... I had to re-name all my files to something that
+  // makes sense so I could keep track of it." Every CSV export in this app
+  // funnels through here (or through the pop-out-window twin below), so a
+  // single prompt() here covers all of them at once, pre-filled with the
+  // same auto-generated name as before -- hitting Cancel or leaving it
+  // blank keeps that default, so this can never block or lose an export,
+  // only optionally rename it.
+  function promptForFilename(defaultName) {
+    const chosen = (prompt('Save this export as:', defaultName) || '').trim();
+    if (!chosen) return defaultName;
+    return chosen.toLowerCase().endsWith('.csv') ? chosen : chosen + '.csv';
+  }
+
   function downloadCsv(filename, cols, rows, prefixText) {
     function csvField(val) {
       const s = String(val == null ? '' : val);
@@ -10142,7 +10201,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    a.download = promptForFilename(filename);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -10206,16 +10265,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const tables = Array.prototype.slice.call(document.querySelectorAll('table'));
     if (!tables.length) { alert('Nothing to export yet.'); return; }
     const dateSuffix = new Date().toISOString().split('T')[0];
+    // Direct request 2026-08-28: "everything gets saved as Pick Export
+    // with today's date stamp... I had to re-name all my files." One
+    // prompt for a base name (not one per file, even in SEPARATE_FILES
+    // mode) -- Cancel or leaving it blank keeps the original default, so
+    // this can never block or lose an export, only optionally rename it.
+    const baseName = (prompt('Save this export as (base name, no extension):', '${filenamePrefix}') || '').trim() || '${filenamePrefix}';
     if (SEPARATE_FILES) {
       tables.forEach(function(table, i) {
         const heading = table.previousElementSibling;
         const label = (heading && heading.textContent ? heading.textContent : ('table-' + (i + 1))).trim();
         const safeLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
-        downloadCsvBlob(tableToCsv(table), '${filenamePrefix}-' + (safeLabel || ('part-' + (i + 1))) + '-' + dateSuffix + '.csv');
+        downloadCsvBlob(tableToCsv(table), baseName + '-' + (safeLabel || ('part-' + (i + 1))) + '-' + dateSuffix + '.csv');
       });
     } else {
       const blocks = tables.map(tableToCsv);
-      downloadCsvBlob(blocks.join('\\r\\n\\r\\n'), '${filenamePrefix}-' + dateSuffix + '.csv');
+      downloadCsvBlob(blocks.join('\\r\\n\\r\\n'), baseName + '-' + dateSuffix + '.csv');
     }
   });
 })();
@@ -14582,6 +14647,123 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('runDupScanBtn').addEventListener('click', runDupScan);
 
+  // ---------- Verify upload against database (internal, read-only) ----------
+  // Direct request 2026-08-28, prompted by the Iowa Kid Pix gap: a way to
+  // sweep a file that was already uploaded and confirm every checkable
+  // row from it actually exists in the database, rather than trusting an
+  // upload silently went in cleanly. Reuses the EXACT same parse/resolve
+  // pipeline as Bulk Import (parseBulkImportText, validateBulkRow,
+  // processParlayGroups) so a row's identity here is computed the same
+  // way it would have been at real import time, then compares against the
+  // database using dupKey -- the same "same pick" definition the live
+  // Duplicate Pick Checker already uses, instead of inventing a second,
+  // possibly-inconsistent one. Never calls anything but a read-only
+  // select -- no insert, update, or delete anywhere in this tool.
+  $('toggleVerifyUploadBtn').addEventListener('click', () => {
+    const panel = $('verifyUploadPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleVerifyUploadBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+  });
+
+  $('verifyUploadFileInput').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      $('verifyUploadText').value = await readAsCsvTextOrReject(file);
+      $('runVerifyUploadBtn').click();
+    } catch (err) {
+      alert('Could not read that file: ' + err.message);
+    }
+  });
+
+  function renderVerifyUploadResults(found, missing, unresolvable) {
+    const wrap = $('verifyUploadWrap');
+    const totalChecked = found.length + missing.length;
+    const nameOf = (list, id) => (list.find(x => String(x.id) === String(id)) || {}).name || '';
+    const summaryHtml = `<div style="background:${missing.length > 0 ? 'var(--stamp-red)' : 'var(--stamp-green)'};color:var(--paper);font-size:14px;font-weight:bold;padding:12px;border-radius:3px;margin-bottom:12px;">
+        ${totalChecked} pick${totalChecked === 1 ? '' : 's'} checked against the database &rarr; <strong>${found.length}</strong> found${missing.length > 0 ? `, <strong>${missing.length}</strong> MISSING -- not in the database at all` : ' -- everything checkable from this file is accounted for'}
+      </div>`;
+    const unresolvableHtml = unresolvable.length
+      ? `<div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${unresolvable.length} row${unresolvable.length === 1 ? '' : 's'} couldn't be checked at all (capper/sport/bet type not recognized, or missing a date/selection) -- these need fixing before they can be compared against anything:
+          <ul style="margin:4px 0 0 18px;">${unresolvable.map(v => `<li>${escapeHtml(v.errors.join('; '))}</li>`).join('')}</ul>
+        </div>`
+      : '';
+    if (!missing.length) {
+      wrap.innerHTML = summaryHtml + unresolvableHtml + `<div class="msg ok">Every checkable pick from this file is already in the database.</div>`;
+      return;
+    }
+    const rows = missing.map(v => `<tr>
+        <td>${escapeHtml(v.resolved.event_date || '')}</td>
+        <td>${escapeHtml(nameOf(cappers, v.resolved.capper_id))}</td>
+        <td>${escapeHtml(nameOf(sports, v.resolved.sport_id))}</td>
+        <td>${escapeHtml(nameOf(betTypes, v.resolved.bet_type_id))}</td>
+        <td>${escapeHtml(v.resolved.selection || '')}</td>
+        <td>${v.resolved.line ?? ''}</td>
+        <td>${escapeHtml(v.resolved.prop_player || '')}</td>
+        <td>${escapeHtml(v.resolved.prop_stat || '')}</td>
+      </tr>`).join('');
+    wrap.innerHTML = summaryHtml + unresolvableHtml + `
+      <table class="picks-table">
+        <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Prop player</th><th>Prop stat</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <button id="exportMissingUploadBtn" style="margin-top:10px;">Export missing rows to CSV</button>`;
+    $('exportMissingUploadBtn').addEventListener('click', () => {
+      const cols = ['Date', 'Capper', 'Sport', 'Bet type', 'Selection', 'Line', 'Prop player', 'Prop stat'];
+      const csvRows = missing.map(v => [v.resolved.event_date, nameOf(cappers, v.resolved.capper_id), nameOf(sports, v.resolved.sport_id), nameOf(betTypes, v.resolved.bet_type_id), v.resolved.selection || '', v.resolved.line ?? '', v.resolved.prop_player || '', v.resolved.prop_stat || '']);
+      downloadCsv(`missing-picks-${new Date().toISOString().split('T')[0]}.csv`, cols, csvRows);
+    });
+  }
+
+  async function runVerifyUpload() {
+    const wrap = $('verifyUploadWrap');
+    const btn = $('runVerifyUploadBtn');
+    const text = $('verifyUploadText').value;
+    const { rows } = parseBulkImportText(text);
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="empty-state">Nothing to check — paste headers plus at least one row.</div>';
+      return;
+    }
+    // Same trailing-template-row skip as Bulk Import's own parser -- see
+    // runBulkImportParse's own comment for the full story.
+    const meaningfulRows = rows.filter(r => (r.capper || '').trim() || (r.sport || '').trim() || (r.bet_type || r.bettype || '').trim());
+    if (!meaningfulRows.length) {
+      wrap.innerHTML = '<div class="empty-state">Nothing to check — paste headers plus at least one row.</div>';
+      return;
+    }
+    btn.disabled = true;
+    try {
+      wrap.innerHTML = '<div class="empty-state">Reading file...</div>';
+      let validated = meaningfulRows.map(validateBulkRow);
+      validated = processParlayGroups(validated);
+
+      const resolvable = validated.filter(v => v.errors.length === 0 && v.resolved);
+      const unresolvable = validated.filter(v => v.errors.length > 0);
+      if (!resolvable.length) {
+        wrap.innerHTML = `<div class="msg error">None of these rows could even be matched against your Setup data (capper/sport/bet type not recognized) -- fix those first; there's nothing yet to check against the database.</div>`;
+        return;
+      }
+
+      wrap.innerHTML = '<div class="empty-state">Checking against the database...</div>';
+      const capperIds = Array.from(new Set(resolvable.map(v => v.resolved.capper_id).filter(id => id !== null && id !== undefined)));
+      const dates = resolvable.map(v => v.resolved.event_date).filter(Boolean);
+      const minDate = dates.reduce((a, b) => (a < b ? a : b));
+      const maxDate = dates.reduce((a, b) => (a > b ? a : b));
+      const existing = await restAllPages(`picks?select=id,capper_id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,doubleheader_game&capper_id=in.(${capperIds.join(',')})&event_date=gte.${minDate}&event_date=lte.${maxDate}&order=id.asc`);
+      const existingKeys = new Set(existing.map(p => dupKey(p)));
+      const found = resolvable.filter(v => existingKeys.has(dupKey(v.resolved)));
+      const missing = resolvable.filter(v => !existingKeys.has(dupKey(v.resolved)));
+      renderVerifyUploadResults(found, missing, unresolvable);
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">Could not check the database: ${e.message}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  $('runVerifyUploadBtn').addEventListener('click', runVerifyUpload);
+
   // ---------- Undo grading (testing use only) ----------
   $('toggleUndoGradingBtn').addEventListener('click', () => {
     const panel = $('undoGradingPanel');
@@ -18918,6 +19100,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // so the checkbox's own listener (below) can re-render instantly against
   // the already-validated/already-checked data, no re-fetch needed.
   let bulkImportLastCheckFailures = [];
+  // Direct request 2026-08-28: "I need to visibly see a total of how many
+  // picks I'm importing... need to make 100% sure it's clear if those
+  // totals don't match so we can immediately stop." The raw row count
+  // from the paste, BEFORE parlay-leg collapsing/summary-row synthesis --
+  // a stable "what I actually pasted" number to check the final import
+  // count against, since a few rows legitimately collapsing into one
+  // linked parlay is expected and NOT the same failure this is meant to
+  // catch.
+  let bulkImportRawRowCount = 0;
 
   function parseBulkImportText(text) {
     const lines = text.split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim() !== '');
@@ -19617,6 +19808,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const tierNeedsReviewCount = validated.filter(v => v.tierNeedsReview).length;
     const newItemsHtml = renderNewItemsPanel(collectNewItemCandidates(validated));
 
+    // Direct request 2026-08-28: "I need to visibly see a total of how
+    // many picks I'm importing on the file or on the page somewhere
+    // highlighted and need to make 100% sure it's clear if those totals
+    // don't match so we can immediately stop." Always shown (not only
+    // when something's wrong), colored green when nothing is being
+    // skipped and red the instant anything is, so the very first thing
+    // on this page is a pass/fail check, not something to go hunting for
+    // in a wall of individual row warnings. bulkImportRawRowCount is the
+    // literal row count read from the paste, before parlay-leg collapsing
+    // or summary-row synthesis -- a batch with real parlays in it is
+    // EXPECTED to show a different "ready to import" count than rows
+    // pasted (several typed rows correctly collapse into one linked
+    // parlay), so the skipped count (hard errors + unconfirmed) -- not a
+    // raw pasted-vs-imported equality check -- is what this actually
+    // gates on.
+    const skippedCount = hardInvalidCount + needsReviewCount;
+    const totalsBannerHtml = `<div style="background:${skippedCount > 0 ? 'var(--stamp-red)' : 'var(--stamp-green)'};color:var(--paper);font-size:14px;font-weight:bold;padding:12px;border-radius:3px;margin-bottom:12px;">
+        ${bulkImportRawRowCount} row${bulkImportRawRowCount === 1 ? '' : 's'} read from your paste &rarr; <strong>${valid.length}</strong> ready to import${skippedCount > 0 ? `, <strong>${skippedCount}</strong> SKIPPED -- STOP and review before importing` : ' -- nothing skipped'}
+        ${skippedCount > 0 ? `<div style="font-size:11px;font-weight:normal;margin-top:4px;">${hardInvalidCount} invalid (red ✗ below, must fix and re-paste) and ${needsReviewCount} unconfirmed (amber ⚠ below, check the box further down to include them). If your batch includes parlays, some rows are also expected to combine into fewer linked entries -- that's normal, not a skip.</div>` : ''}
+      </div>`;
+
     // Made visible deliberately -- if the live schedule check couldn't
     // even run (TheRundown down, rate-limited, or timing out), that's
     // fundamentally different from "checked and found nothing wrong."
@@ -19643,12 +19855,6 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // treatment as the schedule-validation-outage banner above, shown
     // ONLY while there's something it's actually protecting against
     // (rows currently excluded because the box below isn't checked yet).
-    const unconfirmedWarningHtml = (needsReviewCount > 0 && !allowWarnings)
-      ? `<div style="background:var(--stamp-amber);color:var(--ink);font-size:12px;font-weight:bold;padding:10px;border-radius:3px;margin-bottom:12px;">
-          &#9888; ${needsReviewCount} pick${needsReviewCount === 1 ? '' : 's'} will NOT be imported -- ${needsReviewCount === 1 ? 'it has' : 'they have'} an unconfirmed team name, player name, or tournament date (amber ⚠ rows below, no checkbox). Check "Import rows with unresolved validation warnings anyway" below to include ${needsReviewCount === 1 ? 'it' : 'them'} now, flagged for a later look -- otherwise ${needsReviewCount === 1 ? 'it stays' : 'they stay'} out of the database entirely until fixed and re-pasted.
-        </div>`
-      : '';
-
     // Sort invalid rows to the top for display -- this is what actually
     // saves the scrolling back and forth, since errors are otherwise
     // scattered wherever they happened to land in the pasted order.
@@ -19750,9 +19956,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
 
     wrap.innerHTML = `
+      ${totalsBannerHtml}
       ${newItemsHtml}
       ${scheduleWarningHtml}
-      ${unconfirmedWarningHtml}
       <div style="font-size:12px;margin:10px 0;">
         <strong>${valid.length}</strong> ready to import, <strong style="color:var(--stamp-red);">${hardInvalidCount}</strong> flagged as invalid
         ${needsReviewCount > 0 ? `, <strong style="color:var(--stamp-amber);">${needsReviewCount}</strong> unconfirmed (check "Import rows with unresolved validation warnings anyway" above to include ${needsReviewCount === 1 ? 'it' : 'them'} now instead of fixing first)` : ''}
@@ -20227,6 +20433,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       $('bulkImportPreview').innerHTML = '<div class="empty-state">Nothing to parse — paste headers plus at least one row.</div>';
       return;
     }
+    bulkImportRawRowCount = meaningfulRows.length;
     let validated = meaningfulRows.map(validateBulkRow);
     validated = processParlayGroups(validated);
     $('bulkImportPreview').innerHTML = '<div class="empty-state">Matching unit sizes to each capper\'s tier history...</div>';
@@ -20365,7 +20572,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 368; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 369; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
