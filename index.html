@@ -775,9 +775,12 @@
                 <option value="">All statuses</option>
               </select>
             </div>
-            <div class="field">
+            <div class="field" style="flex: 0 0 auto; min-width: 190px;">
               <label>From date</label>
-              <input id="rqFrom" type="date" />
+              <div style="display:flex; gap:4px; align-items:center;">
+                <input id="rqFrom" type="date" style="width:auto;" />
+                <button class="ghost small" id="rqFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+              </div>
             </div>
             <div class="field">
               <label>To date</label>
@@ -1349,9 +1352,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="analyticsSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="analyticsFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="analyticsFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="analyticsFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1427,9 +1433,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <option value="parlay">Parlays only</option>
             </select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="btbFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="btbFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="btbFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1465,9 +1474,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="haSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="haFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="haFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="haFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1499,9 +1511,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="fdSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="fdFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="fdFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="fdFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1533,9 +1548,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="slSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="slFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="slFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="slFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1567,9 +1585,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="potdSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="potdFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="potdFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="potdFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1619,9 +1640,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <option value="annual">Annual</option>
             </select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="pubProgressFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="pubProgressFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="pubProgressFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1653,9 +1677,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="consensusSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="consensusFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="consensusFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="consensusFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1694,9 +1721,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="prSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>Pending picks from (event date)</label>
-            <input id="prFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="prFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="prFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>Pending picks to (event date)</label>
@@ -1748,9 +1778,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <option value="push">Push</option>
             </select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="apFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="apFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="apFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1779,9 +1812,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="ppSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="ppFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="ppFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="ppFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -1810,9 +1846,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="btSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="btFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="btFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="btFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2012,9 +2051,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="topBottomSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="topBottomFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="topBottomFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="topBottomFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2122,9 +2164,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="streaksSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="streaksFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="streaksFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="streaksFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2161,9 +2206,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="capperAnalysisSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="capperAnalysisFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="capperAnalysisFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="capperAnalysisFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2200,9 +2248,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="dupSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="dupFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="dupFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="dupFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2235,9 +2286,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="ugSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="ugFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="ugFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="ugFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2270,9 +2324,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="usSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="usFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="usFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="usFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2348,9 +2405,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="tfSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="tfFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="tfFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="tfFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2398,9 +2458,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="omSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="omFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="omFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="omFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2429,9 +2492,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="pouSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="pouFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="pouFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="pouFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -2460,9 +2526,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>Sport</label>
             <select id="bupSport"><option value="">All sports</option></select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
-            <input id="bupFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="bupFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="bupFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -15886,27 +15955,63 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('findMissingDataBtn').addEventListener('click', findMissingData);
 
-  // Direct request 2026-08-28: "doesn't have an earliest search option for
-  // dates" -- same jump-to-beginning button already on the Pending Picks
-  // date filters (filterDateEarliestBtn), so working through a full
-  // history backfill here doesn't mean scrolling a calendar back manually.
-  // Unscoped by capper/sport on purpose, same as the Pending Picks version
-  // -- it finds the earliest pick on file, period, then runs the search
-  // with whatever other filters are already set.
-  $('mdFromEarliestBtn').addEventListener('click', async () => {
-    const btn = $('mdFromEarliestBtn');
-    btn.disabled = true;
-    try {
-      const rows = await rest('picks?select=event_date&order=event_date.asc&limit=1');
-      if (!rows.length) return;
-      $('mdFrom').value = rows[0].event_date;
-      await findMissingData();
-    } catch (e) {
-      alert('Could not find the earliest date: ' + e.message);
-    } finally {
-      btn.disabled = false;
-    }
-  });
+  // Direct request 2026-08-28, first on Missing Data ("doesn't have an
+  // earliest search option for dates"), then widened to "the entire
+  // database, anywhere we look for picks/events by date" to make working
+  // through a full history backfill (or just testing) possible without
+  // scrolling a calendar back by hand -- same jump-to-beginning behavior
+  // already on the Pending Picks date filters (filterDateEarliestBtn),
+  // now applied to every Reports/Tools/Review-Queue "From date" filter
+  // that has one. Unscoped by whatever else is set (capper/sport/status/
+  // etc) on purpose, same as every earlier version of this button --
+  // finds the single earliest pick on file, fills it into the From field,
+  // then clicks that section's own existing Run/Preview/Scan button
+  // exactly as if it had been clicked by hand, so each section's own
+  // fetch/validation logic runs completely unchanged.
+  function wireEarliestDateButton(fromId, runBtnId) {
+    const earliestBtn = $(fromId + 'EarliestBtn');
+    const runBtn = $(runBtnId);
+    if (!earliestBtn || !runBtn) return; // guard in case markup isn't present in some older cached page
+    earliestBtn.addEventListener('click', async () => {
+      earliestBtn.disabled = true;
+      try {
+        const rows = await rest('picks?select=event_date&order=event_date.asc&limit=1');
+        if (!rows.length) return;
+        $(fromId).value = rows[0].event_date;
+        runBtn.click();
+      } catch (e) {
+        alert('Could not find the earliest date: ' + e.message);
+      } finally {
+        earliestBtn.disabled = false;
+      }
+    });
+  }
+  [
+    ['mdFrom', 'findMissingDataBtn'],
+    ['rqFrom', 'startReviewQueueBtn'],
+    ['analyticsFrom', 'runAnalyticsBtn'],
+    ['btbFrom', 'runBetTypeBreakdownBtn'],
+    ['haFrom', 'runHomeAwayBreakdownBtn'],
+    ['fdFrom', 'runFavDogBreakdownBtn'],
+    ['slFrom', 'runSlateBreakdownBtn'],
+    ['potdFrom', 'runPotdPerfBtn'],
+    ['pubProgressFrom', 'runPubProgressBtn'],
+    ['consensusFrom', 'runConsensusBtn'],
+    ['prFrom', 'runPublishRankBtn'],
+    ['apFrom', 'findAllPublishedBtn'],
+    ['ppFrom', 'runPublishPerfBtn'],
+    ['btFrom', 'runBacktestBtn'],
+    ['topBottomFrom', 'runTopBottomBtn'],
+    ['streaksFrom', 'runStreaksBtn'],
+    ['capperAnalysisFrom', 'runCapperAnalysisBtn'],
+    ['dupFrom', 'runDupScanBtn'],
+    ['ugFrom', 'previewUndoGradingBtn'],
+    ['usFrom', 'previewUndoSyncBtn'],
+    ['tfFrom', 'previewTotalsFillBtn'],
+    ['omFrom', 'previewOddsMatchBtn'],
+    ['pouFrom', 'previewParlayOddsUnavailableBtn'],
+    ['bupFrom', 'previewBulkUnpublishBtn']
+  ].forEach(([fromId, runBtnId]) => wireEarliestDateButton(fromId, runBtnId));
 
   // ---------- Grading corrections (bulk apply back onto exact picks) ----------
   $('toggleGradingCorrectionsBtn').addEventListener('click', () => {
@@ -20221,7 +20326,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 366; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 367; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
