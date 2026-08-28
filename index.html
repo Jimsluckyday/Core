@@ -18,6 +18,13 @@
     --stamp-amber: #a3730a;
     --stamp-gray: #6b6456;
     --line: #b9b09a;
+    /* Direct request 2026-08-28: Setup's Cappers/Teams/Prop Stats/Bet Types
+       chips went through two rounds (solid dark green -- "too loud" -- then
+       a light cream chip that blended into the page, since --paper is also
+       the page's own background). Picked from a set of rendered options:
+       "B -- the Cool Gray". */
+    --chip-bg: #dbe3e6;
+    --chip-border: #9fb3ba;
     font-family: 'Courier New', ui-monospace, monospace;
   }
 
@@ -3098,7 +3105,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // Mid-edit: show a text input pre-filled with the current name,
         // plus Save/Cancel, instead of the normal name+buttons chip.
         return `
-          <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
+          <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
             <input type="text" class="capper-edit-input" data-id="${c.id}" value="${escapeHtml(c.name)}" style="font-size:11px;padding:1px 4px;width:140px;">
             <button type="button" class="capper-save-btn" data-id="${c.id}" style="border:none;background:none;color:var(--stamp-green);cursor:pointer;font-weight:bold;padding:0;" title="Save">&#10003;</button>
             <button type="button" class="capper-cancel-edit-btn" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;font-weight:bold;padding:0;" title="Cancel">&times;</button>
@@ -3113,12 +3120,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // never changes, so scoring is untouched.
       const noTierChecked = c.no_tier_signal ? ' checked' : '';
       return `
-        <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
+        <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
           ${escapeHtml(c.name)}
-          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;text-transform:none;letter-spacing:normal;color:var(--field);cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
+          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;text-transform:none;letter-spacing:normal;color:var(--ink);cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
             <input type="checkbox" class="capper-no-tier-toggle" data-id="${c.id}"${noTierChecked} style="margin:0;"> No tiers
           </label>
-          <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--field);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
+          <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--ink);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
           <button type="button" class="capper-delete-btn" data-id="${c.id}" data-name="${escapeHtml(c.name)}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
         </span>`;
     }).join('')}</div>`;
@@ -3610,7 +3617,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       return;
     }
     wrap.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;">${betTypes.map(b => `
-      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
         <input type="checkbox" class="bet-type-futures-toggle" data-id="${b.id}" ${b.is_futures ? 'checked' : ''} />
         ${escapeHtml(b.name)}
       </span>`).join('')}</div>`;
@@ -3751,7 +3758,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:4px;">${escapeHtml(sportName)} (${bySport[sportName].length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
           ${bySport[sportName].map(t => `
-            <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
+            <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
               ${escapeHtml(t.name)}
               <button type="button" class="delete-team-btn" data-id="${t.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;">&times;</button>
             </span>`).join('')}
@@ -4695,16 +4702,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
           ${bySport[sportName].map(p => {
             if (p.id === propStatEditingId) {
               return `
-                <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
+                <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
                   <input type="text" class="propstat-edit-input" data-id="${p.id}" value="${escapeHtml(p.name)}" style="font-size:11px;padding:1px 4px;width:120px;">
                   <button type="button" class="propstat-save-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-green);cursor:pointer;font-weight:bold;padding:0;" title="Save">&#10003;</button>
                   <button type="button" class="propstat-cancel-edit-btn" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;font-weight:bold;padding:0;" title="Cancel">&times;</button>
                 </span>`;
             }
             return `
-              <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
+              <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
                 ${escapeHtml(p.name)}
-                <button type="button" class="propstat-edit-btn" data-id="${p.id}" style="border:none;background:none;color:var(--field);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
+                <button type="button" class="propstat-edit-btn" data-id="${p.id}" style="border:none;background:none;color:var(--ink);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
                 <button type="button" class="delete-propstat-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
               </span>`;
           }).join('')}
@@ -20056,7 +20063,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 360; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 361; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
