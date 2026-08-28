@@ -477,7 +477,16 @@
         <label>Search cappers</label>
         <input type="text" id="capperSearchInput" placeholder="e.g. Nicky, Gambling...">
       </div>
-      <div id="capperListWrap" style="margin-top:10px;"></div>
+      <!-- Direct request 2026-08-28: "have these sections collapsible so I
+      don't have to scroll through hundreds of cappers to get to the data
+      below it." Collapsed by default (unlike "Hide picks" elsewhere, which
+      defaults open) since the whole point here is not hitting this wall of
+      chips on every visit to Setup -- use Search cappers above if you just
+      need to find one without expanding the full list. -->
+      <button type="button" class="ghost small" id="toggleCapperListBtn" style="margin-top:6px;">Show cappers list</button>
+      <div id="capperListPanel" style="display:none;">
+        <div id="capperListWrap" style="margin-top:10px;"></div>
+      </div>
       <div id="capperBlockedPicksWrap" style="margin-top:10px;"></div>
       <div class="row">
         <div class="field">
@@ -546,7 +555,10 @@
         <label>Search teams</label>
         <input type="text" id="teamSearchInput" placeholder="e.g. Reds, Milwaukee, NHL...">
       </div>
-      <div id="teamListWrap" style="margin-top:10px;"></div>
+      <button type="button" class="ghost small" id="toggleTeamListBtn" style="margin-top:6px;">Show teams list</button>
+      <div id="teamListPanel" style="display:none;">
+        <div id="teamListWrap" style="margin-top:10px;"></div>
+      </div>
 
       <p class="stub-title" style="margin-top:24px;">Find duplicate cappers / teams</p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
@@ -584,7 +596,10 @@
         <label>Search stats</label>
         <input type="text" id="propStatSearchInput" placeholder="e.g. Strikeouts, NHL...">
       </div>
-      <div id="propStatListWrap" style="margin-top:10px;"></div>
+      <button type="button" class="ghost small" id="togglePropStatListBtn" style="margin-top:6px;">Show stats list</button>
+      <div id="propStatListPanel" style="display:none;">
+        <div id="propStatListWrap" style="margin-top:10px;"></div>
+      </div>
 
       <p class="stub-title" style="margin-top:24px;">Tournaments / events</p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
@@ -648,8 +663,13 @@
         </div>
       </div>
 
-      <p class="stub-title" style="margin-top:20px;">Currently registered</p>
-      <div id="tournamentListWrap" style="margin-top:10px;"></div>
+      <p class="stub-title" style="margin-top:20px;">
+        Currently registered
+        <button type="button" class="ghost small" id="toggleTournamentListBtn">Show tournaments list</button>
+      </p>
+      <div id="tournamentListPanel" style="display:none;">
+        <div id="tournamentListWrap" style="margin-top:10px;"></div>
+      </div>
     </div>
 
     <!-- OLD TOOLS -->
@@ -1017,12 +1037,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="exact">Specific date...</option>
           </select>
         </div>
-        <div class="field" id="filterDateExactField" style="display:none; flex: 0 0 auto; min-width: 270px;">
+        <div class="field" id="filterDateExactField" style="display:none; flex: 0 0 auto; min-width: 300px;">
           <label>&nbsp;</label>
           <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
-            <button class="ghost small" id="filterDatePrevBtn" type="button" title="Previous day">&larr;</button>
-            <input id="filterDateExact" type="date" />
-            <button class="ghost small" id="filterDateNextBtn" type="button" title="Next day">&rarr;</button>
+            <button class="ghost small" id="filterDatePrevBtn" type="button" title="Previous day">Prev day</button>
+            <input id="filterDateExact" type="date" style="width:auto;" />
+            <button class="ghost small" id="filterDateNextBtn" type="button" title="Next day">Next day</button>
             <button class="ghost small" id="filterDateEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
           </div>
         </div>
@@ -1034,12 +1054,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="exact">Specific date...</option>
           </select>
         </div>
-        <div class="field" id="filterDateEnteredExactField" style="display:none; flex: 0 0 auto; min-width: 270px;">
+        <div class="field" id="filterDateEnteredExactField" style="display:none; flex: 0 0 auto; min-width: 300px;">
           <label>&nbsp;</label>
           <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
-            <button class="ghost small" id="filterDateEnteredPrevBtn" type="button" title="Previous day">&larr;</button>
-            <input id="filterDateEnteredExact" type="date" />
-            <button class="ghost small" id="filterDateEnteredNextBtn" type="button" title="Next day">&rarr;</button>
+            <button class="ghost small" id="filterDateEnteredPrevBtn" type="button" title="Previous day">Prev day</button>
+            <input id="filterDateEnteredExact" type="date" style="width:auto;" />
+            <button class="ghost small" id="filterDateEnteredNextBtn" type="button" title="Next day">Next day</button>
             <button class="ghost small" id="filterDateEnteredEarliestBtn" type="button" title="Jump to the earliest date-entered on any pick">Earliest</button>
           </div>
         </div>
@@ -3047,7 +3067,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!wrap || !searchInput) return; // guard in case this markup isn't present in some older cached page
 
     if (!capperSearchListenerBound) {
-      searchInput.addEventListener('input', renderCapperList);
+      searchInput.addEventListener('input', () => {
+        // Typing a search only helps if the (collapsed-by-default) list is
+        // actually visible to show the filtered result in.
+        $('capperListPanel').style.display = 'block';
+        $('toggleCapperListBtn').textContent = 'Hide cappers list';
+        renderCapperList();
+      });
       capperSearchListenerBound = true;
     }
 
@@ -3069,7 +3095,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // Mid-edit: show a text input pre-filled with the current name,
         // plus Save/Cancel, instead of the normal name+buttons chip.
         return `
-          <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
+          <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
             <input type="text" class="capper-edit-input" data-id="${c.id}" value="${escapeHtml(c.name)}" style="font-size:11px;padding:1px 4px;width:140px;">
             <button type="button" class="capper-save-btn" data-id="${c.id}" style="border:none;background:none;color:var(--stamp-green);cursor:pointer;font-weight:bold;padding:0;" title="Save">&#10003;</button>
             <button type="button" class="capper-cancel-edit-btn" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;font-weight:bold;padding:0;" title="Cancel">&times;</button>
@@ -3084,13 +3110,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // never changes, so scoring is untouched.
       const noTierChecked = c.no_tier_signal ? ' checked' : '';
       return `
-        <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
+        <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
           ${escapeHtml(c.name)}
-          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;text-transform:none;letter-spacing:normal;color:var(--paper);cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
+          <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;text-transform:none;letter-spacing:normal;color:var(--field);cursor:pointer;" title="This capper never gives a tier/confidence signal -- their picks will show 'None given' instead of 'Tier 0'">
             <input type="checkbox" class="capper-no-tier-toggle" data-id="${c.id}"${noTierChecked} style="margin:0;"> No tiers
           </label>
-          <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--paper);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
-          <button type="button" class="capper-delete-btn" data-id="${c.id}" data-name="${escapeHtml(c.name)}" style="border:none;background:none;color:var(--stamp-red-on-dark);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
+          <button type="button" class="capper-edit-btn" data-id="${c.id}" style="border:none;background:none;color:var(--field);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
+          <button type="button" class="capper-delete-btn" data-id="${c.id}" data-name="${escapeHtml(c.name)}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
         </span>`;
     }).join('')}</div>`;
 
@@ -3340,10 +3366,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
       });
       $('newCapperName').value = '';
       showMsg($('capperMsg'), `Added "${escapeHtml(name)}".`, 'ok');
+      // Expand the list so the just-added capper is actually visible --
+      // otherwise "Added X" prints but the collapsed panel shows nothing
+      // changing, which reads as broken.
+      $('capperListPanel').style.display = 'block';
+      $('toggleCapperListBtn').textContent = 'Hide cappers list';
       await refreshCappers(created && created.id);
     } catch (e) {
       showMsg($('capperMsg'), e.message, 'error');
     }
+  });
+
+  $('toggleCapperListBtn').addEventListener('click', () => {
+    const panel = $('capperListPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleCapperListBtn').textContent = showing ? 'Show cappers list' : 'Hide cappers list';
   });
 
   // ---------- Main app: sports ----------
@@ -3569,7 +3607,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       return;
     }
     wrap.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;">${betTypes.map(b => `
-      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
         <input type="checkbox" class="bet-type-futures-toggle" data-id="${b.id}" ${b.is_futures ? 'checked' : ''} />
         ${escapeHtml(b.name)}
       </span>`).join('')}</div>`;
@@ -3660,7 +3698,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // Bind the search box's live-filter listener once (guarded so repeated
     // calls to renderTeamList/refreshTeams never double-bind it).
     if (searchInput && !teamSearchListenerBound) {
-      searchInput.addEventListener('input', renderTeamList);
+      searchInput.addEventListener('input', () => {
+        $('teamListPanel').style.display = 'block';
+        $('toggleTeamListBtn').textContent = 'Hide teams list';
+        renderTeamList();
+      });
       teamSearchListenerBound = true;
     }
 
@@ -3697,9 +3739,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:4px;">${escapeHtml(sportName)} (${bySport[sportName].length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
           ${bySport[sportName].map(t => `
-            <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
+            <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
               ${escapeHtml(t.name)}
-              <button type="button" class="delete-team-btn" data-id="${t.id}" style="border:none;background:none;color:var(--stamp-red-on-dark);cursor:pointer;font-weight:bold;padding:0;">&times;</button>
+              <button type="button" class="delete-team-btn" data-id="${t.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;">&times;</button>
             </span>`).join('')}
         </div>
       </div>`).join('');
@@ -3735,10 +3777,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       });
       $('teamBulkInput').value = '';
       showMsg($('teamMsg'), `Added ${newNames.length} team${newNames.length === 1 ? '' : 's'}.`, 'ok');
+      $('teamListPanel').style.display = 'block';
+      $('toggleTeamListBtn').textContent = 'Hide teams list';
       await refreshTeams();
     } catch (e) {
       showMsg($('teamMsg'), e.message, 'error');
     }
+  });
+
+  $('toggleTeamListBtn').addEventListener('click', () => {
+    const panel = $('teamListPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleTeamListBtn').textContent = showing ? 'Show teams list' : 'Hide teams list';
   });
 
   // ---------- Find duplicate cappers / teams ----------
@@ -4593,7 +4644,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!wrap || !searchInput) return;
 
     if (!propStatSearchListenerBound) {
-      searchInput.addEventListener('input', renderPropStatList);
+      searchInput.addEventListener('input', () => {
+        $('propStatListPanel').style.display = 'block';
+        $('togglePropStatListBtn').textContent = 'Hide stats list';
+        renderPropStatList();
+      });
       propStatSearchListenerBound = true;
     }
 
@@ -4628,17 +4683,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
           ${bySport[sportName].map(p => {
             if (p.id === propStatEditingId) {
               return `
-                <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
+                <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
                   <input type="text" class="propstat-edit-input" data-id="${p.id}" value="${escapeHtml(p.name)}" style="font-size:11px;padding:1px 4px;width:120px;">
                   <button type="button" class="propstat-save-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-green);cursor:pointer;font-weight:bold;padding:0;" title="Save">&#10003;</button>
                   <button type="button" class="propstat-cancel-edit-btn" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;font-weight:bold;padding:0;" title="Cancel">&times;</button>
                 </span>`;
             }
             return `
-              <span style="display:inline-flex;align-items:center;gap:4px;background:var(--field);color:var(--paper);padding:2px 8px;border-radius:12px;font-size:11px;">
+              <span style="display:inline-flex;align-items:center;gap:4px;background:var(--paper);color:var(--field);border:1.5px solid var(--field);padding:2px 8px;border-radius:12px;font-size:11px;">
                 ${escapeHtml(p.name)}
-                <button type="button" class="propstat-edit-btn" data-id="${p.id}" style="border:none;background:none;color:var(--paper);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
-                <button type="button" class="delete-propstat-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-red-on-dark);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
+                <button type="button" class="propstat-edit-btn" data-id="${p.id}" style="border:none;background:none;color:var(--field);cursor:pointer;padding:0;text-decoration:underline;font-size:10px;" title="Rename">edit</button>
+                <button type="button" class="delete-propstat-btn" data-id="${p.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;" title="Delete">&times;</button>
               </span>`;
           }).join('')}
         </div>
@@ -4700,10 +4755,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       await rest('prop_stats', { method: 'POST', body: JSON.stringify([{ name, sport_id }]) });
       $('newPropStatName').value = '';
       showMsg($('propStatMsg'), `Added "${escapeHtml(name)}".`, 'ok');
+      $('propStatListPanel').style.display = 'block';
+      $('togglePropStatListBtn').textContent = 'Hide stats list';
       await refreshPropStats();
     } catch (e) {
       showMsg($('propStatMsg'), e.message, 'error');
     }
+  });
+
+  $('togglePropStatListBtn').addEventListener('click', () => {
+    const panel = $('propStatListPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('togglePropStatListBtn').textContent = showing ? 'Show stats list' : 'Hide stats list';
   });
 
   async function refreshTournaments() {
@@ -4857,10 +4921,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       $('newTournamentStart').value = '';
       $('newTournamentEnd').value = '';
       showMsg($('tournamentMsg'), `Added "${escapeHtml(name)}".`, 'ok');
+      $('tournamentListPanel').style.display = 'block';
+      $('toggleTournamentListBtn').textContent = 'Hide tournaments list';
       await refreshTournaments();
     } catch (e) {
       showMsg($('tournamentMsg'), e.message, 'error');
     }
+  });
+
+  $('toggleTournamentListBtn').addEventListener('click', () => {
+    const panel = $('tournamentListPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleTournamentListBtn').textContent = showing ? 'Show tournaments list' : 'Hide tournaments list';
   });
 
   // ---------- Bulk refresh tournaments (export request / import results) ----------
@@ -19971,7 +20044,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 358; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 359; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
