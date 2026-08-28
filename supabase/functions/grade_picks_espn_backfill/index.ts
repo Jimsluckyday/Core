@@ -647,7 +647,7 @@ Deno.serve(async (req) => {
       let foundInAnyGame = false;
       let foundInNotFinalGame = false;
       let foundInVoidedGame = false;
-      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching'; displayName: string }[] = [];
+      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching'; displayName: string; gameId: string; startTime: string }[] = [];
       for (const g of games) {
         const completed = !!(g.status && g.status.type && g.status.type.completed);
         // Same postponed/canceled distinction as the team-game grading
@@ -685,7 +685,8 @@ Deno.serve(async (req) => {
                 }
                 allMatches.push({
                   stats: a.stats, keys: sg.keys, displayName: rawDisplayName,
-                  group: (sportNorm === 'mlb' && sgIdx === 1) ? 'pitching' : 'batting'
+                  group: (sportNorm === 'mlb' && sgIdx === 1) ? 'pitching' : 'batting',
+                  gameId: g.id, startTime: g.date
                 });
               }
             });
@@ -708,10 +709,25 @@ Deno.serve(async (req) => {
 
       let value: number | null = null;
       for (const spec of specs) {
-        const rowsInGroup = allMatches.filter(m => m.group === spec.group);
+        let rowsInGroup = allMatches.filter(m => m.group === spec.group);
         if (!rowsInGroup.length) continue;
         if (rowsInGroup.length > 1) {
-          return { grade: null, note: `"${pick.prop_player}" matched more than one ${spec.group} box score row on this date -- needs manual review.` };
+          // Direct request 2026-08-28: a position player who plays BOTH
+          // ends of a doubleheader (unlike a starting pitcher, who only
+          // ever starts one) legitimately has 2 real box score rows here.
+          // Only auto-resolves when every matched row is confirmed the
+          // SAME real person (identical full displayName -- two different
+          // people who happen to share a surname, the exact case this
+          // whole guard exists for, will have different displayNames and
+          // correctly keep falling through to manual review below) AND
+          // the pick is tagged with which game it means.
+          const sameIdentity = rowsInGroup.every(r => r.displayName === rowsInGroup[0].displayName);
+          if (sameIdentity && rowsInGroup.length === 2 && (pick.doubleheader_game === 1 || pick.doubleheader_game === 2)) {
+            const sorted = [...rowsInGroup].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+            rowsInGroup = [sorted[pick.doubleheader_game - 1]];
+          } else {
+            return { grade: null, note: `"${pick.prop_player}" matched more than one ${spec.group} box score row on this date -- needs manual review.` };
+          }
         }
         const row = rowsInGroup[0];
         if (spec.derive === 'outs') value = deriveOuts(row.keys, row.stats);

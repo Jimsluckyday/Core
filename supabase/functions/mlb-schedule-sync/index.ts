@@ -253,7 +253,28 @@ Deno.serve(async (req) => {
     // has no prop support here and continues to skip props exactly as
     // before -- this isn't a regression, just not yet extended.
     const sportNorm = normalize(sportParam);
-    const propLookup = new Map<string, { team: string; startTime: string }>();
+    // Direct request 2026-08-28, CONFIRMED REAL BUG found while investigating
+    // it: this used to be Map<name, ONE {team,startTime}> -- on a
+    // doubleheader day, a team's roster gets fetched once per game it plays
+    // (teamGamePairs has one entry per team PER GAME), so every player on
+    // that team's roster got .set() twice with two different startTimes,
+    // and the SECOND call silently overwrote the first with no error at
+    // all. Confirmed directly against real ESPN data (Milwaukee @ Kansas
+    // City doubleheader, 2026-04-04): every Brewers/Royals player's
+    // game_start_time would have silently landed on whichever game was
+    // processed last, wrong for anyone whose pick was actually for the
+    // other game. Now collects every distinct startTime a name appears
+    // under; the lookup below only trusts a single-entry match
+    // automatically, and uses doubleheader_game (see its own comment on
+    // the picks?select= query below) to pick the right one when there are
+    // two, instead of ever silently guessing.
+    const propLookup = new Map<string, { team: string; startTime: string }[]>();
+    function addPropLookupEntry(name: string, entry: { team: string; startTime: string }) {
+      const key = normalize(name);
+      const arr = propLookup.get(key) || [];
+      if (!arr.some(e => e.startTime === entry.startTime)) arr.push(entry);
+      propLookup.set(key, arr);
+    }
     // Tracked and returned in the response so a failure is always visible
     // in the output rather than silently leaving props unmatched with no
     // explanation -- confirmed necessary after a real run showed zero
@@ -296,7 +317,7 @@ Deno.serve(async (req) => {
             const roster = result.value.roster || [];
             for (const r of roster) {
               const name = r.person && r.person.fullName;
-              if (name) propLookup.set(normalize(name), { team: t.teamName, startTime: t.startTime });
+              if (name) addPropLookupEntry(name, { team: t.teamName, startTime: t.startTime });
             }
           }
           propLookupStatus = propLookup.size > 0 ? 'built' : 'built_but_empty';
@@ -345,7 +366,7 @@ Deno.serve(async (req) => {
               const players = result.value.data || [];
               for (const p of players) {
                 const name = `${p.first_name} ${p.last_name}`.trim();
-                if (name) propLookup.set(normalize(name), { team: t.teamName, startTime: t.startTime });
+                if (name) addPropLookupEntry(name, { team: t.teamName, startTime: t.startTime });
               }
             }
             propLookupStatus = propLookup.size > 0 ? 'built' : 'built_but_empty';
@@ -383,7 +404,21 @@ Deno.serve(async (req) => {
         // event id to store. Team picks populate it; props stay null until
         // this path also resolves a Rundown game.
         if (propLookup.size && pick.prop_player) {
-          const propMatch = propLookup.get(normalize(pick.prop_player));
+          const matches = propLookup.get(normalize(pick.prop_player));
+          // Direct request 2026-08-28: a player whose TEAM plays twice
+          // today (doubleheader) now has 2 real entries here instead of
+          // one silently overwriting the other (see propLookup's own
+          // comment above). Only auto-resolves when the pick is tagged
+          // AND there are exactly 2 entries -- otherwise this falls
+          // through to the same "needs manual review" note used for a
+          // genuine spelling/roster miss, never a silent guess.
+          let propMatch: { team: string; startTime: string } | null = null;
+          if (matches && matches.length === 1) {
+            propMatch = matches[0];
+          } else if (matches && matches.length === 2 && (pick.doubleheader_game === 1 || pick.doubleheader_game === 2)) {
+            const sorted = [...matches].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+            propMatch = sorted[pick.doubleheader_game - 1];
+          }
           if (propMatch) {
             const updatePayload: Record<string, unknown> = {
               game_start_time: propMatch.startTime,
@@ -400,10 +435,9 @@ Deno.serve(async (req) => {
             });
             continue;
           }
-          // Player name didn't match any active roster in today's games --
-          // mark unmatched (not silently skipped) so it surfaces in Start
-          // Time Exceptions / Odds Exceptions rather than disappearing.
-          const note = `"${pick.prop_player}" was not found on any MLB/NBA active roster playing on ${targetDate} -- may be a name spelling issue, or the player may not be active/on this team.`;
+          const note = (matches && matches.length > 1)
+            ? `"${pick.prop_player}"'s team plays more than once on ${targetDate} (possible start times: ${matches.map(m => m.startTime).join(', ')}) -- set this pick's Doubleheader game # (1 or 2) and re-run to resolve automatically, or fill in Start Time manually.`
+            : `"${pick.prop_player}" was not found on any MLB/NBA active roster playing on ${targetDate} -- may be a name spelling issue, or the player may not be active/on this team.`;
           await db(`picks?id=eq.${pick.id}`, {
             method: 'PATCH',
             body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note })

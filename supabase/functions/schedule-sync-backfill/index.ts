@@ -766,13 +766,29 @@ async function espnFetch(url: string, attempts = 2): Promise<Response> {
 }
 
 const NAME_SUFFIX_RE = /(jr|sr|ii|iii|iv)$/;
-function registerPlayerName(map: Map<string, { team: string; startTime: string }>, name: string, info: { team: string; startTime: string }) {
+// Direct request 2026-08-28, CONFIRMED REAL BUG found while investigating
+// it: this used to call map.set(norm, info) -- a single value overwritten
+// on every call. A team playing twice in one day (doubleheader) means
+// this runs once per game for the same roster, so every player's entry
+// silently landed on whichever game was registered LAST, wrong for
+// anyone whose pick was actually the other game. Confirmed directly
+// against real ESPN data (Milwaukee @ Kansas City doubleheader,
+// 2026-04-04). Now collects every distinct startTime a name is
+// registered under; the lookup below only trusts a single-entry match
+// automatically, and uses doubleheader_game to pick the right one when
+// there are two, instead of ever silently guessing.
+function addPropLookupEntry(map: Map<string, { team: string; startTime: string }[]>, key: string, info: { team: string; startTime: string }) {
+  const arr = map.get(key) || [];
+  if (!arr.some(e => e.startTime === info.startTime)) arr.push(info);
+  map.set(key, arr);
+}
+function registerPlayerName(map: Map<string, { team: string; startTime: string }[]>, name: string, info: { team: string; startTime: string }) {
   const norm = normalize(name);
-  map.set(norm, info);
+  addPropLookupEntry(map, norm, info);
   const m = norm.match(NAME_SUFFIX_RE);
   if (m) {
     const stripped = norm.slice(0, norm.length - m[0].length);
-    if (stripped.length >= 4 && !map.has(stripped)) map.set(stripped, info);
+    if (stripped.length >= 4) addPropLookupEntry(map, stripped, info);
   }
 }
 
@@ -1619,7 +1635,7 @@ Deno.serve(async (req) => {
           return matches;
         }
 
-        const propLookup = new Map<string, { team: string; startTime: string }>();
+        const propLookup = new Map<string, { team: string; startTime: string }[]>();
         const propDisplayNames: string[] = [];
         let propLookupStatus = 'not_applicable';
 
@@ -1731,7 +1747,21 @@ Deno.serve(async (req) => {
               sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
               continue;
             }
-            const propMatch = propLookup.get(normalize(pick.prop_player));
+            const propMatches = propLookup.get(normalize(pick.prop_player));
+            // Direct request 2026-08-28: a player whose team plays twice
+            // today (doubleheader) now has 2 real entries here instead of
+            // one silently overwriting the other (see registerPlayerName's
+            // own comment above). Only auto-resolves when the pick is
+            // tagged AND there are exactly 2 entries -- otherwise this
+            // falls through to a real "needs manual review" note, never a
+            // silent guess.
+            let propMatch: { team: string; startTime: string } | null = null;
+            if (propMatches && propMatches.length === 1) {
+              propMatch = propMatches[0];
+            } else if (propMatches && propMatches.length === 2 && (pick.doubleheader_game === 1 || pick.doubleheader_game === 2)) {
+              const sorted = [...propMatches].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+              propMatch = sorted[pick.doubleheader_game - 1];
+            }
             if (propMatch) {
               const updatePayload: Record<string, unknown> = {
                 game_start_time: propMatch.startTime,
@@ -1744,6 +1774,12 @@ Deno.serve(async (req) => {
                 id: pick.id, selection: `${pick.prop_player} (prop)`, start_time: propMatch.startTime,
                 prop_team: propMatch.team
               });
+              continue;
+            }
+            if (propMatches && propMatches.length > 1) {
+              const note = `"${pick.prop_player}"'s team plays more than once on ${targetDate} (possible start times: ${propMatches.map(m => m.startTime).join(', ')}) -- set this pick's Doubleheader game # (1 or 2) and re-run to resolve automatically, or fill in Start Time manually.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
               continue;
             }
             const propSuggestion = suggestClosestPlayer(pick.prop_player, propDisplayNames);
