@@ -14678,23 +14678,94 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   });
 
-  function renderVerifyUploadResults(found, missing, unresolvable) {
+  // Direct request 2026-08-28: "I'd like a scenario where we don't need
+  // secondary validation of the secondary validation that something was
+  // missed." What actually happened twice in a row: a synthesized parlay
+  // summary ("Parlay #1 - 4 Legs") got reported as a bare missing row
+  // that isn't real/re-pasteable on its own, AND its own individual legs
+  // got SEPARATELY reported as their own missing straight picks -- easy
+  // to accidentally double-import if both get re-pasted, and required a
+  // manual cross-check against the original source file to untangle.
+  // Rebuilt so the tool does that cross-referencing itself: every leg is
+  // grouped under its own parlay (never listed standalone), and each
+  // parlay gets a clear, specific verdict instead of a bare true/false --
+  // only the unambiguous case (every one of its real legs is genuinely
+  // absent) gets an auto-generated, directly re-pasteable recovery block;
+  // anything with a mix of found/missing legs is flagged for a manual
+  // database-level look instead of ever being offered as something to
+  // blindly re-import (that's exactly how a real leg would end up
+  // duplicated).
+  function classifyParlay(summary, isFound) {
+    const legs = summary.parlayMemberLegs || [];
+    const legStatuses = legs.map(v => ({ v, found: isFound(v) }));
+    const parentFound = isFound(summary);
+    const missingLegs = legStatuses.filter(l => !l.found);
+    let status;
+    if (parentFound && missingLegs.length === 0) status = 'complete';
+    else if (!parentFound && missingLegs.length === legs.length && legs.length > 0) status = 'fully_missing';
+    else if (!parentFound && missingLegs.length === 0) status = 'orphaned_legs';
+    else if (!parentFound) status = 'partially_missing';
+    else status = 'needs_review';
+    return { summary, legStatuses, parentFound, status };
+  }
+
+  function renderVerifyUploadResults(standaloneFound, standaloneMissing, unresolvable, parlayReports) {
     const wrap = $('verifyUploadWrap');
-    const totalChecked = found.length + missing.length;
     const nameOf = (list, id) => (list.find(x => String(x.id) === String(id)) || {}).name || '';
-    const summaryHtml = `<div style="background:${missing.length > 0 ? 'var(--stamp-red)' : 'var(--stamp-green)'};color:var(--paper);font-size:14px;font-weight:bold;padding:12px;border-radius:3px;margin-bottom:12px;">
-        ${totalChecked} pick${totalChecked === 1 ? '' : 's'} checked against the database &rarr; <strong>${found.length}</strong> found${missing.length > 0 ? `, <strong>${missing.length}</strong> MISSING -- not in the database at all` : ' -- everything checkable from this file is accounted for'}
+    const legLabel = v => {
+      const bt = nameOf(betTypes, v.resolved.bet_type_id);
+      const parts = [v.resolved.prop_player, v.resolved.prop_stat, v.resolved.selection, v.resolved.line !== null && v.resolved.line !== undefined ? `(${v.resolved.line})` : ''].filter(Boolean);
+      return `${bt}: ${parts.join(' ')}`;
+    };
+    const parlaySafe = parlayReports.filter(p => p.status === 'fully_missing');
+    const parlayReviewNeeded = parlayReports.filter(p => p.status === 'orphaned_legs' || p.status === 'partially_missing' || p.status === 'needs_review');
+    const parlayComplete = parlayReports.filter(p => p.status === 'complete');
+
+    const totalMissingCount = standaloneMissing.length + parlaySafe.reduce((n, p) => n + p.legStatuses.length, 0);
+    const totalFoundCount = standaloneFound.length + parlayComplete.length;
+    const needsAttention = totalMissingCount > 0 || parlayReviewNeeded.length > 0;
+    const summaryHtml = `<div style="background:${needsAttention ? 'var(--stamp-red)' : 'var(--stamp-green)'};color:var(--paper);font-size:14px;font-weight:bold;padding:12px;border-radius:3px;margin-bottom:12px;">
+        <strong>${totalFoundCount}</strong> confirmed in the database${totalMissingCount > 0 ? `, <strong>${totalMissingCount}</strong> genuinely missing (safe to re-import, see below)` : ''}${parlayReviewNeeded.length > 0 ? `, <strong>${parlayReviewNeeded.length}</strong> parlay${parlayReviewNeeded.length === 1 ? '' : 's'} need${parlayReviewNeeded.length === 1 ? 's' : ''} a manual look -- NOT safe to re-import as-is` : ''}${!needsAttention ? ' -- everything checkable from this file is accounted for' : ''}
       </div>`;
     const unresolvableHtml = unresolvable.length
       ? `<div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${unresolvable.length} row${unresolvable.length === 1 ? '' : 's'} couldn't be checked at all (capper/sport/bet type not recognized, or missing a date/selection) -- these need fixing before they can be compared against anything:
           <ul style="margin:4px 0 0 18px;">${unresolvable.map(v => `<li>${escapeHtml(v.errors.join('; '))}</li>`).join('')}</ul>
         </div>`
       : '';
-    if (!missing.length) {
-      wrap.innerHTML = summaryHtml + unresolvableHtml + `<div class="msg ok">Every checkable pick from this file is already in the database.</div>`;
+
+    // Parlays needing a human look -- deliberately NOT offered as
+    // something to re-import (see classifyParlay's own comment on why a
+    // mixed found/missing leg set can't be safely auto-recovered via a
+    // plain re-paste).
+    const reviewHtml = parlayReviewNeeded.length
+      ? `<div style="background:var(--stamp-amber);color:var(--ink);padding:10px;border-radius:3px;margin-bottom:12px;">
+          <strong>&#9888; ${parlayReviewNeeded.length} parlay${parlayReviewNeeded.length === 1 ? '' : 's'} need${parlayReviewNeeded.length === 1 ? 's' : ''} a manual database look -- do not re-import these:</strong>
+          <ul style="margin:6px 0 0 18px;font-size:11px;font-weight:normal;">
+            ${parlayReviewNeeded.map(p => {
+              const capperName = nameOf(cappers, p.summary.resolved.capper_id);
+              const reasonText = p.status === 'orphaned_legs'
+                ? `every one of its ${p.legStatuses.length} real legs already exists in the database, but the parlay itself doesn't -- the legs likely got linked to the wrong parent (same class of issue already fixed for Cody Covers Spreads/Bankroll Bill). Needs a targeted database fix, not a re-import, or you'll create duplicate legs.`
+                : p.status === 'partially_missing'
+                  ? `${p.legStatuses.filter(l => !l.found).length} of its ${p.legStatuses.length} legs are missing and ${p.legStatuses.filter(l => l.found).length} already exist -- re-pasting the missing ones would create a NEW incomplete parlay instead of completing the real one. Needs a targeted fix linking the missing legs to the existing ones.`
+                  : `the parlay itself is on file, but not all of its expected legs are -- worth a look in case a leg was removed or replaced.`;
+              return `<li><strong>${escapeHtml(capperName)}</strong>, ${escapeHtml(p.summary.resolved.event_date || '')}, ${escapeHtml(p.summary.resolved.selection || '')}: ${reasonText}
+                <ul style="margin:2px 0 0 18px;">${p.legStatuses.map(l => `<li>${l.found ? '✓ in DB' : '✗ missing'} -- ${escapeHtml(legLabel(l.v))}</li>`).join('')}</ul>
+              </li>`;
+            }).join('')}
+          </ul>
+        </div>`
+      : '';
+
+    if (!needsAttention && !unresolvable.length) {
+      wrap.innerHTML = summaryHtml + `<div class="msg ok">Every checkable pick from this file is already in the database.</div>`;
       return;
     }
-    const rows = missing.map(v => `<tr>
+    if (!needsAttention) {
+      wrap.innerHTML = summaryHtml + unresolvableHtml;
+      return;
+    }
+
+    const standaloneRowsHtml = standaloneMissing.map(v => `<tr>
         <td>${escapeHtml(v.resolved.event_date || '')}</td>
         <td>${escapeHtml(nameOf(cappers, v.resolved.capper_id))}</td>
         <td>${escapeHtml(nameOf(sports, v.resolved.sport_id))}</td>
@@ -14704,17 +14775,50 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${escapeHtml(v.resolved.prop_player || '')}</td>
         <td>${escapeHtml(v.resolved.prop_stat || '')}</td>
       </tr>`).join('');
-    wrap.innerHTML = summaryHtml + unresolvableHtml + `
-      <table class="picks-table">
-        <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Prop player</th><th>Prop stat</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <button id="exportMissingUploadBtn" style="margin-top:10px;">Export missing rows to CSV</button>`;
-    $('exportMissingUploadBtn').addEventListener('click', () => {
-      const cols = ['Date', 'Capper', 'Sport', 'Bet type', 'Selection', 'Line', 'Prop player', 'Prop stat'];
-      const csvRows = missing.map(v => [v.resolved.event_date, nameOf(cappers, v.resolved.capper_id), nameOf(sports, v.resolved.sport_id), nameOf(betTypes, v.resolved.bet_type_id), v.resolved.selection || '', v.resolved.line ?? '', v.resolved.prop_player || '', v.resolved.prop_stat || '']);
-      downloadCsv(`missing-picks-${new Date().toISOString().split('T')[0]}.csv`, cols, csvRows);
+    // Every fully-missing parlay's REAL leg rows, each tagged with its own
+    // parlay number, scoped per-parlay via a simple incrementing counter
+    // so multiple recovered parlays in the same export never collide with
+    // each other once re-pasted together.
+    const parlayLegRows = [];
+    parlaySafe.forEach((p, i) => {
+      const localNumber = i + 1;
+      p.legStatuses.forEach(l => {
+        parlayLegRows.push({ v: l.v, parlayNumber: localNumber });
+      });
     });
+    const tableHtml = (standaloneMissing.length || parlaySafe.length)
+      ? `<table class="picks-table">
+          <thead><tr><th></th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Prop player</th><th>Prop stat</th></tr></thead>
+          <tbody>
+            ${standaloneRowsHtml}
+            ${parlaySafe.map((p, i) => `<tr style="background:rgba(45,106,79,0.08);">
+              <td colspan="9" style="font-size:11px;">Parlay recovery group ${i + 1} of ${parlaySafe.length}: <strong>${escapeHtml(nameOf(cappers, p.summary.resolved.capper_id))}</strong>, ${escapeHtml(p.summary.resolved.event_date || '')} -- all ${p.legStatuses.length} real legs below are genuinely missing, safe to recreate together</td>
+            </tr>` + p.legStatuses.map(l => `<tr>
+              <td></td>
+              <td>${escapeHtml(l.v.resolved.event_date || '')}</td>
+              <td>${escapeHtml(nameOf(cappers, l.v.resolved.capper_id))}</td>
+              <td>${escapeHtml(nameOf(sports, l.v.resolved.sport_id))}</td>
+              <td>${escapeHtml(nameOf(betTypes, l.v.resolved.bet_type_id))}</td>
+              <td>${escapeHtml(l.v.resolved.selection || '')}</td>
+              <td>${l.v.resolved.line ?? ''}</td>
+              <td>${escapeHtml(l.v.resolved.prop_player || '')}</td>
+              <td>${escapeHtml(l.v.resolved.prop_stat || '')}</td>
+            </tr>`).join('')).join('')}
+          </tbody>
+        </table>
+        <button id="exportMissingUploadBtn" style="margin-top:10px;">Export missing rows to CSV</button>
+        <div style="font-size:10px;color:var(--ink-soft);margin-top:4px;">This export is directly safe to paste into Bulk Import as-is -- standalone picks import normally, and each recovered parlay's legs carry a real <code>parlay</code> tag so they'll link back together correctly instead of importing as bare, leg-less picks.</div>`
+      : '';
+
+    wrap.innerHTML = summaryHtml + reviewHtml + unresolvableHtml + tableHtml;
+    if ($('exportMissingUploadBtn')) {
+      $('exportMissingUploadBtn').addEventListener('click', () => {
+        const cols = ['Date', 'Capper', 'Sport', 'Bet type', 'Selection', 'Line', 'Prop player', 'Prop stat', 'Parlay'];
+        const standaloneCsvRows = standaloneMissing.map(v => [v.resolved.event_date, nameOf(cappers, v.resolved.capper_id), nameOf(sports, v.resolved.sport_id), nameOf(betTypes, v.resolved.bet_type_id), v.resolved.selection || '', v.resolved.line ?? '', v.resolved.prop_player || '', v.resolved.prop_stat || '', '']);
+        const parlayCsvRows = parlayLegRows.map(({ v, parlayNumber }) => [v.resolved.event_date, nameOf(cappers, v.resolved.capper_id), nameOf(sports, v.resolved.sport_id), nameOf(betTypes, v.resolved.bet_type_id), v.resolved.selection || '', v.resolved.line ?? '', v.resolved.prop_player || '', v.resolved.prop_stat || '', parlayNumber]);
+        downloadCsv(`missing-picks-${new Date().toISOString().split('T')[0]}.csv`, cols, [...standaloneCsvRows, ...parlayCsvRows]);
+      });
+    }
   }
 
   async function runVerifyUpload() {
@@ -14753,9 +14857,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const maxDate = dates.reduce((a, b) => (a > b ? a : b));
       const existing = await restAllPages(`picks?select=id,capper_id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,doubleheader_game&capper_id=in.(${capperIds.join(',')})&event_date=gte.${minDate}&event_date=lte.${maxDate}&order=id.asc`);
       const existingKeys = new Set(existing.map(p => dupKey(p)));
-      const found = resolvable.filter(v => existingKeys.has(dupKey(v.resolved)));
-      const missing = resolvable.filter(v => !existingKeys.has(dupKey(v.resolved)));
-      renderVerifyUploadResults(found, missing, unresolvable);
+      const isFound = v => existingKeys.has(dupKey(v.resolved));
+
+      // Every leg gets grouped under its own parlay instead of ever being
+      // listed as its own standalone row -- see classifyParlay's own
+      // comment for why this is the actual fix, not just a cosmetic
+      // grouping choice.
+      const parlaySummaries = resolvable.filter(v => v.isSynthesizedParlaySummary);
+      const legSet = new Set();
+      parlaySummaries.forEach(summary => (summary.parlayMemberLegs || []).forEach(legV => legSet.add(legV)));
+      const standaloneRows = resolvable.filter(v => !v.isSynthesizedParlaySummary && !legSet.has(v));
+      const parlayReports = parlaySummaries.map(summary => classifyParlay(summary, isFound));
+
+      const standaloneFound = standaloneRows.filter(isFound);
+      const standaloneMissing = standaloneRows.filter(v => !isFound(v));
+      renderVerifyUploadResults(standaloneFound, standaloneMissing, unresolvable, parlayReports);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">Could not check the database: ${e.message}</div>`;
     } finally {
@@ -19642,6 +19758,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         parlayNumber: null,
         isSynthesizedParlaySummary: true,
         parlayLocalNumber: number,
+        // Direct request 2026-08-28: Verify Upload needs to trace a
+        // synthesized parlay summary back to its own real leg rows --
+        // without this, a "missing parlay" gets reported as a bare
+        // one-line summary that isn't a real, re-pasteable pick, AND its
+        // individual legs get separately (and confusingly) reported as
+        // their own "missing" straight picks, risking a double-import if
+        // both get re-pasted. Never touched by the real import path --
+        // preview/report-only bookkeeping.
+        parlayMemberLegs: members.map(m => m.v),
         resolved: {
           event_date: template.event_date,
           capper_id: template.capper_id,
@@ -20584,7 +20709,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 370; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 371; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
