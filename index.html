@@ -530,8 +530,11 @@
       might get added without remembering to check this box up front. -->
       <div style="font-size:10px;color:var(--ink-soft);margin:10px 0 4px;">
         Long-term futures bet types (checked = tracked by the pending-futures banner above the tabs):
+        <button type="button" class="ghost small" id="toggleBetTypeListBtn">Show bet types list</button>
       </div>
-      <div id="betTypeFuturesListWrap"></div>
+      <div id="betTypeListPanel" style="display:none;">
+        <div id="betTypeFuturesListWrap"></div>
+      </div>
 
       <p class="stub-title" style="margin-top:24px;">Teams</p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
@@ -3655,10 +3658,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       $('newBetTypeUsesProp').checked = false;
       $('newBetTypeUsesMatchup').checked = false;
       showMsg($('capperMsg'), `Added "${escapeHtml(name)}".`, 'ok');
+      $('betTypeListPanel').style.display = 'block';
+      $('toggleBetTypeListBtn').textContent = 'Hide bet types list';
       await refreshBetTypes(created && created.id);
     } catch (e) {
       showMsg($('capperMsg'), e.message, 'error');
     }
+  });
+
+  $('toggleBetTypeListBtn').addEventListener('click', () => {
+    const panel = $('betTypeListPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleBetTypeListBtn').textContent = showing ? 'Show bet types list' : 'Hide bet types list';
   });
 
   // ---------- Main app: tournaments / events ----------
@@ -20044,7 +20056,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 359; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 360; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
