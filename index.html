@@ -19257,7 +19257,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // unchecked doesn't avoid a duplicate -- it just skips linking
       // that leg into the parlay at all, which is the actual risk here.
       const dupNote = v.dupWarning
-        ? `<div style="color:var(--stamp-amber);font-weight:bold;">⚠ ${escapeHtml(v.dupWarning)}${v.parlayMemberships ? ' -- checked by default: this is a parlay leg, and the import step already reuses the existing pick instead of duplicating it, so unchecking this would only drop it from the parlay' : ''}</div>`
+        ? `<div style="color:var(--stamp-amber);font-weight:bold;">⚠ ${escapeHtml(v.dupWarning)}${v.parlayMemberships ? ' -- checked by default: this is a parlay leg, and the import step already reuses the existing pick instead of duplicating it, so unchecking this would only drop it from the parlay' : (v.dupWarningTrusted ? ' -- checked by default: a parlay-tagged leg elsewhere in this paste shares this exact pick, so this is very likely the same selection posted both as its own straight bet and reused in a parlay, not a paste mistake' : '')}</div>`
         : '';
       // Informational only, deliberately NOT styled as a warning and NOT
       // added to v.warnings -- see applyTierFromHistory's own comment for
@@ -19286,12 +19286,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // effect. Shown unchecked and marked as informational rather than
       // offered as something to opt in or out of.
       // See the dupNote comment just above for why parlay legs (v.
-      // parlayMemberships) are the one case where a dupWarning still
-      // defaults to CHECKED -- findExistingLeg() at import time already
-      // makes this safe, and leaving it unchecked only breaks the parlay.
+      // parlayMemberships) and rows sharing a key with a parlay leg
+      // elsewhere in the paste (v.dupWarningTrusted) are the cases where
+      // a dupWarning still defaults to CHECKED -- findExistingLeg() at
+      // import time already makes a real parlay leg safe, and a straight
+      // bet that's genuinely also used as a parlay leg elsewhere is a
+      // normal capper pattern, not a paste mistake.
       const checkboxCell = v.isSynthesizedParlaySummary
         ? '<span title="Auto-created when its legs are imported below -- nothing to check here">—</span>'
-        : (isSelectable ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${(!v.dupWarning || v.parlayMemberships) ? 'checked' : ''} />`
+        : (isSelectable ? `<input type="checkbox" class="bulkImportRowCb" data-index="${i}" ${(!v.dupWarning || v.parlayMemberships || v.dupWarningTrusted) ? 'checked' : ''} />`
           : (isHardInvalid ? '✗' : '⚠'));
       const summaryNote = v.isSynthesizedParlaySummary
         ? '<div style="color:var(--ink-soft);font-style:italic;">Preview only -- created automatically from its legs at import time.</div>' : '';
@@ -19572,8 +19575,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       if (!seenInBatch.has(key)) seenInBatch.set(key, []);
       seenInBatch.get(key).push(v);
     });
+    // CONFIRMED REAL BUG, direct report 2026-08-27: "I just upload them all
+    // and it shows no duplicates after." Traced against a real CSV --
+    // e.g. Texas Rangers Moneyline entered once as its own straight pick
+    // AND again as a leg of Parlay 1 and Parlay 6 (completely normal --
+    // a capper posts a straight pick and separately builds parlays that
+    // reuse that same leg). The two parlay-tagged copies already collapse
+    // together and default to checked (parlayMemberships), but the
+    // STRAIGHT copy has no parlay tag of its own, so it had no way to
+    // know the reason it "appears more than once" is a legitimate parlay
+    // leg sitting right next to it rather than a paste mistake -- it
+    // defaulted to unchecked like a genuine accidental duplicate would.
+    // Fixed by trusting the WHOLE group once any member of it is
+    // parlay-tagged, not just the parlay-tagged member itself.
     seenInBatch.forEach(group => {
-      if (group.length > 1) group.forEach(v => { v.dupWarning = 'Appears more than once in this same paste'; });
+      if (group.length > 1) {
+        const hasParlayMember = group.some(v => v.parlayNumber);
+        group.forEach(v => {
+          v.dupWarning = 'Appears more than once in this same paste';
+          if (hasParlayMember) v.dupWarningTrusted = true;
+        });
+      }
     });
 
     const capperIds = Array.from(new Set(validRows.map(v => v.resolved.capper_id).filter(id => id !== null && id !== undefined)));
@@ -19909,7 +19931,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 354; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 355; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
