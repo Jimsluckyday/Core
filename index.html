@@ -933,6 +933,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <option value="away">Away</option>
           </select>
         </div>
+        <div class="field" id="doubleheaderGameField">
+          <label>Doubleheader game # (optional)</label>
+          <select id="pickDoubleheaderGame">
+            <option value="">— Not a doubleheader —</option>
+            <option value="1">Game 1</option>
+            <option value="2">Game 2</option>
+          </select>
+          <div style="font-size:10px;color:var(--ink-soft);margin-top:2px;">Only set this when the capper's own message says Game 1/Game 2 (or similar) for the same two teams playing twice today -- lets schedule sync/grading tell the two games apart automatically instead of flagging for manual review.</div>
+        </div>
         <div class="field">
           <label>Event / tournament (optional)</label>
           <select id="pickEventName">
@@ -4386,7 +4395,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const HEADERS = ['Date entry (posted date -- blank = repeat above)', 'Event Date (only if different from above)',
         'Capper', 'Sport', 'Bet Type', 'Team 1 / Player', 'Team 2 / Opponent', 'Prop Player', 'Prop Stat', 'Prop Team',
         'Line', 'Odds', 'Raw Unit Size', 'Parlay', 'Event Name', 'Home/Away', 'Notes',
-        'Date Entered', 'Date', 'Selection', 'Capper Check', 'Sport Check', 'Bet Type Check', 'Team 1 Check', 'Team 2 Check', 'Prop Team Check'];
+        'Date Entered', 'Date', 'Selection', 'Capper Check', 'Sport Check', 'Bet Type Check', 'Team 1 Check', 'Team 2 Check', 'Prop Team Check',
+        // Direct request 2026-08-28: "we need to catch this upstream" --
+        // capture whether a pick is Game 1 or Game 2 of a same-day
+        // doubleheader at entry time, since the transcriber knows what the
+        // capper's own message said but has no way to know the sport's
+        // schedule. Deliberately appended at the very end (column 27)
+        // rather than inserted into the typed block above -- every
+        // formula/validation in this file is anchored to a FIXED column
+        // number for Team 1/Team 2/Prop Team/etc, and inserting a column
+        // in the middle would shift all of them, the exact class of bug
+        // the two prior column reorders this feature went through had to
+        // carefully re-verify against. Appending here changes nothing
+        // about any existing column.
+        'Doubleheader Game # (1 or 2 -- leave blank unless the same two teams play twice today)'];
       HEADERS.forEach((h, i) => {
         const c = ws.getCell(1, i + 1);
         c.value = h;
@@ -4395,7 +4417,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         c.border = TEMPLATE_BORDER;
       });
-      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 16, 14, 16, 8, 8, 16, 8, 16, 10, 24, 13, 12, 20, 14, 12, 14, 14, 14, 16];
+      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 16, 14, 16, 8, 8, 16, 8, 16, 10, 24, 13, 12, 20, 14, 12, 14, 14, 14, 16, 14];
       WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
       // Example illustrates the posted-date fill-down AND a real two-sided
@@ -4641,6 +4663,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 4).dataValidation = newEntryWarning('Sports', SPORTS_LAST, 'sport');
         ws.getCell(row, 5).dataValidation = newEntryWarning('BetTypes', BETTYPES_LAST, 'bet type');
         ws.getCell(row, 16).dataValidation = { type: 'list', allowBlank: true, formulae: ['"home,away"'] };
+        // Doubleheader Game # -- see HEADERS' own comment for why this
+        // lives at column 27 instead of the typed block above. Same
+        // input-cell styling as every other typed column, just applied
+        // directly here instead of inside the col<=17 loop above.
+        ws.getCell(row, 27).font = TEMPLATE_INPUT_FONT;
+        ws.getCell(row, 27).border = TEMPLATE_BORDER;
+        ws.getCell(row, 27).dataValidation = { type: 'list', allowBlank: true, formulae: ['"1,2"'] };
         // Soft (warning, not blocking) team-name check -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
         // typed for non-team bets, so rejecting anything off the list
@@ -6035,6 +6064,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const oddsVal = $('pickOpeningOdds').value;
     const closingOddsVal = $('pickClosingOdds').value;
     const homeAway = isProp ? '' : $('pickHomeAway').value;
+    const doubleheaderGameVal = $('pickDoubleheaderGame').value;
     const pickTierVal = $('pickTier').value;
     const gameStartTimeVal = $('pickGameStartTime').value; // datetime-local string, or ''
     const editingId = $('editingPickId').value;
@@ -6107,6 +6137,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       opening_odds: oddsVal ? Number(oddsVal) : null,
       closing_odds: closingOddsVal ? Number(closingOddsVal) : null,
       home_away: homeAway || null,
+      doubleheader_game: doubleheaderGameVal ? Number(doubleheaderGameVal) : null,
       event_name: $('pickEventName').value.trim() || null,
       pick_tier: Number(pickTierVal),
       raw_unit_size: normalizeUnitSize($('pickRawUnitSize').value) || null,
@@ -6179,6 +6210,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickOpeningOdds').value = '';
         $('pickClosingOdds').value = '';
         $('pickHomeAway').value = '';
+        $('pickDoubleheaderGame').value = '';
         $('pickEventName').value = '';
         $('pickNotes').value = '';
         $('propPlayer').value = '';
@@ -6216,6 +6248,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickOpeningOdds').value = '';
         $('pickClosingOdds').value = '';
         $('pickHomeAway').value = '';
+        $('pickDoubleheaderGame').value = '';
         $('pickEventName').value = '';
         $('pickNotes').value = '';
         $('propPlayer').value = '';
@@ -6313,6 +6346,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickOpeningOdds').value = '';
     $('pickClosingOdds').value = '';
     $('pickHomeAway').value = '';
+    $('pickDoubleheaderGame').value = '';
     $('pickEventName').value = '';
     $('pickNotes').value = '';
     $('propPlayer').value = '';
@@ -6463,6 +6497,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickOpeningOdds').value = p.opening_odds ?? '';
     $('pickClosingOdds').value = p.closing_odds ?? '';
     $('pickHomeAway').value = p.home_away || '';
+    $('pickDoubleheaderGame').value = p.doubleheader_game ? String(p.doubleheader_game) : '';
     populatePickTournamentDropdown(p.event_name || '');
     $('pickEventName').value = p.event_name || '';
     $('pickTier').value = String(p.pick_tier || 0);
@@ -14348,9 +14383,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // one group. legSig, when provided, is a sorted signature built from the
   // parlay's ACTUAL linked legs instead, so two parlays only match when
   // they genuinely contain the same games.
+  // Direct request 2026-08-28: a genuine Game 1 and Game 2 straight bet
+  // (same two teams, same selection/line) used to be indistinguishable to
+  // this key -- always flagged as a "duplicate" even though they're two
+  // real, separate picks. doubleheader_game (now captured at entry time,
+  // see validateBulkRow/Add Pick's own comment) is included here so the
+  // two no longer collide once it's set; a pick with no doubleheader_game
+  // set (the overwhelming majority) is completely unaffected, since
+  // `undefined`/`null` both join identically either way.
   function dupKey(p, legSig) {
     if (legSig !== undefined) return [p.capper_id, p.event_date, 'PARLAY_LEGS', legSig].join('|');
-    return [p.capper_id, p.event_date, p.sport_id, p.bet_type_id, p.selection, p.line, p.prop_player, p.prop_stat].join('|');
+    return [p.capper_id, p.event_date, p.sport_id, p.bet_type_id, p.selection, p.line, p.prop_player, p.prop_stat, p.doubleheader_game || null].join('|');
   }
 
   async function runDupScan() {
@@ -14361,7 +14404,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const wrap = $('dupWrap');
     wrap.innerHTML = '<div class="empty-state">Scanning...</div>';
 
-    let query = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,result,created_at,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
+    let query = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,doubleheader_game,result,created_at,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
     if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
@@ -19047,6 +19090,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const homeAway = (row.home_away || '').toLowerCase();
     if (homeAway && homeAway !== 'home' && homeAway !== 'away') errors.push('home_away must be "home", "away", or blank');
 
+    // Direct request 2026-08-28: "we need to catch this upstream... I need
+    // a way to identify it in uploads" -- the person transcribing a pick has
+    // no way to know the sport's schedule, but DOES know what the capper's
+    // own message said (e.g. "Yankees ML Game 2"). Capturing that as a real
+    // field here (rather than free-text in Notes) lets dupKey, schedule
+    // sync, and grading all use it downstream instead of flagging every
+    // doubleheader pick for manual review every time.
+    const doubleheaderGameRaw = (row.doubleheader_game || row.doubleheader || row.game_number || '').trim();
+    let doubleheaderGame = null;
+    if (doubleheaderGameRaw) {
+      if (doubleheaderGameRaw !== '1' && doubleheaderGameRaw !== '2') {
+        errors.push(`doubleheader_game column must be blank, 1, or 2 (got "${doubleheaderGameRaw}")`);
+      } else {
+        doubleheaderGame = Number(doubleheaderGameRaw);
+      }
+    }
+
     // "Parlay" column -- a plain number, not yes/no. The SAME selection can
     // legitimately appear on more than one row with a different number here
     // (one pick belonging to more than one parlay) -- that gets collapsed
@@ -19130,6 +19190,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         selection: row.selection,
         line: row.line ? Number(row.line) : null,
         home_away: homeAway || null,
+        doubleheader_game: doubleheaderGame,
         opening_odds: row.odds ? Number(row.odds) : null,
         event_name: row.event_name || autoEventName || null,
         prop_player: propPlayerRaw || null,
@@ -19192,7 +19253,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     const legKey = v => [v.resolved.capper_id, v.resolved.event_date, v.resolved.sport_id,
       v.resolved.bet_type_id, v.resolved.selection, v.resolved.line,
-      v.resolved.prop_player, v.resolved.prop_stat].join('|');
+      v.resolved.prop_player, v.resolved.prop_stat, v.resolved.doubleheader_game || null].join('|');
     const groups = new Map();
     for (const v of parlayRows) {
       const key = legKey(v);
@@ -19271,6 +19332,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           selection: `Parlay #${number} - ${members.length} Leg${members.length === 1 ? '' : 's'}`,
           line: null,
           home_away: null,
+          doubleheader_game: null,
           opening_odds: allSame ? oddsValues[0] : null,
           event_name: null,
           prop_player: null,
@@ -19833,7 +19895,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const maxDate = dates.reduce((a, b) => (a > b ? a : b));
 
     try {
-      const existing = await restAllPages(`picks?select=id,capper_id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat&capper_id=in.(${capperIds.join(',')})&event_date=gte.${minDate}&event_date=lte.${maxDate}&order=id.asc`);
+      const existing = await restAllPages(`picks?select=id,capper_id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,doubleheader_game&capper_id=in.(${capperIds.join(',')})&event_date=gte.${minDate}&event_date=lte.${maxDate}&order=id.asc`);
       const existingKeys = new Set(existing.map(dupKey));
       validRows.forEach(v => {
         if (!v.dupWarning && existingKeys.has(dupKey(v.resolved))) {
@@ -20159,7 +20221,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 365; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 366; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');

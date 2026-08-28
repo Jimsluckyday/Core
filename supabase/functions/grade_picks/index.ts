@@ -318,7 +318,7 @@ Deno.serve(async (req) => {
         }
 
         const picks = await db(
-          `picks?select=id,selection,line,bet_type_id,bet_types(name)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending`
+          `picks?select=id,selection,line,bet_type_id,doubleheader_game,bet_types(name)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending`
         );
         console.log(`[GRADE TIMING] ${ourSport.name} -- fetched ${picks.length} pending picks at t=${Date.now() - t0}ms`);
 
@@ -367,6 +367,24 @@ Deno.serve(async (req) => {
             const matches = findMatchingGames(pick.selection);
             candidateGames = matches.map(m => m.game);
             if (matches.length === 1) matchedIsHome = matches[0].isHome;
+          }
+
+          // Direct request 2026-08-28: "we need to catch this upstream... I
+          // need a way to identify it in uploads." admin.html's entry
+          // template/Bulk Import/Add Pick form now capture doubleheader_game
+          // (1 or 2) at data-entry time -- the person entering the pick has
+          // no way to know the sport's schedule, but does know what the
+          // capper's own message said. When exactly 2 real games matched the
+          // same matchup on the same date (a genuine doubleheader, not a
+          // data error) and the pick is tagged, sort by start time and grade
+          // against whichever one the tag names instead of flagging
+          // ambiguous. Requires EXACTLY 2 candidates -- 3+ still needs a
+          // human look.
+          if (candidateGames.length === 2 && (pick.doubleheader_game === 1 || pick.doubleheader_game === 2)) {
+            const sorted = [...candidateGames].sort(
+              (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+            );
+            candidateGames = [sorted[pick.doubleheader_game - 1]];
           }
 
           if (candidateGames.length !== 1) {

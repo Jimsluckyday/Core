@@ -1693,7 +1693,7 @@ Deno.serve(async (req) => {
         }
 
         const allPicks = await db(
-          `picks?select=id,selection,prop_player,prop_team,bet_type_id,event_name,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+          `picks?select=id,selection,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
         );
         const picks = (allPicks || []).filter((p: any) => {
           const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
@@ -1774,6 +1774,30 @@ Deno.serve(async (req) => {
             const matches = findMatchingGames(pick.selection);
             candidateGames = matches.map(m => m.game);
             if (matches.length === 1) matchedIsHome = matches[0].isHome;
+          }
+
+          // Direct request 2026-08-28: "we need to catch this upstream... I
+          // need a way to identify it in uploads." admin.html's entry
+          // template/Bulk Import/Add Pick form now capture doubleheader_game
+          // (1 or 2) as a real field at data-entry time. When a pick is
+          // tagged this way and exactly 2 real games matched the same
+          // matchup on the same date (a genuine doubleheader, not a data
+          // error), sort them by start time and treat whichever one the tag
+          // names as the single confirmed match, instead of falling through
+          // to "needs manual review" below. Requires EXACTLY 2 candidates --
+          // 3+ still needs a human look rather than a guess. Deliberately
+          // placed before the Draw No Bet / isAmbiguousSlash branch just
+          // below so a doubleheader Draw No Bet pick benefits from this too.
+          if (candidateGames.length === 2 && (pick.doubleheader_game === 1 || pick.doubleheader_game === 2)) {
+            const sorted = [...candidateGames].sort(
+              (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+            );
+            const chosen = sorted[pick.doubleheader_game - 1];
+            candidateGames = [chosen];
+            if (!hasSlash) {
+              const rematch = findMatchingGames(pick.selection).find(m => m.game.event_id === chosen.event_id);
+              matchedIsHome = rematch ? rematch.isHome : null;
+            }
           }
 
           // CONFIRMED REAL BUG, direct report 2026-08-21: "this is how we

@@ -360,7 +360,7 @@ Deno.serve(async (req) => {
     }
 
     const picks = await db(
-      `picks?select=id,selection,line,prop_player,prop_team,bet_type_id,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSportId}&event_date=eq.${targetDate}&result=eq.pending&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+      `picks?select=id,selection,line,prop_player,prop_team,bet_type_id,doubleheader_game,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSportId}&event_date=eq.${targetDate}&result=eq.pending&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
     );
 
     const results = {
@@ -429,6 +429,26 @@ Deno.serve(async (req) => {
         const matches = findMatchingGames(pick.selection);
         candidateGames = matches.map(m => m.game);
         if (matches.length === 1) matchedIsHome = matches[0].isHome;
+      }
+
+      // Direct request 2026-08-28: "we need to catch this upstream... I need
+      // a way to identify it in uploads." admin.html's entry template/Bulk
+      // Import/Add Pick form now capture doubleheader_game (1 or 2) as a
+      // real field at data-entry time, since the person entering a pick has
+      // no way to know the sport's schedule but DOES know what the capper's
+      // own message said. When a pick is tagged this way and exactly 2 real
+      // games matched the same matchup on the same date (a genuine
+      // doubleheader, not a data error), sort them by start time and treat
+      // whichever one the tag names as the single confirmed match, instead
+      // of falling through to "needs manual review" below. Deliberately
+      // requires EXACTLY 2 candidates -- 3+ means something else is wrong
+      // (e.g. a genuine matching bug) and still needs a human look rather
+      // than a guess.
+      if (candidateGames.length === 2 && (pick.doubleheader_game === 1 || pick.doubleheader_game === 2)) {
+        const sorted = [...candidateGames].sort(
+          (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+        );
+        candidateGames = [sorted[pick.doubleheader_game - 1]];
       }
 
       if (candidateGames.length === 1) {
