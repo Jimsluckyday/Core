@@ -19594,18 +19594,30 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     validated = validated.filter(v => !toDrop.has(v));
 
+    // CONFIRMED REAL BUG, direct report 2026-08-28: "these totals don't
+    // make sense as he typically puts in 5-10 picks... 38 legs." This map
+    // used to be keyed by the bare parlay NUMBER alone (1, 2, 3...) --
+    // that number is only ever meaningful within ONE capper's ONE day's
+    // message, never globally, so any two rows anywhere in the same
+    // paste tagged "Parlay 1" (a near-certainty in any real multi-capper
+    // file, since everyone's own numbering restarts at 1) got merged into
+    // a single synthesized parlay, silently combining unrelated cappers'
+    // and dates' legs into one another. Scoped to (capper_id, event_date,
+    // number) instead -- deliberately NOT sport_id, since a single real
+    // parlay can legitimately mix sports (e.g. one leg MLB, one leg NBA).
     const survivingLegs = validated.filter(v => v.errors.length === 0 && v.parlayMemberships);
     const byNumber = new Map();
     for (const v of survivingLegs) {
       for (const m of v.parlayMemberships) {
-        if (!byNumber.has(m.number)) byNumber.set(m.number, []);
-        byNumber.get(m.number).push({ v, odds: m.odds });
+        const scopeKey = [v.resolved.capper_id, v.resolved.event_date, m.number].join('|');
+        if (!byNumber.has(scopeKey)) byNumber.set(scopeKey, { number: m.number, members: [] });
+        byNumber.get(scopeKey).members.push({ v, odds: m.odds });
       }
     }
 
     const parlayBetType = findByNameCI(betTypes, 'Parlay');
     const summaries = [];
-    for (const [number, members] of byNumber) {
+    for (const { number, members } of byNumber.values()) {
       const oddsValues = members.map(m => m.odds).filter(o => o !== null && o !== undefined);
       const allSame = oddsValues.length === members.length && members.length > 0 && oddsValues.every(o => o === oddsValues[0]);
       if (allSame) {
@@ -20572,7 +20584,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 369; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 370; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
