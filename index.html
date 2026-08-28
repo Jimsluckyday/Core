@@ -2508,9 +2508,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <option value="push">Push</option>
             </select>
           </div>
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 220px;">
             <label>From date</label>
-            <input id="mdFrom" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="mdFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="mdFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div class="field">
             <label>To date</label>
@@ -15840,6 +15843,28 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('findMissingDataBtn').addEventListener('click', findMissingData);
 
+  // Direct request 2026-08-28: "doesn't have an earliest search option for
+  // dates" -- same jump-to-beginning button already on the Pending Picks
+  // date filters (filterDateEarliestBtn), so working through a full
+  // history backfill here doesn't mean scrolling a calendar back manually.
+  // Unscoped by capper/sport on purpose, same as the Pending Picks version
+  // -- it finds the earliest pick on file, period, then runs the search
+  // with whatever other filters are already set.
+  $('mdFromEarliestBtn').addEventListener('click', async () => {
+    const btn = $('mdFromEarliestBtn');
+    btn.disabled = true;
+    try {
+      const rows = await rest('picks?select=event_date&order=event_date.asc&limit=1');
+      if (!rows.length) return;
+      $('mdFrom').value = rows[0].event_date;
+      await findMissingData();
+    } catch (e) {
+      alert('Could not find the earliest date: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // ---------- Grading corrections (bulk apply back onto exact picks) ----------
   $('toggleGradingCorrectionsBtn').addEventListener('click', () => {
     const panel = $('gradingCorrectionsPanel');
@@ -20134,7 +20159,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 364; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 365; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
