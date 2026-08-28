@@ -4791,6 +4791,35 @@ These are almost always the same day, so "Date entered" only fills in a starting
         };
       }
 
+      // Direct request 2026-08-28: "the check throws an error but it's on
+      // the far right column and I have to scroll over to the right...
+      // it's a nice feature but easily skipped/missed" -- especially true
+      // when a name gets typed once (e.g. "Cincinatti") and then filled
+      // down across many rows in one motion, since nothing draws the eye
+      // back to check each one afterward. Highlights the ENTIRE typed
+      // row the instant any of its Capper/Sport/Bet Type/Team 1/Team 2/
+      // Prop Team Check columns (U-Z) says "NEW?" -- no macro, pure
+      // conditional formatting, so it survives LibreOffice's headless
+      // recalc exactly like the existing data validations do (a macro-
+      // driven version was tried once already for a different feature
+      // and had to be reverted after breaking under LibreOffice -- see
+      // the removed Search column's own history). Same single-rule-
+      // anchored-to-row-3 pattern as every other validation in this file,
+      // so it consolidates into one rule instead of one per row. Two
+      // ranges (typed columns, then the Doubleheader column past the
+      // computed/check block) since a conditional formatting range can't
+      // skip over columns in between.
+      const newEntryHighlight = {
+        type: 'expression',
+        formulae: ['OR(LEFT($U3,4)="NEW?",LEFT($V3,4)="NEW?",LEFT($W3,4)="NEW?",LEFT($X3,4)="NEW?",LEFT($Y3,4)="NEW?",LEFT($Z3,4)="NEW?")'],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } },
+          font: { color: { argb: 'FF9C0006' } }
+        }
+      };
+      ws.addConditionalFormatting({ ref: `A3:Q${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 1 }] });
+      ws.addConditionalFormatting({ ref: `AA3:AA${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 2 }] });
+
       ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
 
       const buf = await wb.xlsx.writeBuffer();
@@ -19227,17 +19256,26 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   let bulkImportRawRowCount = 0;
 
   function parseBulkImportText(text) {
-    const lines = text.split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim() !== '');
-    if (lines.length < 2) return { headers: [], rows: [] };
-    const delim = lines[0].includes('\t') ? '\t' : ',';
-    const headers = splitCsvLine(lines[0], delim).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+    // Direct request 2026-08-28: "I need it to point out precisely what
+    // rows are the issue in the upload as I am not going to know that
+    // line 98 was the specific issue." Tracks each row's real spreadsheet
+    // row number (1 = header, same as opening the same file in Excel)
+    // BEFORE blank lines get filtered out, so it survives all the way
+    // through validation into the preview table -- a row flagged as
+    // needing a fix can be found by its exact row number instead of by
+    // scanning content back against the original paste.
+    const allLines = text.split('\n').map(l => l.replace(/\r$/, ''));
+    const nonBlank = allLines.map((line, i) => ({ line, rowNumber: i + 1 })).filter(x => x.line.trim() !== '');
+    if (nonBlank.length < 2) return { headers: [], rows: [] };
+    const delim = nonBlank[0].line.includes('\t') ? '\t' : ',';
+    const headers = splitCsvLine(nonBlank[0].line, delim).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
     // Quote-aware split (see splitCsvLine, defined alongside
     // parseCorrectionsCsv) -- a pick's selection/event name can genuinely
     // contain a comma, same class of bug already confirmed and fixed for
     // Grading Corrections' importer.
-    const rows = lines.slice(1).map(line => {
+    const rows = nonBlank.slice(1).map(({ line, rowNumber }) => {
       const cells = splitCsvLine(line, delim).map(c => c.trim());
-      const obj = {};
+      const obj = { _rowNumber: rowNumber };
       headers.forEach((h, i) => { obj[h] = cells[i] !== undefined ? cells[i] : ''; });
       return obj;
     });
@@ -19598,6 +19636,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     return {
       raw: row,
+      // Direct request 2026-08-28: carries the row's real spreadsheet row
+      // number (see parseBulkImportText's own comment) into the preview
+      // table, so a flagged row can be found by its exact line instead of
+      // by scanning content back against the original paste.
+      sourceRowNumber: row._rowNumber || null,
       errors,
       warnings,
       missing,
@@ -20065,6 +20108,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         ? '<div style="color:var(--ink-soft);font-style:italic;">Preview only -- created automatically from its legs at import time.</div>' : '';
       return `<tr style="${v.dupWarning ? 'background:rgba(200,150,20,0.08);' : ''}${(!isHardInvalid && hasWarnings) ? 'background:rgba(200,150,20,0.05);' : ''}${v.isSynthesizedParlaySummary ? 'background:rgba(100,100,100,0.06);' : ''}">
         <td>${checkboxCell}</td>
+        <td style="font-family:inherit;font-size:11px;color:var(--ink-soft);" title="This row's position in your pasted text -- row 1 is the header, matching what you'd count opening the same file in a spreadsheet">${v.sourceRowNumber ? `Row ${v.sourceRowNumber}` : (v.isSynthesizedParlaySummary ? '<em>auto</em>' : '—')}</td>
         <td>${escapeHtml(v.raw.date || '')}</td>
         <td>${escapeHtml(v.raw.capper || '')}</td>
         <td>${escapeHtml(v.raw.sport || '')}</td>
@@ -20083,13 +20127,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     let dividerInserted = invalid.length === 0; // no divider needed if nothing's invalid
     for (const { v, i } of withIndex) {
       if (!dividerInserted && isBulkRowSelectable(v, allowWarnings)) {
-        rowsHtml += `<tr><td colspan="9" style="background:var(--field);font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;padding:8px 6px;">Ready to import (${valid.length})</td></tr>`;
+        rowsHtml += `<tr><td colspan="10" style="background:var(--field);font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;padding:8px 6px;">Ready to import (${valid.length})</td></tr>`;
         dividerInserted = true;
       }
       rowsHtml += rowHtml(v, i);
     }
     if (invalid.length > 0) {
-      rowsHtml = `<tr><td colspan="9" style="background:var(--stamp-red);color:var(--paper);font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;padding:8px 6px;">Needs fixing (${invalid.length})</td></tr>` + rowsHtml;
+      rowsHtml = `<tr><td colspan="10" style="background:var(--stamp-red);color:var(--paper);font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;padding:8px 6px;">Needs fixing (${invalid.length})</td></tr>` + rowsHtml;
     }
 
     wrap.innerHTML = `
@@ -20106,7 +20150,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         ${tierNeedsReviewCount > 0 ? `<strong>${tierNeedsReviewCount}</strong> row${tierNeedsReviewCount === 1 ? '' : 's'} left at Tier 0 (new phrase or inconsistent history) -- these still import normally; see Reports &gt; Tier Consistency whenever you want to review them, no need to fix before importing.` : ''}
       </div>` : ''}
       <table class="picks-table">
-        <thead><tr><th></th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Event</th><th>Issue</th></tr></thead>
+        <thead><tr><th></th><th>Row #</th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Event</th><th>Issue</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
       <button id="importValidRowsBtn" style="margin-top:10px;" ${valid.length === 0 ? 'disabled' : ''}>Import selected picks</button>
@@ -20709,7 +20753,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 371; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 372; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
