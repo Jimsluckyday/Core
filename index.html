@@ -18908,6 +18908,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   let bulkImportParsedRows = [];
+  // Direct report 2026-08-28: a real upload silently dropped every Player
+  // Prop row using an abbreviated name ("J. Duran") -- traced to the MLB
+  // roster check correctly flagging them as unconfirmed (an abbreviated
+  // name doesn't match a real roster's full name), which correctly makes
+  // them non-selectable until "Import rows with unresolved validation
+  // warnings anyway" is checked -- but checking that box AFTER the initial
+  // parse did nothing, since nothing re-rendered the preview. Stored here
+  // so the checkbox's own listener (below) can re-render instantly against
+  // the already-validated/already-checked data, no re-fetch needed.
+  let bulkImportLastCheckFailures = [];
 
   function parseBulkImportText(text) {
     const lines = text.split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim() !== '');
@@ -19600,6 +19610,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const allowWarnings = $('bulkImportAllowWarnings').checked;
     const valid = validated.filter(v => isBulkRowSelectable(v, allowWarnings));
     const invalid = validated.filter(v => !isBulkRowSelectable(v, allowWarnings));
+    const hardInvalidCount = invalid.filter(v => v.errors.length > 0).length;
+    const needsReviewCount = invalid.length - hardInvalidCount;
     const dupCount = valid.filter(v => v.dupWarning).length;
     const tierAutoFilledCount = validated.filter(v => v.tierAutoFilled).length;
     const tierNeedsReviewCount = validated.filter(v => v.tierNeedsReview).length;
@@ -19619,6 +19631,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
           <ul style="margin:6px 0 0 18px;font-weight:normal;">
             ${scheduleCheckFailures.map(f => `<li>${escapeHtml(f.date)} — ${escapeHtml(f.sport)} (${f.rowCount} row${f.rowCount === 1 ? '' : 's'}): ${escapeHtml(f.error)}</li>`).join('')}
           </ul>
+        </div>`
+      : '';
+
+    // Direct report 2026-08-28, CONFIRMED REAL BUG: a real upload of ~200
+    // rows silently excluded 5 Player Prop picks (abbreviated names like
+    // "J. Duran" that a roster check couldn't confirm) with nothing but a
+    // small amber "⚠" in the row and one line of inline text among a wall
+    // of green "ready to import" rows -- easy to miss at that volume, and
+    // exactly what happened. This is now impossible to scroll past: same
+    // treatment as the schedule-validation-outage banner above, shown
+    // ONLY while there's something it's actually protecting against
+    // (rows currently excluded because the box below isn't checked yet).
+    const unconfirmedWarningHtml = (needsReviewCount > 0 && !allowWarnings)
+      ? `<div style="background:var(--stamp-amber);color:var(--ink);font-size:12px;font-weight:bold;padding:10px;border-radius:3px;margin-bottom:12px;">
+          &#9888; ${needsReviewCount} pick${needsReviewCount === 1 ? '' : 's'} will NOT be imported -- ${needsReviewCount === 1 ? 'it has' : 'they have'} an unconfirmed team name, player name, or tournament date (amber ⚠ rows below, no checkbox). Check "Import rows with unresolved validation warnings anyway" below to include ${needsReviewCount === 1 ? 'it' : 'them'} now, flagged for a later look -- otherwise ${needsReviewCount === 1 ? 'it stays' : 'they stay'} out of the database entirely until fixed and re-pasted.
         </div>`
       : '';
 
@@ -19722,11 +19749,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       rowsHtml = `<tr><td colspan="9" style="background:var(--stamp-red);color:var(--paper);font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;padding:8px 6px;">Needs fixing (${invalid.length})</td></tr>` + rowsHtml;
     }
 
-    const hardInvalidCount = invalid.filter(v => v.errors.length > 0).length;
-    const needsReviewCount = invalid.length - hardInvalidCount;
     wrap.innerHTML = `
       ${newItemsHtml}
       ${scheduleWarningHtml}
+      ${unconfirmedWarningHtml}
       <div style="font-size:12px;margin:10px 0;">
         <strong>${valid.length}</strong> ready to import, <strong style="color:var(--stamp-red);">${hardInvalidCount}</strong> flagged as invalid
         ${needsReviewCount > 0 ? `, <strong style="color:var(--stamp-amber);">${needsReviewCount}</strong> unconfirmed (check "Import rows with unresolved validation warnings anyway" above to include ${needsReviewCount === 1 ? 'it' : 'them'} now instead of fixing first)` : ''}
@@ -20212,8 +20238,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('bulkImportPreview').innerHTML = '<div class="empty-state">Checking MLB rosters for player prop picks...</div>';
     const mlbCheckFailures = await checkMlbPlayers(validated);
     bulkImportParsedRows = validated;
-    renderBulkImportPreview(validated, [...scheduleCheckFailures, ...mlbCheckFailures]);
+    bulkImportLastCheckFailures = [...scheduleCheckFailures, ...mlbCheckFailures];
+    renderBulkImportPreview(validated, bulkImportLastCheckFailures);
   }
+
+  // Direct report 2026-08-28: checking this box after the initial parse
+  // used to do nothing visible at all -- the preview only ever reflected
+  // whatever the checkbox said at the moment "Parse & preview" was last
+  // clicked, so a row correctly held back as unconfirmed (e.g. a Player
+  // Prop name a roster check couldn't verify) stayed stuck showing a bare,
+  // un-checkable "⚠" even after checking this box, unless you happened to
+  // realize you had to re-click Parse & preview from scratch. Re-renders
+  // instantly against the already-validated data instead.
+  $('bulkImportAllowWarnings').addEventListener('change', () => {
+    if (bulkImportParsedRows.length) renderBulkImportPreview(bulkImportParsedRows, bulkImportLastCheckFailures);
+  });
 
   $('parseBulkImportBtn').addEventListener('click', runBulkImportParse);
 
@@ -20326,7 +20365,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 367; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 368; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
