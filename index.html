@@ -4146,10 +4146,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['', false, 10],
         ['PLAYER PROPS -- Selection is NOT Team 1/Team 2 here', true, 12],
         ['CONFIRMED REAL BUG, direct report 2026-08-26: every Player Prop row used to compute a BLANK Selection (Team 1/2 are correctly left empty for props -- the player\'s identity belongs in "Prop Player" instead), and a blank Selection gets the whole row REJECTED on upload, no matter how complete everything else is. Selection is now computed differently for Player Prop rows specifically, based on Prop Stat and Line -- leave Team 1/Team 2 blank for props exactly as before, this is handled automatically:', false, 10],
-        ['-- A real stat-line prop (Strikeouts, Points, HR, Rebounds, etc.): Selection becomes "Over" or "Under" automatically from the sign of "Line" -- NEGATIVE = Over, positive/unsigned = Under (this project\'s standard convention). Just fill in Line with the correct sign and Selection takes care of itself.', false, 10],
-        ['-- Golf "Round Matchup" or "Tournament Matchup" (head-to-head): Selection becomes the OPPONENT -- type the opponent\'s name into "Team 1 / Player" (yes, that reads oddly against the column name; Prop Player holds the golfer you\'re actually backing to win). Leave Line blank.', false, 10],
-        ['-- Golf "Tournament Winner" or "Round Winner" (outright, no opponent at all): Selection is automatically the fixed text "To Win". Leave Team 1/Team 2 AND Line both blank -- "Round Winner" added 2026-08-26 specifically so a round-outright pick never needs an opponent you don\'t have handy; just Prop Player + Prop Stat = "Round Winner" is a complete, correct row.', false, 10],
-        ['Prop Stat now has its own dropdown (pulled from Setup, same soft-warning style as Team 1/2) -- for the 4 golf stats above, the exact spelling matters since Selection\'s formula and the real grading automation both key off it literally. "Round 4 Winner" or similar variants will NOT be recognized as "Round Winner" -- use the dropdown to get the exact registered name.', false, 10],
+        ['-- A real stat-line prop with a number (Strikeouts, Points, HR, Rebounds, etc.): fill in Line, and Selection becomes "Over" or "Under" automatically from its sign -- NEGATIVE = Over, positive/unsigned = Under (this project\'s standard convention).', false, 10],
+        ['-- Golf "Tournament Winner" or "Round Winner" (outright, no opponent at all): Selection is automatically the fixed text "To Win". Leave Team 1/Team 2 AND Line both blank -- just Prop Player + Prop Stat = "Round Winner" is a complete, correct row.', false, 10],
+        ['-- Anything else with NO Line at all (Golf "Round Matchup"/"Tournament Matchup", a UFC/MMA method-of-victory prop like "Decision" or "KO/TKO", or any other prop that isn\'t a number): Selection is read directly from "Team 1 / Player" -- yes, that reads oddly against the column name (Prop Player already holds who you\'re backing); just type the answer there. Example -- "Joshua Van to win by points": Prop Player = "Joshua Van", Prop Stat = whatever you\'ve registered for method-of-victory props, Team 1 / Player = "Decision", Line blank.', false, 10],
+        ['Prop Stat now has its own dropdown (pulled from Setup, same soft-warning style as Team 1/2) -- for the golf outright stats above ("Round Winner"/"Tournament Winner"), the exact spelling matters since Selection\'s formula and the real grading automation both key off it literally. "Round 4 Winner" or similar variants will NOT be recognized as "Round Winner" -- use the dropdown to get the exact registered name.', false, 10],
         ['', false, 10],
         ['COLUMN GUIDE', true, 12],
         ['Date entry -- type the date the pick was POSTED, as M/D/YYYY (e.g. 6/1/2025 or 06/01/2025). Leave BLANK to repeat the date from the row above -- see DATE AUTO-FILL above.', false, 10],
@@ -4443,12 +4443,25 @@ These are almost always the same day, so "Date entered" only fills in a starting
         //    (negative = Over, positive = Under).
         // Non-prop bet types keep the original Team 1(/Team 2) logic,
         // completely untouched.
+        // CONFIRMED REAL GAP, direct report 2026-08-27: "Joshua Van to win
+        // by points" (a UFC method-of-victory prop) has no Line and isn't
+        // a golf-style outright-to-win pick either, so it fell all the way
+        // through to the old Line-only fallback and computed a BLANK
+        // Selection -- the exact same silent-rejection failure mode as the
+        // original Player Prop bug, just for a bet shape golf's special
+        // cases never anticipated. Generalized the no-Line fallback from
+        // "blank" to "whatever's typed in Team 1/Player" instead of
+        // special-casing yet another named stat -- this already covers
+        // Round Matchup/Tournament Matchup for free (Selection = opponent,
+        // exactly as before, so that branch was folded into this one) and
+        // now also covers "Method of Victory"-style props (Team 1 / Player
+        // holds the answer, e.g. "Decision") without ever needing another
+        // hardcoded stat name added here again.
         ws.getCell(row, 20).value = { formula:
           `IF(${betTypeAddr}<>"Player Prop",` +
           `IF(${team1Addr}="","",IF(${team2Addr}="",${team1Addr},${team1Addr}&"/"&${team2Addr})),` +
           `IF(OR(${propStatAddr}="Tournament Winner",${propStatAddr}="Round Winner"),"To Win",` +
-          `IF(OR(${propStatAddr}="Round Matchup",${propStatAddr}="Tournament Matchup"),${team1Addr},` +
-          `IF(${lineAddr}="","",IF(${lineAddr}<0,"Over","Under")))))` };
+          `IF(${lineAddr}="",${team1Addr},IF(${lineAddr}<0,"Over","Under"))))` };
 
         ws.getCell(row, 21).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
         ws.getCell(row, 22).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
@@ -19931,7 +19944,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 355; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 356; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
