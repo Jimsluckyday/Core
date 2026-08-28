@@ -9740,7 +9740,18 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const id = csvField(row.dataset.pickId || '');
         return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, sourceImage];
       });
-      const csvContent = [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
+      // Direct request 2026-08-28: "we need this built into the ruleset of
+      // the file we export so this can be cross compatible with any
+      // chat/AI" -- same reasoning as downloadCsv's own prefixText param
+      // (see that function's comment), just applied here too since this
+      // export never went through that shared helper. This export's own
+      // "Odds" column is read-only reference (whatever's currently on
+      // file, not separately opening/closing), so the instruction points
+      // at building a companion id+opening_odds+closing_odds file rather
+      // than claiming this file's own columns are already fill-in-ready --
+      // the ID column here is exactly what that companion file matches on.
+      const prefixText = 'This is a read-only reference export. To WRITE odds back onto these picks: build a separate CSV with just the columns "id,opening_odds,closing_odds" (id = the first column in this file, one row per pick needing odds), then upload or paste that file into Data Tools -> Grading Corrections in this app -- it matches strictly by id and writes opening_odds/closing_odds onto exactly those picks, ignoring any other column name. Do not edit the plain "Odds" column in this export and re-upload it -- Grading Corrections does not read that column, only opening_odds/closing_odds.';
+      const csvContent = prefixText + '\\r\\n\\r\\n' + [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -19960,7 +19971,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 357; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 358; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
