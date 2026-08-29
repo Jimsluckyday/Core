@@ -4213,16 +4213,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
         const tierCounts = {};
         g.picks.forEach(p => { const t = Number(p.pick_tier); tierCounts[t] = (tierCounts[t] || 0) + 1; });
         const breakdown = Object.entries(tierCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => `Tier ${t} (${c})`).join(', ');
+        // Direct report 2026-08-29: "I am unclear what each of the A11
+        // Bets value was as Raw Value isn't something I use as a value
+        // and I don't know what value he chose for each of the 2 I need
+        // to look at." The group header above only ever shows ONE
+        // representative raw string (whichever pick this group happened
+        // to encounter first) -- if two picks' actual raw_unit_size text
+        // differs even slightly ("1.75" vs "1.75 units"), both still land
+        // in the same normalized group, but the header can't show both,
+        // so there was no way to tell which specific text produced which
+        // row's tier without going elsewhere to look it up. Each row now
+        // shows its own real raw_unit_size directly, not just the shared
+        // header's single example.
         const rows = g.picks.slice().sort((a, b) => Number(a.pick_tier) - Number(b.pick_tier)).map(p => `
           <tr>
             <td>${p.event_date}</td>
             <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
+            <td>${escapeHtml(p.raw_unit_size || '—')}</td>
             <td><select class="tier-fix-select" data-id="${p.id}">${tierOptionsHtml(p.pick_tier)}</select></td>
           </tr>`).join('');
         return `<div class="msg" style="margin-bottom:14px;">
           <strong>${escapeHtml(g.capperName)}</strong> — raw value "${escapeHtml(g.raw)}": ${breakdown}
           <table class="picks-table" style="margin-top:8px;">
-            <thead><tr><th>Date</th><th>Selection</th><th>Tier</th></tr></thead>
+            <thead><tr><th>Date</th><th>Selection</th><th>Raw value</th><th>Tier</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>`;
@@ -21013,7 +21026,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 387; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 388; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
