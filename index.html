@@ -5891,7 +5891,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
           unitSizeCounts.set(v, (unitSizeCounts.get(v) || 0) + 1);
         });
         const topUnit = [...unitSizeCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-        const unitsText = topUnit ? `at ${escapeHtml(topUnit[0])}U` : 'no unit recorded';
+        // Direct report 2026-08-29: "remove the U from any tier that has a
+        // name beside it as it looks weird and provides no value" (e.g.
+        // "2 StarU"). "U" only actually adds information for a bare
+        // number ("2" -> "2U", a real unit count) -- appending it to a
+        // capper's own named tier label just glues an unrelated letter
+        // onto their wording.
+        const unitsText = topUnit ? `at ${escapeHtml(topUnit[0])}${/^-?\d+(\.\d+)?$/.test(topUnit[0]) ? 'U' : ''}` : 'no unit recorded';
         const reviewNotes = [...new Set(group.map(r => (r.tier_review_note || '').trim()).filter(Boolean))];
         const images = [...new Set(group.map(r => r.source_image).filter(Boolean))];
         return `<div style="margin-bottom:10px;">
@@ -8518,7 +8524,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
             const { total, unitCounts } = tierData[tier];
             const label = tier === '—' ? 'No tier' : `Tier ${tier}`;
             const topUnit = [...unitCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-            const unitsText = topUnit ? `at ${topUnit[0]}U` : 'no unit recorded';
+            // Same "no U on a named unit size" fix as the Tier Consistency
+            // panel's own copy of this logic -- see that comment for why.
+            const unitsText = topUnit ? `at ${topUnit[0]}${/^-?\d+(\.\d+)?$/.test(topUnit[0]) ? 'U' : ''}` : 'no unit recorded';
             return escapeHtml(`${label} : (${total}) ${unitsText}`);
           });
           // Joined with a real <br>, not escaped -- each line's own text was
@@ -20986,7 +20994,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 385; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 386; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
