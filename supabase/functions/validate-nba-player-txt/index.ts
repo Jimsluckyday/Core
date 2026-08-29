@@ -61,6 +61,20 @@ function normalize(s: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+// CONFIRMED REAL BUG, direct report 2026-08-28 (found via validate-mlb-
+// player-txt, same matching logic ported here): a capper writing "J.
+// Duran"-style first-initial-plus-surname names never matches a roster's
+// full name via plain equality/substring, no matter how correct the pick
+// is -- normalize("J. Duran") = "jduran" is neither equal to nor a
+// substring match against normalize("Jarren Duran") = "jarrenduran".
+// Builds the same shape from the roster's own full name so it can be
+// registered as an extra lookup key below.
+function initialSurname(fullName: string): string | null {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length < 2) return null;
+  return normalize(parts[0][0] + parts[parts.length - 1]);
+}
+
 // CONFIRMED FIX, direct real-world report: two consecutive live runs both
 // failed with "ESPN NBA scoreboard request failed" on a date independently
 // confirmed to have real games (2026-06-05, NBA Finals Game 2) -- ruled out
@@ -166,7 +180,11 @@ Deno.serve(async (req) => {
       const athletes = result.value.athletes || [];
       for (const a of athletes) {
         const name = a.fullName || a.displayName;
-        if (name) rosterByNorm.set(normalize(name), { teamName: t.teamName, opponent: t.opponent, displayName: name });
+        if (!name) continue;
+        const entry = { teamName: t.teamName, opponent: t.opponent, displayName: name };
+        rosterByNorm.set(normalize(name), entry);
+        const alias = initialSurname(name);
+        if (alias && !rosterByNorm.has(alias)) rosterByNorm.set(alias, entry);
       }
     }
 

@@ -48,6 +48,16 @@ function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
 }
 
+// Same "first initial + last name" fix as validate-mlb-player-txt -- a
+// capper writing "J. Duran"-style abbreviated names never matches a
+// roster's full name via plain equality/substring, no matter how correct
+// the pick is. See that file's own comment for the confirmed real case.
+function initialSurname(fullName: string): string | null {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length < 2) return null;
+  return normalize(parts[0][0] + parts[parts.length - 1]);
+}
+
 async function nhlFetch(url: string, attempts = 2): Promise<Response> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -149,7 +159,10 @@ Deno.serve(async (req) => {
     const results = checks.map((check: any) => {
       const norm = normalize(check.playerName || '');
       if (!norm) return { id: check.id, verifiable: true, valid: false, reason: 'No player name provided' };
-      const match = rosters.find(r => r.players.some((p: string) => normalize(p) === norm || normalize(p).includes(norm) || norm.includes(normalize(p))));
+      const match = rosters.find(r => r.players.some((p: string) => {
+        const pn = normalize(p);
+        return pn === norm || pn.includes(norm) || norm.includes(pn) || initialSurname(p) === norm;
+      }));
       if (match) {
         return { id: check.id, verifiable: true, valid: true, team: match.teamName, matchup: `${match.teamName} ${match.opponent}` };
       }

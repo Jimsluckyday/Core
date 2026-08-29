@@ -44,6 +44,23 @@ function normalize(s: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+// CONFIRMED REAL BUG, direct report 2026-08-28: a real capper (Iowa Kid
+// Pix) writes EVERY player prop as "first initial + last name" ("J.
+// Duran", "T. Stephenson", "W. Adames") -- checked directly against live
+// rosters for 2025-06-02 and every one of these was a genuinely active
+// player on a team playing that day, yet all failed this check. Root
+// cause: normalize("J. Duran") = "jduran", and neither
+// normalize("Jarren Duran") ("jarrenduran") nor the input is a substring
+// of the other, so the existing exact/substring check can never match an
+// abbreviated first name no matter how correct it is. This builds the
+// same "first initial + surname" shape from the roster's own full name
+// so it can be compared on equal terms.
+function initialSurname(fullName: string): string | null {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length < 2) return null;
+  return normalize(parts[0][0] + parts[parts.length - 1]);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -120,7 +137,10 @@ Deno.serve(async (req) => {
     const results = checks.map((check: any) => {
       const norm = normalize(check.playerName || '');
       if (!norm) return { id: check.id, verifiable: true, valid: false, reason: 'No player name provided' };
-      const match = rosters.find(r => r.players.some((p: string) => normalize(p) === norm || normalize(p).includes(norm) || norm.includes(normalize(p))));
+      const match = rosters.find(r => r.players.some((p: string) => {
+        const pn = normalize(p);
+        return pn === norm || pn.includes(norm) || norm.includes(pn) || initialSurname(p) === norm;
+      }));
       if (match) {
         return { id: check.id, verifiable: true, valid: true, team: match.teamName, matchup: `${match.teamName} ${match.opponent}` };
       }
