@@ -15785,7 +15785,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     wrap.innerHTML = '<div class="empty-state">Loading incomplete picks...</div>';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,pick_tier,raw_unit_size,prop_stat,capper_id,sport_id,bet_type_id,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,pick_tier,raw_unit_size,prop_stat,capper_id,sport_id,bet_type_id,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields,is_futures)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -15804,11 +15804,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const sportName = p.sports ? p.sports.name : '';
         const betTypeName = p.bet_types ? p.bet_types.name : '';
         const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
+        // Same is_futures exclusion as Missing Data's own filter -- a
+        // long-term futures pick will never have a home/away side or a
+        // game start time to find, so it isn't a real gap.
+        const isFutures = p.bet_types && p.bet_types.is_futures;
         if (checkClosing && !p.odds_unavailable && (p.closing_odds === null || p.closing_odds === undefined)) return true;
         if (checkOpening && !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined)) return true;
-        if (checkHomeAway && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
+        if (checkHomeAway && !p.home_away && !isFutures && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
         if (checkUnitSize && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal) && !betTypeName.toLowerCase().includes('parlay')) return true;
-        if (checkStartTime && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
+        if (checkStartTime && !p.game_start_time && !isFutures && !betTypeName.toLowerCase().includes('parlay')) return true;
         if (checkEventName && !p.event_name && sportUsesEventName(sportName)) return true;
         if (checkLine && (p.line === null || p.line === undefined) && betTypeUsesLine(betTypeName, usesPropFields, p.prop_stat)) return true;
         return false;
@@ -15835,11 +15839,12 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     const p = reviewQueue[reviewIndex];
     const isProp = p.bet_types && p.bet_types.uses_prop_fields;
+    const isFutures = p.bet_types && p.bet_types.is_futures;
     const sportName = p.sports ? p.sports.name : '';
     const betTypeName = p.bet_types ? p.bet_types.name : '';
     const eventNameScoped = sportUsesEventName(sportName);
     const lineScoped = betTypeUsesLine(betTypeName, isProp, p.prop_stat);
-    const homeAwayApplies = !isProp && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName);
+    const homeAwayApplies = !isProp && !isFutures && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName);
     const missingParts = [];
     if (!p.odds_unavailable) {
       if (p.opening_odds === null || p.opening_odds === undefined) missingParts.push('opening odds');
@@ -15847,7 +15852,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
     if (!p.home_away && homeAwayApplies) missingParts.push('home/away');
     if (!p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal) && !betTypeName.toLowerCase().includes('parlay')) missingParts.push('unit size');
-    if (!p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) missingParts.push('start time');
+    if (!p.game_start_time && !isFutures && !betTypeName.toLowerCase().includes('parlay')) missingParts.push('start time');
     if (eventNameScoped && !p.event_name) missingParts.push('event name');
     if (lineScoped && (p.line === null || p.line === undefined)) missingParts.push('line');
 
@@ -16046,6 +16051,16 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const sportName = p.sports ? p.sports.name : '';
       const betTypeName = p.bet_types ? p.bet_types.name : '';
       const usesPropFields = p.bet_types && p.bet_types.uses_prop_fields;
+      // Direct report 2026-08-28: a long-term futures pick (Series/Award/
+      // Season Win Total -- resolves whenever the event concludes, never
+      // tied to one game on one date) kept resurfacing under "Missing
+      // start time" forever, since it will NEVER have a game_start_time,
+      // home_away, or a schedule-sync match -- the exact same "not tied to
+      // a single game" reasoning the is_futures flag already exists to
+      // name, and that Bulk Import's own checkScheduleMatchups already
+      // excludes futures bet types for. Missing Data never applied that
+      // same exclusion.
+      const isFutures = p.bet_types && p.bet_types.is_futures;
       // Direct report 2026-08-22: a leg's own opening_odds/closing_odds
       // are ALWAYS null by design -- only the PARENT parlay pick ever
       // carries the real combined price (see the Bulk mark parlay odds
@@ -16054,7 +16069,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // used for Unit size just below.
       if (has('mdCheckClosing') && !p.odds_unavailable && !p.is_parlay_leg && (p.closing_odds === null || p.closing_odds === undefined)) return true;
       if (has('mdCheckOpening') && !p.odds_unavailable && !p.is_parlay_leg && (p.opening_odds === null || p.opening_odds === undefined)) return true;
-      if (has('mdCheckHomeAway') && !p.home_away && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
+      if (has('mdCheckHomeAway') && !p.home_away && !isFutures && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
       // CONFIRMED REAL BUG (found 2026-08-14), direct report: parlay legs
       // were showing up as individually-editable rows needing Unit size,
       // instead of being fixed once through the parlay's own Tier/Unit
@@ -16067,7 +16082,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // Parlay wrapper pick itself, which usually carries no unit size at
       // all even from a capper who always gives one on straight bets.
       if (has('mdCheckUnitSize') && !p.is_parlay_leg && !p.raw_unit_size && !(p.cappers && p.cappers.no_tier_signal) && betTypeName.toLowerCase() !== 'parlay') return true;
-      if (has('mdCheckStartTime') && !p.game_start_time && !betTypeName.toLowerCase().includes('parlay')) return true;
+      if (has('mdCheckStartTime') && !p.game_start_time && !isFutures && !betTypeName.toLowerCase().includes('parlay')) return true;
       // Same Parlay-wrapper exclusion as missingFieldsSummary's own Event
       // name check (see its comment for the full story) -- kept in sync
       // deliberately since this function exists specifically to mirror
@@ -16118,7 +16133,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // for-review finder. 'not_supported' included too -- same "needs a
       // human, nothing here is confirmed" meaning, just for a sport with no
       // automated source at all rather than a found-but-uncertain match.
-      if (has('mdCheckSyncFlagged') && (p.schedule_sync_status === 'unmatched' || p.schedule_sync_status === 'not_supported')) return true;
+      if (has('mdCheckSyncFlagged') && !isFutures && (p.schedule_sync_status === 'unmatched' || p.schedule_sync_status === 'not_supported')) return true;
       // Direct request 2026-08-20: flag for a human, no auto-correction --
       // "there's no auto way to do this." Tennis/KBO only, since those are
       // the two sports confirmed prone to the owner's posting-delay crossing
@@ -16209,7 +16224,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,capper_message_timestamp,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&or=(${conditions.join(',')})`;
+      let query = `picks?select=id,event_date,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,capper_message_timestamp,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields,is_futures)&or=(${conditions.join(',')})`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -20764,7 +20779,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 373; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 374; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');

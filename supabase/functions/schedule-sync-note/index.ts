@@ -145,8 +145,14 @@ Deno.serve(async (req) => {
       return line.prices[FANDUEL_BOOK_ID].price;
     }
 
+    // Direct report 2026-08-28: a long-term futures pick (Series/Award/
+    // Season Win Total) was never excluded here, so it got re-flagged
+    // "unmatched" with a "no matching game found" note every single time
+    // this ran -- it will NEVER match a single day's schedule, since it
+    // isn't tied to one game. Same is_futures exclusion Bulk Import's own
+    // schedule check already applies at entry time.
     const picks = await db(
-      `picks?select=id,selection,line,bet_type_id,bet_types(name)&sport_id=eq.${ourSportId}&event_date=eq.${targetDate}&result=eq.pending&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+      `picks?select=id,selection,line,bet_type_id,bet_types!inner(name,is_futures)&sport_id=eq.${ourSportId}&event_date=eq.${targetDate}&result=eq.pending&bet_types.is_futures=eq.false&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
     );
 
     const results = {
