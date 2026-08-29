@@ -11643,8 +11643,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   });
 
   function leaderboardRowsToHtml(rows, filterSummary, minPicks) {
+    // Direct report 2026-08-29: "Matthew P07 3rd but he has 10 wins the 2
+    // people above him have less than that... It should go by wins then
+    // the tie breaker would go to fewer losses as those are the things
+    // that drive results." A tied win % used to leave rows in whatever
+    // arbitrary order the underlying query happened to return them in --
+    // not wrong, just meaningless, since nothing was actually breaking the
+    // tie. Now: win % first, then more wins, then fewer losses.
     const qualified = rows.filter(r => (r.wins + r.losses) >= minPicks && r.win_pct !== null && r.win_pct > 0)
-      .sort((a, b) => b.win_pct - a.win_pct);
+      .sort((a, b) => (b.win_pct - a.win_pct) || (b.wins - a.wins) || (a.losses - b.losses));
     const unqualified = rows.filter(r => (r.wins + r.losses) < minPicks || r.win_pct === null || r.win_pct === 0)
       .sort((a, b) => b.total_picks - a.total_picks);
 
@@ -11695,7 +11702,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <tbody>${body}</tbody>
       </table>
       <div style="font-size:10px;color:var(--ink-soft);margin-top:8px;">
-        Ranked purely by win % — cappers below the rank line either have fewer than ${minPicks} graded picks or are at 0%, both too small/extreme a sample to rank meaningfully, and are listed by volume just for reference. Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. Straight/Parlay shows how many of Total picks were the capper's own standalone bets vs. whole combined parlays (e.g. "9/1") — individual parlay legs are never counted separately here. Wins/Losses/Pushes stay combined across both — a parlay counts as one win, loss, or push against its own overall result, same as any straight bet. Click the arrow on any column to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the report.
+        Ranked by win % first, then by more wins, then by fewer losses to break a tie — cappers below the rank line either have fewer than ${minPicks} graded picks or are at 0%, both too small/extreme a sample to rank meaningfully, and are listed by volume just for reference. Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. Straight/Parlay shows how many of Total picks were the capper's own standalone bets vs. whole combined parlays (e.g. "9/1") — individual parlay legs are never counted separately here. Wins/Losses/Pushes stay combined across both — a parlay counts as one win, loss, or push against its own overall result, same as any straight bet. Click the arrow on any column to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the report.
       </div>`;
   }
 
@@ -11931,8 +11938,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   });
 
   function betTypeBreakdownRowsToHtml(rows, filterSummary, minPicks) {
+    // Same win %, then wins, then losses tiebreaker as the Capper
+    // Leaderboard -- see that report's own comment for the direct report
+    // behind it.
     const qualified = rows.filter(r => (r.wins + r.losses) >= minPicks && r.win_pct !== null && r.win_pct > 0)
-      .sort((a, b) => b.win_pct - a.win_pct);
+      .sort((a, b) => (b.win_pct - a.win_pct) || (b.wins - a.wins) || (a.losses - b.losses));
     const unqualified = rows.filter(r => (r.wins + r.losses) < minPicks || r.win_pct === null || r.win_pct === 0)
       .sort((a, b) => b.total_picks - a.total_picks);
 
@@ -12280,8 +12290,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // refactoring the two pre-existing popouts (Bet Type Breakdown, Pick Tier
   // Performance) to use this -- out of scope for this change.
   function capperSplitRowsToHtml(rows, filterSummary, minPicks, categoryLabel) {
+    // Same win %, then wins, then losses tiebreaker as the Capper
+    // Leaderboard -- see that report's own comment for the direct report
+    // behind it.
     const qualified = rows.filter(r => (r.wins + r.losses) >= minPicks && r.win_pct !== null && r.win_pct > 0)
-      .sort((a, b) => b.win_pct - a.win_pct);
+      .sort((a, b) => (b.win_pct - a.win_pct) || (b.wins - a.wins) || (a.losses - b.losses));
     const unqualified = rows.filter(r => (r.wins + r.losses) < minPicks || r.win_pct === null || r.win_pct === 0)
       .sort((a, b) => b.total_picks - a.total_picks);
 
@@ -13754,7 +13767,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }));
 
     const qualifying = rows.filter(r => (r.wins + r.losses) >= minPicks && r.win_pct !== null);
-    const sorted = [...qualifying].sort((a, b) => b.win_pct - a.win_pct);
+    // Same win %, then wins, then losses tiebreaker as the Capper
+    // Leaderboard -- see that report's own comment for the direct report
+    // behind it. Applies to both ends of this same sort: the bottom slice
+    // below is just the tail of this same order, so a tied-worst capper
+    // with more decisions (more losses) correctly reads as more bottom
+    // than one with almost no sample either.
+    const sorted = [...qualifying].sort((a, b) => (b.win_pct - a.win_pct) || (b.wins - a.wins) || (a.losses - b.losses));
     const topRows = sorted.slice(0, 5);
     const bottomRows = sorted.slice(-5).reverse();
 
@@ -20994,7 +21013,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 386; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 387; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
