@@ -8196,6 +8196,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // closing odds" rows together, "missing start time" rows together,
       // etc., instead of scanning every column by eye to notice a gap.
       const missingCell = missingFieldsSummary(p, sportName, betTypeName, isProp);
+      // Direct report 2026-08-29: "the only place I see that is if I do a
+      // full edit so we need to have a place where I see this value." The
+      // Missing column already carries this exact text, but it sits at
+      // column 17 of ~20 -- the same "off to the side, easy to miss/have
+      // to scroll to see" complaint already raised once before about the
+      // Excel entry template's own check columns. Rather than reorder the
+      // Missing column itself (a lot of code elsewhere indexes into this
+      // row's cells by position), mirror the same text as a prominent
+      // badge right on the Pick cell, which is already one of the first
+      // things read on any row -- so why a pick is flagged is visible
+      // without scrolling or opening Full edit, in every view (not just
+      // an active Missing Data search).
+      const missingBadge = missingCell === 'Complete' ? '' : ` <span style="display:inline-block;background:var(--stamp-red);color:var(--paper);font-size:10px;font-weight:bold;padding:1px 6px;border-radius:8px;white-space:nowrap;" title="Missing: ${escapeHtml(missingCell)}">&#9888; ${escapeHtml(missingCell)}</span>`;
+      pickText += missingBadge;
       // Direct request: when this table is showing a "fix these issues"
       // list (Missing Data), a pick that's now fully Complete should just
       // disappear rather than sit there as a solved row you have to look
@@ -20918,7 +20932,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 383; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 384; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
