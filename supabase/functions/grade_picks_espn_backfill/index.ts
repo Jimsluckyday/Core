@@ -485,8 +485,16 @@ Deno.serve(async (req) => {
       // box score (2025-06-02, MIL @ CIN) that "walks" is a real key in
       // the BATTING stat group, not just pitching (where it was already
       // wired up as walksallowed) -- this was simply never added, not a
-      // real data gap.
-      walks: [{ key: 'walks', group: 'batting' }],
+      // real data gap. FOLLOW-UP direct report, same session: a plain
+      // "Walks" prop on Tomoyuki Sugano (a pitcher) came back "found the
+      // player but couldn't read a value" -- his box score row that day
+      // only had pitching stats (see fixed sample). Same ambiguity as
+      // strikeouts just below (a named player could mean either side of
+      // the ball) -- now tries PITCHING first (the dominant real market
+      // for a pitcher prop, same reasoning strikeouts already uses), then
+      // falls back to BATTING for a position player like the confirmed
+      // 2025-06-02 case.
+      walks: [{ key: 'walks', group: 'pitching' }, { key: 'walks', group: 'batting' }],
       // Same "sum two already-available keys" pattern as hrrbi just above
       // -- a real capper (Rhino) posts this combo prop regularly. The line
       // structure (Over/Under a .5 number) confirms it's a literal summed
@@ -1188,6 +1196,13 @@ Deno.serve(async (req) => {
           // already has (or, for the First5/First7 ones, can easily
           // derive) everything needed to grade them.
           const isTeamTotal = betTypeNorm === 'teamtotal';
+          // Direct report 2026-08-29: "Bet type 'Team Total First 5' is
+          // not supported by this grader." Same idea as Team Total above,
+          // just scoped to the first 5 innings the same way Total First 5
+          // already is -- everything it needs (first5_home/away, the
+          // single-team matching Team Total already uses) already exists,
+          // it just never got its own flag wired up.
+          const isTeamTotalFirst5 = betTypeNorm === 'teamtotalfirst5';
           const isMoneylineFirst5 = betTypeNorm === 'moneylinefirst5';
           const isTotalFirst5 = betTypeNorm === 'overunderfirst5';
           const isTotalFirst7 = betTypeNorm === 'overunderfirst7';
@@ -1230,7 +1245,7 @@ Deno.serve(async (req) => {
           const sportNormForProps = normalize(ourSport.name);
           const propsSupportedForThisSport = PLAYER_PROP_SPORTS.includes(sportNormForProps);
           const supported = isMoneyline || isSpread || isTotalType || isNRFI || isYRFI
-            || isTeamTotal || isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7
+            || isTeamTotal || isTeamTotalFirst5 || isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7
             || isMoneyline1stInning || isSpread1stQuarter || isSpread1stHalf || isMoneyline1stHalf
             || isMoneyline1stQuarter
             || (isPlayerProp && propsSupportedForThisSport);
@@ -1420,6 +1435,10 @@ Deno.serve(async (req) => {
             const ownScore = matchedIsHome ? game.score.score_home : game.score.score_away;
             grade = gradeTeamTotal(ownScore, Number(pick.line));
           }
+          else if (isTeamTotalFirst5) {
+            const ownVal = matchedIsHome ? game.score.first5_home : game.score.first5_away;
+            grade = ownVal !== null ? gradeTeamTotal(ownVal, Number(pick.line)) : null;
+          }
           else if (isMoneylineFirst5) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 5);
           else if (isTotalFirst5) grade = gradeTotalFirstN(game.score, 5, Number(pick.line));
           else if (isTotalFirst7) grade = gradeTotalFirstN(game.score, 7, Number(pick.line));
@@ -1438,7 +1457,7 @@ Deno.serve(async (req) => {
           if (!grade) {
             const note = (isNRFI || isYRFI)
               ? '1st-inning score data looked incomplete or unclear -- needs manual review.'
-              : (isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7)
+              : (isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7 || isTeamTotalFirst5)
               ? 'First 5/7 innings score data looked incomplete or unclear -- needs manual review.'
               : (isMoneyline1stInning || isSpread1stQuarter || isMoneyline1stQuarter)
               ? '1st period score data looked incomplete or unclear -- needs manual review.'
