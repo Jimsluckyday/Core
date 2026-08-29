@@ -481,6 +481,19 @@ Deno.serve(async (req) => {
       rbi: [{ key: 'RBIs', group: 'batting' }],
       rbis: [{ key: 'RBIs', group: 'batting' }],
       hrrbi: [{ key: '', group: 'batting' }],
+      // Direct report 2026-08-29: confirmed directly against a real ESPN
+      // box score (2025-06-02, MIL @ CIN) that "walks" is a real key in
+      // the BATTING stat group, not just pitching (where it was already
+      // wired up as walksallowed) -- this was simply never added, not a
+      // real data gap.
+      walks: [{ key: 'walks', group: 'batting' }],
+      // Same "sum two already-available keys" pattern as hrrbi just above
+      // -- a real capper (Rhino) posts this combo prop regularly. The line
+      // structure (Over/Under a .5 number) confirms it's a literal summed
+      // count (hits + home runs, intentionally double-counting a HR at-bat
+      // as both a hit and a homer -- the same convention PrizePicks/
+      // Underdog use for this exact combo), not a boolean.
+      hrhits: [{ key: '', group: 'batting' }],
       runs: [{ key: 'runs', group: 'batting' }],
       strikeouts: [{ key: 'strikeouts', group: 'pitching' }, { key: 'strikeouts', group: 'batting' }],
       earnedrunsallowed: [{ key: 'earnedRuns', group: 'pitching' }],
@@ -631,6 +644,15 @@ Deno.serve(async (req) => {
       if (statNorm === 'totalbases' && sportNorm === 'mlb') {
         return { grade: null, unsupported: true, note: "Total Bases can't be computed from ESPN's box score data -- it doesn't break out doubles/triples, and the only rate stats available here (AVG/OBP/SLG) are season totals, not this game's -- needs manual grading." };
       }
+      // Same root cause as Total Bases just above -- Singles = hits minus
+      // doubles/triples/home runs, and this box score never breaks out
+      // doubles/triples at all, so there's no way to isolate singles from
+      // a raw hit count. Called out with its own reason for the same
+      // reason Total Bases gets one, rather than falling into the generic
+      // "not supported yet" message below.
+      if (statNorm === 'singles' && sportNorm === 'mlb') {
+        return { grade: null, unsupported: true, note: "Singles can't be computed from ESPN's box score data -- it doesn't break out doubles/triples, so a raw hit count can't be split into singles vs. extra-base hits -- needs manual grading." };
+      }
       const STAT_SPECS_BY_SPORT: Record<'mlb' | 'wnba' | 'nba', Record<string, StatSpec[]>> = {
         mlb: MLB_STAT_SPECS, wnba: WNBA_STAT_SPECS, nba: NBA_STAT_SPECS
       };
@@ -740,6 +762,11 @@ Deno.serve(async (req) => {
           const hr = hrIdx >= 0 ? espnStatToNumber(row.stats[hrIdx]) : null;
           const rbi = rbiIdx >= 0 ? espnStatToNumber(row.stats[rbiIdx]) : null;
           value = (hr !== null && rbi !== null) ? hr + rbi : null;
+        } else if (statNorm === 'hrhits') {
+          const hrIdx = row.keys.indexOf('homeRuns'), hitsIdx = row.keys.indexOf('hits');
+          const hr = hrIdx >= 0 ? espnStatToNumber(row.stats[hrIdx]) : null;
+          const hits = hitsIdx >= 0 ? espnStatToNumber(row.stats[hitsIdx]) : null;
+          value = (hr !== null && hits !== null) ? hr + hits : null;
         } else if (statNorm === 'pointsreboundsassists' || statNorm === 'pointsrebounds' || statNorm === 'pointsassists' || statNorm === 'reboundsassists'
           || statNorm === 'ptsrebassists' || statNorm === 'ptsreb' || statNorm === 'ptsassists' || statNorm === 'rebassists'
           || statNorm === 'ptsreboundsassists') {
@@ -1019,8 +1046,16 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Direct report 2026-08-29: "I was not expecting it to try and
+        // resolve the open ended future bets." A long-term futures pick
+        // (Series/Award/Season Win Total) isn't tied to a single game on
+        // a single date, so it can never be "supported" by this per-date
+        // grader -- same is_futures exclusion already applied to schedule
+        // sync (schedule-sync-note) and Missing Data's own checks. It's
+        // handled separately by Grading Exceptions' blank-date sweep, not
+        // by running it through a date-scoped grading pass at all.
         const picks = await db(
-          `picks?select=id,selection,line,bet_type_id,prop_player,prop_stat,doubleheader_game,bet_types(name)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending`
+          `picks?select=id,selection,line,bet_type_id,prop_player,prop_stat,doubleheader_game,bet_types!inner(name,is_futures)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending&bet_types.is_futures=eq.false`
         );
 
         const sportResult = {
