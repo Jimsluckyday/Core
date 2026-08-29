@@ -2648,13 +2648,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <label>To date</label>
             <input id="mdTo" type="date" />
           </div>
-          <div class="field" style="flex: 0 0 auto;">
-            <label>&nbsp;</label>
-            <div class="checkbox-row">
-              <input type="checkbox" id="mdSearchByDateEntered" />
-              <label for="mdSearchByDateEntered" title="A pick's event_date can get corrected away from the day it was actually entered (most often KBO/Tennis, where the real event lands on a different calendar day than when it was posted -- see the Late-night pick check below). Check this to search by the day it was ENTERED instead, so a corrected pick doesn't silently fall out of the date range you're actually working through.">Search by date entered, not event date</label>
-            </div>
-          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          This date range matches a pick whose EVENT date falls in it, or whose ENTERED date does -- so a KBO/Tennis pick entered on one day for a game the next (or previous) day shows up either way you're thinking about it, without needing to guess which one applies before you search.
         </div>
         <div class="field" style="margin-bottom:10px;">
           <label>Find picks missing:</label>
@@ -16242,7 +16238,6 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const statusFilter = $('mdStatus').value;
     const from = $('mdFrom').value;
     const to = $('mdTo').value;
-    const searchByDateEntered = $('mdSearchByDateEntered').checked;
     const checkClosing = $('mdCheckClosing').checked;
     const checkOpening = $('mdCheckOpening').checked;
     const checkHomeAway = $('mdCheckHomeAway').checked;
@@ -16301,25 +16296,40 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let query = `picks?select=id,event_date,date_entered,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,capper_message_timestamp,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields,is_futures)&or=(${conditions.join(',')})`;
-      if (statusFilter) query += `&result=eq.${statusFilter}`;
-      if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
-      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+      let baseQuery = `picks?select=id,event_date,date_entered,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,capper_message_timestamp,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields,is_futures)&or=(${conditions.join(',')})`;
+      if (statusFilter) baseQuery += `&result=eq.${statusFilter}`;
+      if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
+      if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
       // Direct report 2026-08-29: "It found KBO games but my missing data
-      // query did not because I entered them Jun 2 with a date of Jun 3."
-      // event_date is the REAL corrected game date (right where grading/
-      // publishing need it), but a search built around "what I was
-      // entering that day" naturally means the day it was ENTERED, not
-      // whatever event_date got corrected to -- a KBO/Tennis pick whose
-      // event_date moved a day (see the Late-night pick check below) can
-      // silently fall outside a date range scoped the normal way. This
-      // toggle searches date_entered instead when checked, so a corrected
-      // pick doesn't disappear from the exact batch you're working through.
-      const dateField = searchByDateEntered ? 'date_entered' : 'event_date';
-      if (from) query += `&${dateField}=gte.${from}`;
-      if (to) query += `&${dateField}=lte.${to}`;
+      // query did not because I entered them Jun 2 with a date of Jun 3,"
+      // then, on reflection: "I'm trying to create less backtracking
+      // because one that failed today could be one that was put in today
+      // for tomorrow or one from yesterday for today." A manual "search by
+      // date entered instead" toggle (the first fix tried here) still
+      // required knowing in advance which direction a mismatch went before
+      // you could even find it -- exactly the backtracking being asked to
+      // avoid. Fetching by BOTH event_date and date_entered and merging
+      // means a single search for "June 2" catches a pick entered June 2
+      // for a June 3 game AND a pick entered June 1 for a June 2 game,
+      // with no guessing. This never adds noise for a normal pick (where
+      // both dates already match, so it'd be found either way) -- the
+      // union only ever surfaces the exact mismatched-date cases this
+      // exists to catch. "Date entered" is already a real column in the
+      // results table this opens into, so both dates are visible side by
+      // side without any extra digging once a row shows up.
+      let query = baseQuery;
+      if (from) query += `&event_date=gte.${from}`;
+      if (to) query += `&event_date=lte.${to}`;
       query += '&order=event_date.asc';
       let picks = await restAllPages(query);
+      if (from || to) {
+        let byEnteredQuery = baseQuery;
+        if (from) byEnteredQuery += `&date_entered=gte.${from}`;
+        if (to) byEnteredQuery += `&date_entered=lte.${to}`;
+        const byEntered = await restAllPages(byEnteredQuery);
+        const seenIds = new Set(picks.map(p => p.id));
+        for (const p of byEntered) if (!seenIds.has(p.id)) { picks.push(p); seenIds.add(p.id); }
+      }
 
       // Computed here (not inside filterMissingDataRows, which has to stay
       // synchronous -- it's re-run client-side every time a checkbox is
@@ -20891,7 +20901,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 381; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 382; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
