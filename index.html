@@ -16348,12 +16348,25 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const earliestBtn = $(fromId + 'EarliestBtn');
     const runBtn = $(runBtnId);
     if (!earliestBtn || !runBtn) return; // guard in case markup isn't present in some older cached page
+    // Direct report 2026-08-29: "it pulls up the earliest date but a lot
+    // of these tools require an end date or if left open it pulls the
+    // entire history which is not what I want." Every one of these tools
+    // has a matching toId (fromId with "To" in place of "From") -- setting
+    // it to the SAME date turns this into a single-day jump-to-start by
+    // default, instead of leaving the end date open and silently pulling
+    // everything from that day forward through the whole history. Working
+    // through months/years of backfill one day at a time was exactly the
+    // stated use case, so this also saves having to fix the end date by
+    // hand every single time.
+    const toId = fromId.replace(/From$/, 'To');
+    const toField = $(toId);
     earliestBtn.addEventListener('click', async () => {
       earliestBtn.disabled = true;
       try {
         const rows = await rest('picks?select=event_date&order=event_date.asc&limit=1');
         if (!rows.length) return;
         $(fromId).value = rows[0].event_date;
+        if (toField) toField.value = rows[0].event_date;
         runBtn.click();
       } catch (e) {
         alert('Could not find the earliest date: ' + e.message);
@@ -20802,7 +20815,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 377; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 378; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
