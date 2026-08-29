@@ -8320,6 +8320,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const propPlayerCell = isProp
         ? `<input type="text" class="inline-propplayer-input" data-id="${p.id}" value="${escapeHtml(p.prop_player || '')}" style="width:130px;font-family:inherit;font-size:11px;padding:3px 4px;" />`
         : '—';
+      // Direct report 2026-08-29: "I have nowhere in the inline edit or
+      // anywhere in my searches to see what if any prop team is
+      // associated with a player unless I do a full edit." Prop Player,
+      // Selection, Tier, Unit size, Start time, Event name, and Home/Away
+      // are all already editable right in this table -- Prop Team was the
+      // one field left requiring a trip to Full edit just to view OR set,
+      // for the field a fixed player name most directly needs corrected
+      // next. Same plain-text pattern as Prop Player just above; deliberately
+      // NOT a dropdown tied to the sport's registered team list, since
+      // that list is already what "Find & Update Teams / Tournaments"
+      // resolves this field FROM -- this is the manual override for when
+      // that automation hasn't run yet or got it wrong.
+      const propTeamCell = isProp
+        ? `<input type="text" class="inline-propteam-input" data-id="${p.id}" value="${escapeHtml(p.prop_team || '')}" style="width:130px;font-family:inherit;font-size:11px;padding:3px 4px;" />`
+        : '—';
       // CONFIRMED direct request 2026-08-14: correcting a pick's date to
       // match a real match found by hand (e.g. Flashscore) used to require
       // Full edit, a separate screen -- direct feedback that doing this for
@@ -8357,7 +8372,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         startTimeCell,
         missingCell,
         homeAwayCell,
-        syncNoteCell
+        syncNoteCell,
+        propTeamCell
       ];
       const cellsHtml = cells.map((c, i) => {
         // Sort/filter value must stay the PLAIN capper name (not the richer
@@ -8375,7 +8391,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // string (not the input's HTML) is what actually needs to sort.
         // Sits at index 1 now (not 0) since Date entered/Event date swapped
         // display order -- see the cells array above for the full story.
-        const sortVal = i === 1 ? (p.event_date || '') : (i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : String(c)))))))))));
+        const sortVal = i === 1 ? (p.event_date || '') : (i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : (i === 19 ? (p.prop_team || '') : String(c))))))))))));
         const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
@@ -8419,7 +8435,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // "Status" (Published/Draft) removed -- direct feedback that it wasn't
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
-    const cols = ['Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note'];
+    const cols = ['Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team'];
     // Pick was excluded here when Selection first became a live input
     // (v218), matching the same pattern as Tier/Unit size -- but direct
     // feedback confirmed this broke a real, regularly-used workflow: the
@@ -9817,6 +9833,40 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
   });
 
+  // Direct report 2026-08-29: "I have nowhere in the inline edit or
+  // anywhere in my searches to see what if any prop team is associated
+  // with a player unless I do a full edit." Same live-input pattern as
+  // Prop Player just above, including clearing a stale schedule_sync_note
+  // -- a note about this pick's roster/team match is invalidated the
+  // moment the team itself is hand-corrected here, same reasoning as
+  // Selection/Prop Player.
+  document.querySelectorAll('input.inline-propteam-input').forEach(inp => {
+    let lastSaved = inp.value;
+    inp.addEventListener('blur', async () => {
+      const value = inp.value.trim();
+      if (value === lastSaved) return;
+      const op = opener();
+      if (!op) return;
+      const id = inp.getAttribute('data-id');
+      inp.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ prop_team: value || null, schedule_sync_status: null, schedule_sync_note: null })
+        });
+        lastSaved = value;
+        const cell = inp.closest('td');
+        if (cell) cell.setAttribute('data-value', value.toLowerCase());
+        flashSaveStatus(inp, true);
+      } catch (e) {
+        flashSaveStatus(inp, false, e.message);
+      } finally {
+        inp.disabled = false;
+      }
+    });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+  });
+
   document.querySelectorAll('input.inline-eventname-input').forEach(inp => {
     let lastSaved = inp.value;
     inp.addEventListener('blur', async () => {
@@ -10008,7 +10058,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // masking this gap until Missing Data (v215) made this the only
       // export path for that workflow. Added as the first column, reading
       // the same data-pick-id attribute the row itself already carries.
-      const cols = ['ID', 'Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Source Image'];
+      const cols = ['ID', 'Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -10121,9 +10171,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         // Sync note (table col 18) is plain text, same as Missing above.
         const syncNoteCell = row.children[18];
         const syncNoteVal = csvField(syncNoteCell ? syncNoteCell.textContent.trim() : '');
+        // Prop team (table col 19) holds a live input, added 2026-08-29 --
+        // same read-the-input-value reasoning as Event name/Start time above.
+        const propTeamCell = row.children[19];
+        const propTeamVal = csvField(propTeamCell ? (propTeamCell.querySelector('input') ? propTeamCell.querySelector('input').value.trim() : '') : '');
         const sourceImage = csvField(row.dataset.sourceImage || '');
         const id = csvField(row.dataset.pickId || '');
-        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, sourceImage];
+        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, propTeamVal, sourceImage];
       });
       // Direct request 2026-08-28: "we need this built into the ruleset of
       // the file we export so this can be cross compatible with any
@@ -20932,7 +20986,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 384; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 385; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
