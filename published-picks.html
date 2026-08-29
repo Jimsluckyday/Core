@@ -1145,6 +1145,18 @@
     }
     loadBoard();
     loadTrackRecord();
+
+    // Chrome (and other browsers) can restore this whole page from an
+    // in-memory snapshot on back/forward navigation ("bfcache") instead of
+    // re-running any of the load above, so the totals freeze at whatever
+    // they were when the visitor left. Force a real reload of the live
+    // numbers whenever that happens.
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted && config && config.url && config.anonKey) {
+        loadBoard();
+        loadTrackRecord();
+      }
+    });
   })();
 })();
 </script>
