@@ -9739,9 +9739,22 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const id = inp.getAttribute('data-id');
       inp.disabled = true;
       try {
+        // CONFIRMED REAL GAP, direct report 2026-08-29: "these both have
+        // lines... I resolved [it] after it threw the error. The tool
+        // never removes a stale line so they stay there all the time...
+        // even once we resolve an issue the note has always stayed." A
+        // schedule_sync_note is ALWAYS about whether this exact selection/
+        // player text matched a real game or roster -- once that text is
+        // hand-corrected here, the old note is talking about text that no
+        // longer exists on this pick, which reads as a still-open problem
+        // forever even after the real fix. Clearing it here (a no-op if
+        // there was never one) means a corrected pick stops looking
+        // broken the moment the actual correction is saved, instead of
+        // waiting for some future automated re-check that may never run
+        // again for an old date.
         await op.rest('picks?id=eq.' + id, {
           method: 'PATCH',
-          body: JSON.stringify({ selection: value })
+          body: JSON.stringify({ selection: value, schedule_sync_status: null, schedule_sync_note: null })
         });
         lastSaved = value;
         // Keep the filter dropdown's own data-value in sync with the
@@ -9769,9 +9782,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const id = inp.getAttribute('data-id');
       inp.disabled = true;
       try {
+        // Same stale-note fix as the Selection input just above -- a
+        // roster-check note names the exact (wrong) player text it
+        // couldn't match, so it's specifically invalidated the moment
+        // that text is corrected here.
         await op.rest('picks?id=eq.' + id, {
           method: 'PATCH',
-          body: JSON.stringify({ prop_player: value || null })
+          body: JSON.stringify({ prop_player: value || null, schedule_sync_status: null, schedule_sync_note: null })
         });
         lastSaved = value;
         const cell = inp.closest('td');
@@ -20901,7 +20918,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 382; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 383; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
