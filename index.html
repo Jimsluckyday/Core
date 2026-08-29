@@ -34,9 +34,20 @@
      (No-tiers checkbox, edit/delete links) that made them read as noisier
      than plain Team/Prop Stat chips -- those extras now only show on
      hover/focus so the default view is just the name. */
-  .chip-hover-controls { display: none; align-items: center; gap: 4px; }
+  /* CONFIRMED REAL BUG, direct report 2026-08-28: "when I hover over the
+     pick it slid it down a row below... making them impossible to
+     update." Toggling display:none -> inline-flex changes the chip's own
+     rendered width the instant it's hovered -- in a wrapping chip list,
+     that growth can push the chip itself onto the next line, which moves
+     it out from under the cursor, which un-hovers it, which shrinks it
+     back and snaps it back up, re-triggering the hover -- an infinite
+     flicker that never gives you a stable target to click. Reserving the
+     same layout space at all times (opacity/pointer-events instead of
+     display) keeps the chip's width and position completely fixed
+     whether or not it's hovered, so it can never move. */
+  .chip-hover-controls { display: inline-flex; align-items: center; gap: 4px; opacity: 0; pointer-events: none; transition: opacity 0.1s; }
   .chip-hover:hover .chip-hover-controls,
-  .chip-hover:focus-within .chip-hover-controls { display: inline-flex; }
+  .chip-hover:focus-within .chip-hover-controls { opacity: 1; pointer-events: auto; }
 
   .ticket-app {
     background: var(--paper);
@@ -20791,7 +20802,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 375; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 376; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
