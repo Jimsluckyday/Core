@@ -1177,9 +1177,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
             &#9888; Always double-check the date (and sport, where used) before clicking any button below — these write real, permanent changes to your data. Each one will ask you to confirm first, but the date field itself is never auto-filled for you.
           </div>
           <div class="row">
-            <div class="field">
+            <div class="field" style="flex: 0 0 auto; min-width: 220px;">
               <label>Date</label>
-              <input id="autoDate" type="date" />
+              <div style="display:flex; gap:4px; align-items:center;">
+                <input id="autoDate" type="date" style="width:auto;" />
+                <button class="ghost small" id="autoDateEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+              </div>
             </div>
             <div class="field">
               <label>Sport (used by "Find &amp; Update Teams / Tournaments", "Find Missing Odds", and "Find &amp; Update Results" — Pick Info always covers every sport)</label>
@@ -1887,9 +1890,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </p>
       <div id="scorecardPanel" style="display:none;">
         <div class="row">
-          <div class="field">
+          <div class="field" style="flex: 0 0 auto; min-width: 220px;">
             <label>Date</label>
-            <input id="scDate" type="date" />
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="scDate" type="date" style="width:auto;" />
+              <button class="ghost small" id="scDateEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
           </div>
           <div style="align-self:flex-end;">
             <button id="runScorecardBtn">Show scorecards for this date</button>
@@ -16344,10 +16350,17 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // then clicks that section's own existing Run/Preview/Scan button
   // exactly as if it had been clicked by hand, so each section's own
   // fetch/validation logic runs completely unchanged.
+  // runBtnId is OPTIONAL, direct request 2026-08-29: "the Automation tool
+  // doesn't have the earliest date option." That panel has a single Date
+  // field shared by 5+ separate write-action buttons (grading, backfill,
+  // etc.), each already requiring its own confirm() before doing anything
+  // -- there's no single correct "Run" button to auto-click the way every
+  // other Earliest button here does, so it just jumps the date and leaves
+  // picking which tool to run to the user, same as always.
   function wireEarliestDateButton(fromId, runBtnId) {
     const earliestBtn = $(fromId + 'EarliestBtn');
-    const runBtn = $(runBtnId);
-    if (!earliestBtn || !runBtn) return; // guard in case markup isn't present in some older cached page
+    const runBtn = runBtnId ? $(runBtnId) : null;
+    if (!earliestBtn || (runBtnId && !runBtn)) return; // guard in case markup isn't present in some older cached page
     // Direct report 2026-08-29: "it pulls up the earliest date but a lot
     // of these tools require an end date or if left open it pulls the
     // entire history which is not what I want." Every one of these tools
@@ -16357,9 +16370,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     // everything from that day forward through the whole history. Working
     // through months/years of backfill one day at a time was exactly the
     // stated use case, so this also saves having to fix the end date by
-    // hand every single time.
-    const toId = fromId.replace(/From$/, 'To');
-    const toField = $(toId);
+    // hand every single time. Only applies when fromId actually ends in
+    // "From" -- the single-date Automation panel above has no separate
+    // end-date field to mirror onto at all.
+    const toId = /From$/.test(fromId) ? fromId.replace(/From$/, 'To') : null;
+    const toField = toId ? $(toId) : null;
     earliestBtn.addEventListener('click', async () => {
       earliestBtn.disabled = true;
       try {
@@ -16367,7 +16382,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         if (!rows.length) return;
         $(fromId).value = rows[0].event_date;
         if (toField) toField.value = rows[0].event_date;
-        runBtn.click();
+        if (runBtn) runBtn.click();
       } catch (e) {
         alert('Could not find the earliest date: ' + e.message);
       } finally {
@@ -16401,6 +16416,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     ['pouFrom', 'previewParlayOddsUnavailableBtn'],
     ['bupFrom', 'previewBulkUnpublishBtn']
   ].forEach(([fromId, runBtnId]) => wireEarliestDateButton(fromId, runBtnId));
+  wireEarliestDateButton('autoDate', null);
+  wireEarliestDateButton('scDate', 'runScorecardBtn');
 
   // ---------- Grading corrections (bulk apply back onto exact picks) ----------
   $('toggleGradingCorrectionsBtn').addEventListener('click', () => {
@@ -20815,7 +20832,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 378; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 379; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
