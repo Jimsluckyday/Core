@@ -2121,7 +2121,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Scans every capper × tier, capper × bet type, and capper × sport/bet-type combo for a record notable enough to act on -- either promote (Travy going 10-0 on parlays) or watch closely (a real cold streak in one specific slice, not just an overall bad day). Ranked by a Wilson confidence bound, not raw win %, so a 2-0 record can never outrank a real 10-0 one -- it asks "how good is this, even in the worst plausible case given how few picks I've seen," which naturally demands more proof from a smaller sample. The minimum sample size is deliberately NOT a fixed number -- it's a percentage of the average capper's total graded volume, recomputed live every time this runs, so the bar rises on its own as your overall data grows instead of staying stuck at whatever felt right on day one (the absolute floor just prevents it from allowing something silly while the average itself is still tiny). This is a snapshot for you to look at and act on by hand -- nothing here feeds the scoring formula yet.
+          Scans every capper × tier, capper × bet type, and capper × sport/bet-type combo for a record notable enough to act on -- either promote (Travy going 10-0 on parlays) or watch closely (a real cold streak in one specific slice, not just an overall bad day). Ranked by a Wilson confidence bound, not raw win %, so a 2-0 record can never outrank a real 10-0 one -- it asks "how good is this, even in the worst plausible case given how few picks I've seen," which naturally demands more proof from a smaller sample. The minimum sample size is deliberately NOT a fixed number -- it's a percentage of the average capper's total graded volume, recomputed live every time this runs, so the bar rises on its own as your overall data grows instead of staying stuck at whatever felt right on day one (the absolute floor just prevents it from allowing something silly while the average itself is still tiny). Direct report 2026-08-29: a capper below that floor used to just vanish from the report with no trace -- a third section, "Still building sample," now lists them by their own overall record (not sliced) with how many more decisions they need, so a quiet low-volume capper never gets forgotten just for not having posted enough yet. This is a snapshot for you to look at and act on by hand -- nothing here feeds the scoring formula yet.
         </div>
       </div>
     </div>
@@ -13772,7 +13772,30 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     hot.sort((a, b) => b.lower - a.lower);
     cold.sort((a, b) => a.upper - b.upper);
 
-    return { hot, cold, minSample, avgVolume, totalPicks: picks.length, totalCappers: cappersSeen.size };
+    // Direct report 2026-08-29: "a small consistent capper who makes 1-2
+    // picks a day... would get ignored for months if not ever." The
+    // slice-level cutoff above is doing its real job correctly (an
+    // adaptive, statistically-sound floor beats a fixed one) -- but a
+    // capper who simply hasn't cleared it yet at the OVERALL level
+    // doesn't appear anywhere in this report at all, hot or cold,
+    // silently. This is a SEPARATE, capper-level (not sliced by tier/
+    // bet-type/sport -- that would just be a wall of thin, unreadable
+    // rows) rollup specifically so a low-volume capper is still visible
+    // somewhere, with their real progress toward the same floor, instead
+    // of vanishing until some month they happen to cross it.
+    const overallByCapper = {};
+    for (const p of picks) {
+      const id = p.capper_id;
+      if (!overallByCapper[id]) overallByCapper[id] = { capperName: p.cappers ? p.cappers.name : '—', wins: 0, losses: 0 };
+      if (p.result === 'win') overallByCapper[id].wins++; else overallByCapper[id].losses++;
+    }
+    const building = Object.values(overallByCapper)
+      .map(c => ({ ...c, n: c.wins + c.losses }))
+      .filter(c => c.n < minSample)
+      .map(c => ({ ...c, winPct: c.n > 0 ? Math.round((1000 * c.wins) / c.n) / 10 : null, needed: minSample - c.n }))
+      .sort((a, b) => b.n - a.n);
+
+    return { hot, cold, building, minSample, avgVolume, totalPicks: picks.length, totalCappers: cappersSeen.size };
   }
 
   function notableStatsRowHtml(e) {
@@ -13782,6 +13805,15 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       <td>${e.wins}-${e.losses}</td>
       <td>${e.winPct}%</td>
       <td>${Math.round(e.lower * 1000) / 10}% – ${Math.round(e.upper * 1000) / 10}%</td>
+    </tr>`;
+  }
+
+  function notableStatsBuildingRowHtml(c) {
+    return `<tr>
+      <td>${escapeHtml(c.capperName)}</td>
+      <td>${c.wins}-${c.losses}</td>
+      <td>${c.winPct === null ? '—' : c.winPct + '%'}</td>
+      <td>${c.needed}</td>
     </tr>`;
   }
 
@@ -13797,6 +13829,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const coldHtml = result.cold.length
       ? result.cold.map(notableStatsRowHtml).join('')
       : `<tr><td colspan="5">Nothing clears the bar yet.</td></tr>`;
+    const buildingHtml = result.building.length
+      ? result.building.map(notableStatsBuildingRowHtml).join('')
+      : `<tr><td colspan="4">Every capper with any graded picks has already cleared the sample floor.</td></tr>`;
     win.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Notable Statistics</title>
 <style>
@@ -13822,8 +13857,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     <thead><tr><th>Capper</th><th>Slice</th><th>Record</th><th>Win %</th><th>Wilson range</th></tr></thead>
     <tbody>${coldHtml}</tbody>
   </table>
+  <p class="stub-title" style="margin-bottom:8px;">&#128203; Still building sample -- not enough decisions yet to judge</p>
+  <table class="picks-table">
+    <thead><tr><th>Capper</th><th>Record (overall)</th><th>Win %</th><th>Picks needed to reach the floor</th></tr></thead>
+    <tbody>${buildingHtml}</tbody>
+  </table>
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
-    "Wilson range" is the 95% confidence interval on that slice's true win rate given its sample size -- a positive entry's LOWER bound already clears the bar (so it's a real signal, not lucky small-sample noise); a negative entry's UPPER bound already sits below the mirrored bar (so it's a real cold pattern, not an unlucky blip). This is a snapshot for you to act on by hand -- nothing here feeds the scoring formula yet.
+    "Wilson range" is the 95% confidence interval on that slice's true win rate given its sample size -- a positive entry's LOWER bound already clears the bar (so it's a real signal, not lucky small-sample noise); a negative entry's UPPER bound already sits below the mirrored bar (so it's a real cold pattern, not an unlucky blip). "Still building sample" is deliberately NOT sliced by tier/bet-type/sport the way the two tables above are -- that would just be a wall of thin, unreadable rows for every capper at once -- it's each capper's own OVERALL record, so a low-volume capper never silently disappears from this report just for not having posted enough yet; they show up here with their real progress toward the same floor instead. This is a snapshot for you to act on by hand -- nothing here feeds the scoring formula yet.
   </div>
   ${csvExportPopoutScript('notable-statistics')}
 </body></html>`);
@@ -20832,7 +20872,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 379; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 380; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
