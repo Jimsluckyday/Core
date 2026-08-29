@@ -632,35 +632,125 @@ Deno.serve(async (req) => {
       return cache[eventId];
     }
 
+    // Direct report 2026-08-29: "I see on their website it's listed on the
+    // box score" -- confirmed the user was right. ESPN's site API box
+    // score never exposes doubles/triples (see the long comment above
+    // deriveOuts for the full story on that), but MLB's OWN official Stats
+    // API -- already proven reliable elsewhere in this project (mlb-
+    // schedule-sync, schedule-sync-backfill, validate-mlb-player-txt) --
+    // carries doubles/triples/totalBases as real, direct per-player
+    // fields. Confirmed directly against a real game (2025-06-02, MIL @
+    // CIN, Elly De La Cruz): {"doubles":0,"triples":0,"totalBases":1,...}
+    // right on the batting stat line. Fetched ONLY for Total Bases/Singles
+    // (the two stats ESPN structurally can't provide) -- everything else
+    // stays on the existing ESPN-based path, which already works fine.
+    const mlbStatsApiGamesCache: Record<string, { gamePk: string; isFinal: boolean }[]> = {};
+    async function fetchMlbStatsApiGames(targetDateStr: string) {
+      if (targetDateStr in mlbStatsApiGamesCache) return mlbStatsApiGamesCache[targetDateStr];
+      try {
+        const res = await espnFetch(`https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${targetDateStr}`);
+        const data = res.ok ? await res.json() : null;
+        const rawGames = (data && data.dates && data.dates[0] && data.dates[0].games) || [];
+        mlbStatsApiGamesCache[targetDateStr] = rawGames.map((g: any) => ({
+          gamePk: String(g.gamePk), isFinal: !!(g.status && g.status.abstractGameState === 'Final')
+        }));
+      } catch {
+        mlbStatsApiGamesCache[targetDateStr] = [];
+      }
+      return mlbStatsApiGamesCache[targetDateStr];
+    }
+    const mlbStatsApiBoxscoreCache: Record<string, any> = {};
+    async function fetchMlbStatsApiBoxscore(gamePk: string) {
+      if (gamePk in mlbStatsApiBoxscoreCache) return mlbStatsApiBoxscoreCache[gamePk];
+      await new Promise(resolve => setTimeout(resolve, 250));
+      try {
+        const res = await espnFetch(`https://statsapi.mlb.com/api/v1/game/${gamePk}/boxscore`);
+        mlbStatsApiBoxscoreCache[gamePk] = res.ok ? await res.json() : null;
+      } catch {
+        mlbStatsApiBoxscoreCache[gamePk] = null;
+      }
+      return mlbStatsApiBoxscoreCache[gamePk];
+    }
+    // Same "check everywhere, only accept a UNIQUE match" discipline as
+    // the ESPN-based lookup elsewhere in this file -- a same-day name
+    // collision across two different games must never be silently
+    // guessed. Doubleheader disambiguation (see the ESPN path's own
+    // handling) isn't ported here -- left as a known gap, since it's a
+    // much rarer combination (two Total Bases/Singles props on the same
+    // doubleheader player) than worth blocking this fix on.
+    async function findMlbStatsApiBatting(playerNorm: string, targetDateStr: string): Promise<{ batting: any; status: 'ok' | 'not_found' | 'not_final' | 'ambiguous' }> {
+      const games = await fetchMlbStatsApiGames(targetDateStr);
+      const matches: any[] = [];
+      let foundNotFinal = false;
+      for (const g of games) {
+        const box = await fetchMlbStatsApiBoxscore(g.gamePk);
+        if (!box || !box.teams) continue;
+        for (const side of ['home', 'away'] as const) {
+          const team = box.teams[side];
+          if (!team || !team.players) continue;
+          for (const pid of Object.keys(team.players)) {
+            const p = team.players[pid];
+            const fullName: string = (p.person && p.person.fullName) || '';
+            if (!fullName) continue;
+            const nameTokens = fullName.trim().split(/\s+/);
+            const surnameNorm = nameTokens.length ? normalize(nameTokens[nameTokens.length - 1]) : '';
+            if (normalize(fullName) !== playerNorm && surnameNorm !== playerNorm) continue;
+            const batting = p.stats && p.stats.batting;
+            if (!batting || batting.plateAppearances === undefined) continue; // registered on roster, didn't actually play
+            if (!g.isFinal) { foundNotFinal = true; continue; }
+            matches.push(batting);
+          }
+        }
+      }
+      if (!matches.length) return { batting: null, status: foundNotFinal ? 'not_final' : 'not_found' };
+      if (matches.length > 1) return { batting: null, status: 'ambiguous' };
+      return { batting: matches[0], status: 'ok' };
+    }
+
     async function gradePlayerProp(
       pick: any, sportNorm: 'mlb' | 'wnba' | 'nba', espnPath: string, games: any[], boxCache: Record<string, any>
     ): Promise<{ grade: 'win' | 'loss' | 'push' | null; note: string | null; notFinal?: boolean; unsupported?: boolean; matchedName?: string }> {
       const statNorm = normalize(pick.prop_stat || '');
-      // Confirmed real finding (direct report): Total Bases can't be
-      // computed from this box score at all -- see the long comment above
-      // deriveOuts for the full story. Called out explicitly here with its
-      // own reason rather than falling into the generic "not supported"
-      // message below, since this one's worth explaining, not just noting.
-      if (statNorm === 'totalbases' && sportNorm === 'mlb') {
-        return { grade: null, unsupported: true, note: "Total Bases can't be computed from ESPN's box score data -- it doesn't break out doubles/triples, and the only rate stats available here (AVG/OBP/SLG) are season totals, not this game's -- needs manual grading." };
+      const playerNorm = normalize(pick.prop_player || '');
+      if (!playerNorm) return { grade: null, note: 'No player name recorded on this pick -- needs manual grading.' };
+
+      if ((statNorm === 'totalbases' || statNorm === 'singles') && sportNorm === 'mlb') {
+        const result = await findMlbStatsApiBatting(playerNorm, targetDate);
+        if (result.status === 'not_final') {
+          return { grade: null, note: 'Matched to a game today via the MLB Stats API, but it has not been marked final yet -- check back later.', notFinal: true };
+        }
+        if (result.status === 'ambiguous') {
+          return { grade: null, note: `"${pick.prop_player}" matched more than one MLB Stats API box score row on this date -- needs manual review.` };
+        }
+        if (result.status === 'ok' && result.batting) {
+          const value = statNorm === 'totalbases'
+            ? result.batting.totalBases
+            : result.batting.hits - result.batting.doubles - result.batting.triples - result.batting.homeRuns;
+          const line = Number(pick.line);
+          const isOver = normalize(pick.selection) === 'over';
+          const isUnder = normalize(pick.selection) === 'under';
+          if (!isOver && !isUnder) {
+            return { grade: null, note: `Selection "${pick.selection}" isn't a recognized Over/Under call -- needs manual review.` };
+          }
+          if (value === line) return { grade: 'push', note: null };
+          const won = isOver ? value > line : value < line;
+          return { grade: won ? 'win' : 'loss', note: null };
+        }
+        // result.status === 'not_found' -- returned directly here rather
+        // than falling through to the STAT_SPECS lookup below, which would
+        // incorrectly report "not supported" (totalbases/singles were
+        // deliberately never added to MLB_STAT_SPECS, since they're
+        // handled entirely through this separate MLB Stats API path) --
+        // the real, more useful reason is a name/spelling mismatch, same
+        // as the ESPN path's own "No player found" message below.
+        return { grade: null, note: `No player named "${pick.prop_player}" found in any MLB Stats API box score on this date -- check spelling, or needs manual grading.` };
       }
-      // Same root cause as Total Bases just above -- Singles = hits minus
-      // doubles/triples/home runs, and this box score never breaks out
-      // doubles/triples at all, so there's no way to isolate singles from
-      // a raw hit count. Called out with its own reason for the same
-      // reason Total Bases gets one, rather than falling into the generic
-      // "not supported yet" message below.
-      if (statNorm === 'singles' && sportNorm === 'mlb') {
-        return { grade: null, unsupported: true, note: "Singles can't be computed from ESPN's box score data -- it doesn't break out doubles/triples, so a raw hit count can't be split into singles vs. extra-base hits -- needs manual grading." };
-      }
+
       const STAT_SPECS_BY_SPORT: Record<'mlb' | 'wnba' | 'nba', Record<string, StatSpec[]>> = {
         mlb: MLB_STAT_SPECS, wnba: WNBA_STAT_SPECS, nba: NBA_STAT_SPECS
       };
       const specs = STAT_SPECS_BY_SPORT[sportNorm][statNorm];
       if (!specs) return { grade: null, unsupported: true, note: `Stat "${pick.prop_stat}" is not supported by this grader yet -- needs manual grading.` };
-
-      const playerNorm = normalize(pick.prop_player || '');
-      if (!playerNorm) return { grade: null, note: 'No player name recorded on this pick -- needs manual grading.' };
 
       // Check every one of the day's games for this sport -- same "check
       // everywhere, only accept a UNIQUE match" discipline as team
