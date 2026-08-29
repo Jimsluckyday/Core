@@ -502,6 +502,16 @@ Deno.serve(async (req) => {
       // as both a hit and a homer -- the same convention PrizePicks/
       // Underdog use for this exact combo), not a boolean.
       hrhits: [{ key: '', group: 'batting' }],
+      // Direct report 2026-08-29, same Rhino combo family as hrhits above
+      // but a genuinely different shape -- confirmed with the user rather
+      // than assumed: "1 HR & a hit so 2 hits with one being a HR." Unlike
+      // hrhits (a literal sum), this is a yes/no condition -- did the
+      // player BOTH hit a home run AND finish with 2+ total hits -- graded
+      // as 1 (true) or 0 (false) against the same Over(-0.5) structure,
+      // not a count. Confirmed this materially changes the grade vs. the
+      // summed reading for a real June 3 2025 batch (a player with 2 hits
+      // and 0 HR is a loss here, a win under the summed convention).
+      hr2hits: [{ key: '', group: 'batting' }],
       runs: [{ key: 'runs', group: 'batting' }],
       strikeouts: [{ key: 'strikeouts', group: 'pitching' }, { key: 'strikeouts', group: 'batting' }],
       earnedrunsallowed: [{ key: 'earnedRuns', group: 'pitching' }],
@@ -865,6 +875,11 @@ Deno.serve(async (req) => {
           const hr = hrIdx >= 0 ? espnStatToNumber(row.stats[hrIdx]) : null;
           const hits = hitsIdx >= 0 ? espnStatToNumber(row.stats[hitsIdx]) : null;
           value = (hr !== null && hits !== null) ? hr + hits : null;
+        } else if (statNorm === 'hr2hits') {
+          const hrIdx = row.keys.indexOf('homeRuns'), hitsIdx = row.keys.indexOf('hits');
+          const hr = hrIdx >= 0 ? espnStatToNumber(row.stats[hrIdx]) : null;
+          const hits = hitsIdx >= 0 ? espnStatToNumber(row.stats[hitsIdx]) : null;
+          value = (hr !== null && hits !== null) ? ((hr >= 1 && hits >= 2) ? 1 : 0) : null;
         } else if (statNorm === 'pointsreboundsassists' || statNorm === 'pointsrebounds' || statNorm === 'pointsassists' || statNorm === 'reboundsassists'
           || statNorm === 'ptsrebassists' || statNorm === 'ptsreb' || statNorm === 'ptsassists' || statNorm === 'rebassists'
           || statNorm === 'ptsreboundsassists') {
