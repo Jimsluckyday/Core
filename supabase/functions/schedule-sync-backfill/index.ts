@@ -862,6 +862,26 @@
 //     on purpose, as a record this path was tried and confirmed dead, not
 //     just never attempted.
 //
+// 39. CONFIRMED FIX, direct report 2026-08-30: "Venezuela" came back "no
+//     matching game found" on 2025-06-05 despite the message's own claim
+//     to check "any real tournament windows within 30 days" -- that claim
+//     was never actually true. getCandidateQueryDates only ever added ONE
+//     midpoint date per matching row in the `tournaments` table, never a
+//     real day-by-day scan -- for a rolling qualifying campaign playing
+//     matchdays days apart, the midpoint can land nowhere near any real
+//     game. Confirmed live: Venezuela's real match (Bolivia at Venezuela,
+//     a real CONMEBOL World Cup Qualifier this file's own
+//     SOCCER_COMPETITION_SLUGS already covers) was on 2025-06-06, one day
+//     after this pick's own event_date -- a date this function never
+//     queried at all, tournaments table or not. Fixed with a small,
+//     unconditional +/-2 day buffer around the TARGET date itself (same
+//     reasoning already proven for KBO's own +/-1 day window elsewhere in
+//     this file), on top of the existing tournament-midpoint lookup, not
+//     instead of it. Shared by both Soccer and Tennis (same helper
+//     function) -- harmless for Tennis, which was already effectively
+//     protected from this exact gap by ESPN's own "returns the whole
+//     tournament regardless of date" quirk (see Fix #13).
+//
 // Run it once per date you want to catch up: POST /schedule-sync-backfill?date=2026-06-01
 // Optionally add &sport=MLB to run just one sport at a time, or &skipProps=true
 // to only touch game_start_time/home_away and never prop_team/event_name.
@@ -1084,7 +1104,27 @@ async function getCandidateQueryDates(
   db: (path: string, options?: RequestInit) => Promise<any>,
   sportId: string, targetDate: string, bufferDays: number
 ): Promise<string[]> {
-  const dates = new Set<string>([targetDate.replace(/-/g, '')]);
+  // CONFIRMED REAL BUG, direct report 2026-08-30: "Venezuela" came back
+  // "no matching game found" for 2025-06-05 even though the message
+  // claims to check "any real tournament windows within 30 days" -- that
+  // claim was never actually true. This only ever added ONE midpoint date
+  // per matching row in the `tournaments` table (see below), never a real
+  // day-by-day scan -- for a rolling qualifying campaign playing matchdays
+  // days apart, the midpoint can easily land nowhere near any of them.
+  // Confirmed live: Venezuela's real match (Bolivia at Venezuela) was on
+  // 2025-06-06, one day after this pick's own event_date -- a date this
+  // function never queried at all, tournaments table or not. Fixed with a
+  // small, cheap, unconditional buffer around the TARGET date itself
+  // (same reasoning already proven elsewhere in this file for KBO's own
+  // +/-1 day window) -- catches this exact class of one-day-off case
+  // (timezone/qualifier-date attribution drift) regardless of whether the
+  // tournaments table has anything registered for it at all.
+  const dates = new Set<string>();
+  for (const offset of [-2, -1, 0, 1, 2]) {
+    const d = new Date(targetDate + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + offset);
+    dates.add(d.toISOString().slice(0, 10).replace(/-/g, ''));
+  }
   try {
     const target = new Date(targetDate + 'T00:00:00Z').getTime();
     const bufferMs = bufferDays * 24 * 60 * 60 * 1000;
@@ -1518,7 +1558,7 @@ Deno.serve(async (req) => {
                 }
               }
               const updatePayload: Record<string, unknown> = { schedule_sync_status: 'unmatched' };
-              let note = `Could not find ${missingTokens.map(t => `"${t}"`).join(', ')} on any ATP/WTA match near ${targetDate} (checked that date plus any real tournament windows within 30 days of it) -- may be a name spelling issue, or the tournament may not be in your tournaments table yet.${suggestions.length ? ' ' + suggestions.join(', ') + '.' : ''}`;
+              let note = `Could not find ${missingTokens.map(t => `"${t}"`).join(', ')} on any ATP/WTA match near ${targetDate} (checked that date +/-2 days, plus any real tournament windows registered within 30 days of it) -- may be a name spelling issue, or the tournament may not be in your tournaments table yet.${suggestions.length ? ' ' + suggestions.join(', ') + '.' : ''}`;
               if (ambiguousTournament && !skipProps) {
                 updatePayload.event_name = ambiguousTournament;
                 note += ` Event name set to "${ambiguousTournament}" anyway -- every real player with this name is playing that same tournament, even though which specific one (and their exact match/start time) can't be told apart from the name alone.`;
@@ -2398,7 +2438,7 @@ Deno.serve(async (req) => {
             }
             const pickOwnDate = pick.event_date || targetDate;
             let dateNote = ` on ${pickOwnDate}`;
-            if (isSoccer) dateNote = ` (checked ${pickOwnDate} plus any real tournament windows within 30 days of it)`;
+            if (isSoccer) dateNote = ` (checked ${pickOwnDate} +/-2 days, plus any real tournament windows registered within 30 days of it)`;
             else if (isKBO) dateNote = ` (checked ${pickOwnDate} plus the day before and after)`;
             const note = `No matching ${ourSport.name} game found for "${pick.selection}"${dateNote}.${suggestionText}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
