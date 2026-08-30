@@ -125,13 +125,39 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Fetch every team's current roster (typically 2-16 teams playing on
-    // a given day, well within reasonable free-API use).
+    // LIKELY FIX, NOT independently confirmed against a real response (same
+    // honesty standard as this file's own top-of-file caveat) -- direct
+    // report: "Matthew Tchachuk was not found on any current roster playing
+    // on 2025-06-04" for a real Stanley Cup Final game. /current always
+    // returns the CURRENT (as-of-whenever-this-runs) roster, not a
+    // historical snapshot for the actual backfill date -- the exact same
+    // bug already found and fixed for MLB (see this repo's schedule-sync-
+    // backfill Fix #4, which found MLB's Stats API accepts a real date=
+    // param). The NHL's api-web.nhle.com doesn't expose an equivalent date
+    // parameter on /roster, but does expose a season-specific roster
+    // endpoint (/roster/{team}/{season}, season formatted like
+    // "20242025") -- computed here from targetDate assuming the standard
+    // NHL season boundary (a season starting in year Y runs roughly July Y
+    // through June Y+1). Falls back to /current if the season-specific
+    // fetch fails for any reason, so this can only ever help, never make a
+    // working case newly fail. Needs a real re-run against this exact
+    // Tchachuk case to confirm the season endpoint actually resolves it.
+    function nhlSeasonFor(dateStr: string): string {
+      const [y, m] = dateStr.split('-').map(Number);
+      const startYear = m >= 7 ? y : y - 1;
+      return `${startYear}${startYear + 1}`;
+    }
+    const season = nhlSeasonFor(targetDate);
+
+    // Fetch every team's roster for the season covering targetDate
+    // (typically 2-16 teams playing on a given day, well within reasonable
+    // free-API use).
     const rosters: { abbrev: string; teamName: string; opponent: string; players: string[] }[] = [];
     let loggedFirstRoster = false;
     for (const t of teamsToday) {
       try {
-        const rosterRes = await nhlFetch(`https://api-web.nhle.com/v1/roster/${t.abbrev}/current`);
+        let rosterRes = await nhlFetch(`https://api-web.nhle.com/v1/roster/${t.abbrev}/${season}`);
+        if (!rosterRes.ok) rosterRes = await nhlFetch(`https://api-web.nhle.com/v1/roster/${t.abbrev}/current`);
         if (!rosterRes.ok) continue;
         const rosterData = await rosterRes.json();
         if (!loggedFirstRoster) {
