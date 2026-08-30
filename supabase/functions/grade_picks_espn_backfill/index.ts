@@ -1177,8 +1177,17 @@ Deno.serve(async (req) => {
             }
           }
 
+          // CONFIRMED REAL BUG, direct investigation 2026-08-29: every
+          // Spread/Total/Total(Sets) pick failed with "a real ... count or
+          // this pick's own line wasn't available" even after directly
+          // confirming (via a live simulation against real ESPN data) that
+          // the games/sets counts themselves were computing correctly.
+          // Root cause: this select clause never included `line` at all --
+          // pick.line was undefined on every row regardless of whether the
+          // match data was good, which is exactly why Moneyline (the only
+          // bet type that doesn't need a line) was the only one working.
           const tennisPicks = await db(
-            `picks?select=id,selection,bet_type_id,bet_types!inner(name,is_futures)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending&bet_types.is_futures=eq.false`
+            `picks?select=id,selection,line,bet_type_id,bet_types!inner(name,is_futures)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending&bet_types.is_futures=eq.false`
           );
           const tennisSportResult = {
             sport: ourSport.name, matches_found: tennisMatches.length,
