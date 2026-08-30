@@ -1936,7 +1936,24 @@ Deno.serve(async (req) => {
               if (isPermanent) {
                 note = `No player roster data source available for ${ourSport.name} props -- start time needs manual entry.`;
               } else if (isEmptyNotError) {
-                note = `No ${ourSport.name} games found on ${targetDate} (or the day after) -- if this pick's event_date is wrong (e.g. entered before a playoff series/Finals actually started), correct it and re-run. If a game really is scheduled that day, this may be a temporary data gap worth retrying.`;
+                // CONFIRMED REAL BUG under investigation, direct report
+                // 2026-08-29: a run reported "games_found: 1" (a real
+                // Stanley Cup Final game) for NHL on the exact same date
+                // this branch is now calling "no games found" for a
+                // player prop -- a direct contradiction, since both
+                // numbers come from the same `games` array. Rather than
+                // guess a fix blind (this sandbox can't reach ESPN's API
+                // directly to inspect a real response), surface the raw
+                // shape of whatever `games` actually contains right in the
+                // note itself when this contradiction is detected, so the
+                // real cause is visible on the next run without needing
+                // separate log access.
+                if (games.length > 0) {
+                  const rawShape = JSON.stringify((games[0].competitions && games[0].competitions[0] && games[0].competitions[0].competitors) || 'no competitions[0].competitors at all').slice(0, 600);
+                  note = `${ourSport.name} found ${games.length} real game(s) on ${targetDate}, but the roster-lookup step found zero usable teams from it -- likely a real data-shape mismatch, not a wrong date. Raw first game's competitors data: ${rawShape}`;
+                } else {
+                  note = `No ${ourSport.name} games found on ${targetDate} (or the day after) -- if this pick's event_date is wrong (e.g. entered before a playoff series/Finals actually started), correct it and re-run. If a game really is scheduled that day, this may be a temporary data gap worth retrying.`;
+                }
               } else {
                 note = `Could not build a ${ourSport.name} player roster for ${targetDate} this run (${propLookupStatus}) -- try running the backfill again, or enter start time manually.`;
               }
