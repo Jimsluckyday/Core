@@ -326,11 +326,22 @@ Deno.serve(async (req) => {
         tmlRow = tmlByPair.get(pairKey(m.winner, m.loser));
       }
 
+      // CONFIRMED REAL BUG, direct report 2026-08-30: PostgREST's bulk
+      // insert (POST with a JSON array body) requires EVERY object in the
+      // array to have the exact same set of keys ("All object keys must
+      // match", PGRST102) -- a row with fewer keys than its neighbors
+      // fails the whole batch, not just that row. Both branches below now
+      // always emit the full, identical key set, explicitly null-filling
+      // whatever a "not found" row can't know yet.
       if (!tmlRow) {
         result.not_found++;
         logRows.push({
           checked_date: targetDate, match_key: pairKey(m.winner, m.loser), tour: m.tour,
-          player_a: m.winner, player_b: m.loser, espn_winner: m.winner, found_in_source: false,
+          player_a: m.winner, player_b: m.loser,
+          espn_winner: m.winner, tml_winner: null, winner_agrees: null,
+          espn_total_games: m.totalGames, tml_total_games: null, games_agree: null,
+          found_in_source: false, tml_tourney_date: null,
+          player_a_breaks: null, player_b_breaks: null,
         });
         continue;
       }
