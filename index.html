@@ -7637,7 +7637,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (!legIds.length) {
         legsHtml = '<div style="color:var(--ink-soft);font-style:italic;">No legs linked yet.</div>';
       } else {
-        legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,bet_types(name)&id=in.(${legIds.join(',')})`);
+        legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(${legIds.join(',')})`);
         // Legs are deliberately never their own row anywhere else in the
         // picks list (see buildPicksFilterQuery) -- the same game appearing
         // both as its own line AND inside a parlay's legs was exactly the
@@ -7681,7 +7681,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <option value="8" ${Number(linkTier) === 8 ? 'selected' : ''}>Tier 8</option>
             </select>`;
           const unitSizeInputHtml = `<input type="text" class="leg-unitsize-input" data-parlay-id="${parlayId}" data-leg-id="${leg.id}" value="${escapeHtml(link.raw_unit_size || '')}" placeholder="unit size" style="width:70px;font-family:inherit;font-size:10px;padding:1px 3px;margin-left:4px;" />`;
-          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}
+          // Direct report 2026-08-29: a leg with an unresolved
+          // schedule_sync_status ('unmatched', e.g. the KBO same-day-series
+          // ambiguity or a Tennis Challenger match ESPN can't see) is
+          // completely invisible here otherwise -- this list shows Result/
+          // Tier/Unit only, and the PARLAY WRAPPER's own Missing badge can
+          // never reflect it either, since schedule-sync never even attempts
+          // to touch a wrapper row. Without this, the only way to discover a
+          // broken leg is if it happens to separately surface in a Missing
+          // Data batch export -- easy to miss on a parlay with several legs.
+          const legSyncBadge = leg.schedule_sync_status === 'unmatched'
+            ? ` <span style="display:inline-block;background:var(--stamp-red);color:var(--paper);font-size:10px;font-weight:bold;padding:1px 6px;border-radius:8px;white-space:nowrap;" title="${escapeHtml(leg.schedule_sync_note || 'Needs manual review')}">&#9888; Sync note</span>`
+            : '';
+          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}${legSyncBadge}
               <button type="button" class="ghost small" data-leg-edit="${leg.id}" style="padding:1px 6px;font-size:10px;margin-left:6px;">Edit</button>
               <button type="button" class="ghost small" data-leg-delete="${leg.id}" data-leg-summary="${escapeHtml(leg.selection)}${lineTxt}${propBit}" style="padding:1px 6px;font-size:10px;color:var(--stamp-red);border-color:var(--stamp-red);">Delete</button>
               <span style="color:var(--ink-soft);font-size:10px;margin-left:6px;">this parlay's tier/unit:</span>${tierSelectHtml}${unitSizeInputHtml}
@@ -9338,7 +9350,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         if (!legIds.length) {
           legsHtml = '<div style="color:#55584d;font-style:italic;">No legs linked yet.</div>';
         } else {
-          legs = await op.rest('picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,bet_types(name)&id=in.(' + legIds.join(',') + ')');
+          legs = await op.rest('picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(' + legIds.join(',') + ')');
           legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;list-style:none;">' + legs.map(function(leg) {
             const bt = leg.bet_types ? leg.bet_types.name : '';
             const lineTxt = (leg.line !== null && leg.line !== undefined) ? ' (' + (leg.line > 0 ? '+' : '') + leg.line + ')' : '';
@@ -9372,7 +9384,10 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
               '<option value="8"' + (Number(linkTier) === 8 ? ' selected' : '') + '>Tier 8</option>' +
               '</select>';
             const unitSizeInputHtml = '<input type="text" class="leg-unitsize-input" data-parlay-id="' + parlayId + '" data-leg-id="' + leg.id + '" value="' + escLocal(link.raw_unit_size || '') + '" placeholder="unit size" style="width:70px;font-family:inherit;font-size:10px;padding:1px 3px;margin-left:4px;" />';
-            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml +
+            const legSyncBadge = leg.schedule_sync_status === 'unmatched'
+              ? ' <span style="display:inline-block;background:var(--stamp-red);color:var(--paper);font-size:10px;font-weight:bold;padding:1px 6px;border-radius:8px;white-space:nowrap;" title="' + escLocal(leg.schedule_sync_note || 'Needs manual review') + '">&#9888; Sync note</span>'
+              : '';
+            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml + legSyncBadge +
               ' <button type="button" class="mini leg-edit-btn" data-leg-edit="' + leg.id + '" style="padding:1px 6px;">Edit</button>' +
               ' <button type="button" class="mini leg-delete-btn" data-leg-delete="' + leg.id + '" data-leg-summary="' + escLocal(leg.selection) + lineTxt + propBit + '" style="padding:1px 6px;border-color:#8a2f3a;color:#8a2f3a;">Delete</button>' +
               ' <span style="color:#55584d;font-size:10px;margin-left:6px;">Tier/unit for this parlay:</span>' + tierSelectHtml + unitSizeInputHtml +
@@ -21034,7 +21049,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 389; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 390; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
