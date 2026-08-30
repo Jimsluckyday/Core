@@ -1197,6 +1197,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div style="align-self:flex-end;">
               <button id="autoMissingOddsBtn">Find Missing Odds</button>
             </div>
+            <div style="align-self:flex-end;">
+              <button type="button" class="ghost" id="goDataValidationBtn" title="Takes you to the Data Validation Tool (Data Tools tab), pre-set to today's date with every relevant check ticked -- including the wrong-day checks (Schedule sync flagged, Late-night pick, Parlay leg date mismatch) that catch a KBO/Tennis pick about to publish a day early.">Data Validation Tool &rarr;</button>
+            </div>
           </div>
           <!-- Direct request 2026-08-22: "I can see a scenario where
                someone forgets that you stop at finding the odds to then
@@ -1320,23 +1323,25 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  problem across every sport in one pass, before spending
                  any effort on prop/tournament lookups for a pick that
                  might turn out to belong to a different day entirely. -->
-            <p style="font-size:13px;color:var(--ink);margin:0 0 8px;line-height:1.5;">
-              Run the first three buttons, left to right, to get today's picks to publish standard: <strong>Pick Info</strong> (also catches wrong-day picks — fix those first), <strong>Teams / Tournaments</strong>, then <strong>Find Missing Odds</strong>. Once those are clean, go publish from the <strong>Publish tab</strong> — not another button here.
-            </p>
-            <p style="font-size:13px;color:var(--ink);margin:0 0 8px;line-height:1.5;">
-              Come back the <strong>next day</strong> and run <strong>Find &amp; Update Results</strong> / <strong>Golf Results</strong> to grade what published. That's a separate pass, not part of getting today's picks live.
-            </p>
-            <p style="font-size:13px;color:var(--ink);margin:0 0 10px;line-height:1.5;">
-              Home/Away, Unit Size, and similar fields are useful for internal analysis later (Reports tab) but aren't required to publish or to grade — clean those up whenever it's convenient, via Data Tools, not as a blocker here.
+            <ol style="font-size:13px;color:var(--ink);margin:0 0 4px;padding-left:20px;line-height:1.7;">
+              <li><strong>Pick Info</strong> — fixes wrong-day picks first</li>
+              <li><strong>Teams / Tournaments</strong></li>
+              <li><strong>Find Missing Odds</strong></li>
+              <li><strong>Data Validation Tool</strong> — confirm everything's actually complete, catches an early KBO/Tennis publish too</li>
+              <li>Publish from the <strong>Publish tab</strong></li>
+            </ol>
+            <p style="font-size:11px;color:var(--ink-soft);margin:0 0 10px;">
+              Next day, separately: <strong>Find &amp; Update Results</strong> / <strong>Golf Results</strong> to grade what published.
             </p>
             <details style="font-size:11px;color:var(--ink-soft);">
-              <summary style="cursor:pointer;font-weight:bold;">Exactly what each button does &amp; why this order &#9662;</summary>
+              <summary style="cursor:pointer;font-weight:bold;">Exactly what each step does &amp; why this order &#9662;</summary>
               <div style="margin-top:8px;">
                 <p style="margin:0 0 8px;"><strong>1. Find &amp; Update Pick Info</strong> — run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after.</p>
                 <p style="margin:0 0 8px;"><strong>2. Find &amp; Update Teams / Tournaments</strong> — run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it.</p>
                 <p style="margin:0 0 8px;"><strong>3. Find Missing Odds</strong> — run this third, once matchups/tournaments are filled in. Never calls a live odds source (no paid odds API is wired in yet, same as the rest of this box being test data until one is) — it only finds and sorts picks still missing an opening or closing price on that date. Straight Moneyline picks (never period-qualified variants like "Moneyline First5", those move far less) come back separately, flagged as needing a real researched number — a flat default price is never safe for a market that can swing hundreds of points between a favorite and an underdog. Everything else is flagged as safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools instead of a one-by-one manual price.</p>
-                <p style="margin:0 0 8px;"><strong>4. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — also grades straight MMA (UFC) Moneyline picks, winner-take-all only, matched by fighter name against that day's real card (method/round/other MMA bet types still need manual grading). Tennis, Soccer, Golf, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all.</p>
-                <p style="margin:0;"><strong>5. Find &amp; Update Golf Results</strong> is separate from step 4 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.</p>
+                <p style="margin:0 0 8px;"><strong>4. Data Validation Tool</strong> — added 2026-08-30 as the actual pre-publish gate, not just an odds check. Publishing an incomplete pick (missing start time, odds, event name, etc.) looks unprofessional on the public site even after the 3 checks above, and this is also the last line of defense against a KBO/Tennis pick going live a day early -- it re-checks Schedule sync flagged, Late-night pick, and Parlay leg date mismatch alongside every other field. The button above jumps you to Data Tools with today's date and every relevant box pre-checked (excluding "Not yet scored", which doesn't apply before anything's published) -- review what it finds, fix it, then move on.</p>
+                <p style="margin:0 0 8px;"><strong>5. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — also grades straight MMA (UFC) Moneyline picks, winner-take-all only, matched by fighter name against that day's real card (method/round/other MMA bet types still need manual grading). Tennis, Soccer, Golf, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all.</p>
+                <p style="margin:0;"><strong>6. Find &amp; Update Golf Results</strong> is separate from step 5 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.</p>
               </div>
             </details>
           </div>
@@ -2611,10 +2616,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
-    <!-- MISSING DATA (internal only -- unified finder for any incomplete field on any pick, regardless of grading status. Replaces the old separate Odds Exceptions and Start Time Exceptions tools -- both were the same idea (find picks with a hole in a specific field) split across separate panels, which made it easy to forget one existed while chasing the other. -->
+    <!-- MISSING DATA / DATA VALIDATION TOOL (internal only -- unified finder for any incomplete field on any pick, regardless of grading status. Replaces the old separate Odds Exceptions and Start Time Exceptions tools -- both were the same idea (find picks with a hole in a specific field) split across separate panels, which made it easy to forget one existed while chasing the other. RENAMED 2026-08-30, direct request: "it's not really looking for missing info so much as it is validating what's there to be ready to move on" -- now also the documented pre-publish gate, linked from the Automation tools panel's new step 4 (id="goDataValidationBtn"), so a day's picks get confirmed complete before they ever go live, not just checked for missing odds. IDs left unchanged (mdCheckXxx, findMissingDataBtn, etc.) -- this is a label/positioning change, not a rebuild. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Missing data <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— find picks missing any field, regardless of grading status</span>
+        Data Validation Tool <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— confirm a pick's data is actually complete, not just check for missing odds</span>
         <button class="ghost small" id="toggleMissingDataBtn">Show tool</button>
       </p>
       <div id="missingDataPanel" style="display:none;">
@@ -10536,6 +10541,28 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const panel = $('publishRankPanel');
     if (panel && panel.style.display === 'none') $('togglePublishRankBtn').click();
     $('togglePublishRankBtn').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  // Added 2026-08-30, direct request: a documented pre-publish gate so an
+  // incomplete pick (missing odds/start time/etc.) never goes live just
+  // because it passed the narrower checks above, and so a KBO/Tennis pick
+  // scheduled a day early gets caught before publish rather than after.
+  // Jumps to the Data Validation Tool (Data Tools tab, formerly labeled
+  // "Missing data") pre-set to today's automation date with every relevant
+  // box checked -- MD_CHECKBOX_IDS is the same list mdSelectAllBtn uses,
+  // minus "Not yet scored" (a post-publish/grading concern, not a
+  // pre-publish one). Doesn't run the search itself -- same "always
+  // require an explicit click before anything happens" pattern as every
+  // other automation tool in this box.
+  $('goDataValidationBtn').addEventListener('click', () => {
+    switchTab('tools');
+    const panel = $('missingDataPanel');
+    panel.style.display = 'block';
+    $('toggleMissingDataBtn').textContent = 'Hide tool';
+    const date = $('autoDate').value;
+    if (date) { $('mdFrom').value = date; $('mdTo').value = date; }
+    MD_CHECKBOX_IDS.forEach(id => { $(id).checked = id !== 'mdCheckNotScored'; });
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   // Direct request 2026-08-21: a raw JSON dump after running one of the 4
@@ -21065,7 +21092,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 393; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 394; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
