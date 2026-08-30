@@ -19949,6 +19949,20 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       } else {
         doubleheaderGame = Number(doubleheaderGameRaw);
       }
+    } else if (row.notes) {
+      // CONFIRMED REAL GAP, direct report 2026-08-30: the real upload
+      // template doesn't have a dedicated doubleheader_game/doubleheader/
+      // game_number column at all -- the transcriber writes "Game 1" /
+      // "Game 2" straight into the existing Notes column instead (2025-06-05
+      // had this for several Kansas City Royals / St. Louis Cardinals
+      // doubleheader picks), which the dedicated-column-only check above
+      // silently never captured, so every one of those picks fell back to
+      // "2 possible games matched -- needs manual review" despite the real
+      // answer being written right there in Notes the whole time. Falls
+      // back to parsing "Game 1"/"Game 2" out of Notes only when no
+      // dedicated column was given -- an explicit column always wins.
+      const notesMatch = row.notes.match(/\bgame\s*([12])\b/i);
+      if (notesMatch) doubleheaderGame = Number(notesMatch[1]);
     }
 
     // "Parlay" column -- a plain number, not yes/no. The SAME selection can
@@ -21137,7 +21151,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 395; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 396; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
