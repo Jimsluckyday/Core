@@ -845,6 +845,23 @@
 //     avoid ever silently matching e.g. a tennis match from a week ago
 //     onto today's entry.
 //
+// 38. CONFIRMED FIX, direct report 2026-08-30: "no matching CFL game
+//     found" for Ottawa Redblacks on a date they genuinely played, which
+//     read like a labeling problem but wasn't. Confirmed directly against
+//     ESPN's own football/cfl scoreboard endpoint: it returns ZERO events
+//     for literally every date tested -- 5 different 2025 dates plus a
+//     real in-season 2023 date -- with its season metadata permanently
+//     frozen at {"year":2023} regardless of the date queried. Same
+//     confirmed-dead finding as grade_picks_espn_backfill's own header
+//     comment. CFL is now routed into the same "no automated schedule
+//     source" skip bucket Golf already uses (schedule_sync_status=
+//     'not_supported'), rather than actually attempting a fetch with a
+//     100% confirmed failure rate and reporting each pick as a per-pick
+//     "unmatched" mismatch -- which wrongly implied the pick's own date or
+//     name might be wrong. The ESPN_SPORT_MAP entry for cfl stays in place
+//     on purpose, as a record this path was tried and confirmed dead, not
+//     just never attempted.
+//
 // Run it once per date you want to catch up: POST /schedule-sync-backfill?date=2026-06-01
 // Optionally add &sport=MLB to run just one sport at a time, or &skipProps=true
 // to only touch game_start_time/home_away and never prop_team/event_name.
@@ -1152,8 +1169,27 @@ Deno.serve(async (req) => {
       const isTennis = sportNormName === 'tennis';
       const isKBO = sportNormName === 'kbo';
       const isCricket = sportNormName === 'cricket';
+      // CONFIRMED FIX, direct report 2026-08-30: "no matching CFL game
+      // found" for Ottawa Redblacks on a date they genuinely played --
+      // same root cause already confirmed in grade_picks_espn_backfill's
+      // own header comment: ESPN's football/cfl scoreboard endpoint
+      // returns ZERO events for every date tested (checked 5 different
+      // 2025 dates plus a real in-season 2023 date), season metadata
+      // permanently frozen at 2023 regardless of the date queried. CFL
+      // still has a real, correct entry in ESPN_SPORT_MAP below (kept
+      // deliberately, as a record that this path WAS tried and confirmed
+      // dead, not just never attempted) -- but it's routed into the same
+      // "no automated source" skip bucket as Golf here rather than
+      // actually attempting a fetch that has never once returned a game,
+      // for two reasons: (1) no point spending a real network call on an
+      // endpoint with a 100% confirmed failure rate, and (2) the old
+      // behavior mislabeled this as "unmatched"/ambiguous on a per-pick
+      // basis, which reads as "this specific pick's date or name might be
+      // wrong" -- not true here, and different enough from a genuine
+      // per-pick mismatch that it deserves its own honest category.
+      const isCFL = sportNormName === 'cfl';
       const espnPath = ESPN_SPORT_MAP[sportNormName];
-      if (!isSoccer && !isTennis && !isKBO && !isCricket && !espnPath) {
+      if (!isSoccer && !isTennis && !isKBO && !isCricket && (!espnPath || isCFL)) {
         const needsHomeAwayHere = !NO_HOME_AWAY_SPORTS.includes(sportNormName);
         const unsupportedPicks = await db(
           `picks?select=id,selection,home_away,game_start_time,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
@@ -1172,10 +1208,12 @@ Deno.serve(async (req) => {
           const missingParts: string[] = [];
           if (needsHomeAwayHere && !usesProp && !p.home_away) missingParts.push('home/away');
           if (!p.game_start_time) missingParts.push('start time');
-          const note = `No automated schedule source available for ${ourSport.name} -- ${missingParts.join(' and ')} needs manual entry.`;
+          const note = isCFL
+            ? `ESPN has no CFL schedule data at all (confirmed, not specific to this pick) -- ${missingParts.join(' and ')} needs manual entry. Not a labeling issue with "${p.selection}".`
+            : `No automated schedule source available for ${ourSport.name} -- ${missingParts.join(' and ')} needs manual entry.`;
           await db(`picks?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'not_supported', schedule_sync_note: note }) });
         }
-        overall.sports_skipped.push({ sport: ourSport.name, reason: 'No ESPN scoreboard mapping for this sport.', picks_flagged: applicable.length });
+        overall.sports_skipped.push({ sport: ourSport.name, reason: isCFL ? 'ESPN CFL scoreboard confirmed dead for every date tested -- see header comment.' : 'No ESPN scoreboard mapping for this sport.', picks_flagged: applicable.length });
         continue;
       }
 
