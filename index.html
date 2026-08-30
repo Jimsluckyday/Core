@@ -2296,153 +2296,106 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
-    <!-- VERIFY UPLOAD AGAINST DATABASE -->
-    <!-- Direct request 2026-08-28: "a tool where I can pick a file and
-         validate whether all the information from that file is in the
-         database for all the files I happened to save from the week long
-         uploads of data I've done." A retroactive audit for exactly the
-         Iowa Kid Pix gap -- re-reads a previously-uploaded file the same
-         way Bulk Import does (same parser, same capper/sport/bet-type
-         resolution, same parlay-leg collapsing), then checks the database
-         for a matching pick using the same identity signature the live
-         Duplicate Pick Checker already uses (dupKey), instead of
-         re-implementing a second, possibly-inconsistent notion of "same
-         pick." Entirely read-only -- nothing here inserts, updates, or
-         deletes anything. -->
+    <!-- MISSING DATA / DATA VALIDATION TOOL (internal only -- unified finder for any incomplete field on any pick, regardless of grading status. Replaces the old separate Odds Exceptions and Start Time Exceptions tools -- both were the same idea (find picks with a hole in a specific field) split across separate panels, which made it easy to forget one existed while chasing the other. RENAMED 2026-08-30, direct request: "it's not really looking for missing info so much as it is validating what's there to be ready to move on" -- now also the documented pre-publish gate, linked from the Automation tools panel's new step 4 (id="goDataValidationBtn"), so a day's picks get confirmed complete before they ever go live, not just checked for missing odds. IDs left unchanged (mdCheckXxx, findMissingDataBtn, etc.) -- this is a label/positioning change, not a rebuild. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Verify upload against database <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— read-only audit, catches anything a past upload silently missed</span>
-        <button class="ghost small" id="toggleVerifyUploadBtn">Show tool</button>
+        Data Validation Tool <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— confirm a pick's data is actually complete, not just check for missing odds</span>
+        <button class="ghost small" id="toggleMissingDataBtn">Show tool</button>
       </p>
-      <div id="verifyUploadPanel" style="display:none;">
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Paste (or upload) the exact same file you originally uploaded. This re-reads every row the same way Bulk Import does, then checks whether a matching pick already exists in the database -- it never inserts, updates, or deletes anything, so it's safe to run against any file at any time, as many times as you want. Use this to sweep the backlog of files you've already uploaded and confirm nothing else silently didn't make it in.
-        </div>
-        <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <label for="verifyUploadFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a spreadsheet file directly (from this device, no copy/paste needed):</label>
-          <input type="file" id="verifyUploadFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
-        </div>
-        <textarea id="verifyUploadText" placeholder="Paste the same data you originally uploaded..." style="min-height:120px;width:100%;font-family:monospace;font-size:12px;"></textarea>
-        <div class="row" style="margin-top:8px;">
-          <button id="runVerifyUploadBtn">Check against database</button>
-        </div>
-        <div id="verifyUploadWrap" style="margin-top:12px;"></div>
-      </div>
-    </div>
-
-    <!-- UNDO GRADING (internal, testing use only) -->
-    <div class="stub" data-tab="tools">
-      <p class="stub-title">
-        Undo grading <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, testing use only</span>
-        <button class="ghost small" id="toggleUndoGradingBtn">Show tool</button>
-      </p>
-      <div id="undoGradingPanel" style="display:none;">
+      <div id="missingDataPanel" style="display:none;">
         <div class="row">
           <div class="field">
             <label>Capper</label>
-            <select id="ugCapper"><option value="">All cappers</option></select>
+            <select id="mdCapper"><option value="">All cappers</option></select>
           </div>
           <div class="field">
             <label>Sport</label>
-            <select id="ugSport"><option value="">All sports</option></select>
+            <select id="mdSport"><option value="">All sports</option></select>
           </div>
-          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
+          <div class="field">
+            <label>Status</label>
+            <select id="mdStatus">
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="win">Win</option>
+              <option value="loss">Loss</option>
+              <option value="push">Push</option>
+            </select>
+          </div>
+          <div class="field" style="flex: 0 0 auto; min-width: 220px;">
             <label>From date</label>
             <div style="display:flex; gap:4px; align-items:center;">
-              <input id="ugFrom" type="date" style="width:auto;" />
-              <button class="ghost small" id="ugFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+              <input id="mdFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="mdFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
             </div>
           </div>
           <div class="field">
             <label>To date</label>
-            <input id="ugTo" type="date" />
-          </div>
-          <div style="align-self:flex-end;">
-            <button id="previewUndoGradingBtn">Preview affected picks</button>
+            <input id="mdTo" type="date" />
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Resets graded picks (win/loss/push) back to pending, for whichever capper/sport/date range you set above — meant for undoing a wrong-date grading run during testing, not everyday use. This shows you exactly which picks would be affected first; nothing changes until you explicitly confirm. If any of these picks are currently published, resetting them will make that result disappear from the public "past days" view until they're graded again.
+          This date range matches a pick whose EVENT date falls in it, or whose ENTERED date does -- so a KBO/Tennis pick entered on one day for a game the next (or previous) day shows up either way you're thinking about it, without needing to guess which one applies before you search.
         </div>
-        <div id="undoGradingWrap"></div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Find picks missing:</label>
+          <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:6px 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
+            &#9888; Checkboxes below are ordered left to right on purpose -- work through them in order, don't jump to a color/warning you happen to notice. <strong>Start time, Parlay leg date mismatch, Schedule sync flagged, and Late-night pick</strong> come first because a wrong date is the root cause of most other "missing" results: fix the date before you research anything else, or you'll end up researching the wrong day's game and either come up empty or resolve a win/loss/push that didn't happen on that date. <strong>Event name</strong> and <strong>Prop team</strong> come next -- resolving those narrows what schedule-sync-backfill and Add Pick's Auto-fill button have to search. The remaining fields (Line, Home/Away, odds, Unit size) come last since they don't block other lookups. <strong>Not yet scored</strong> stays last on purpose -- run it as a final end-of-day check, not alongside the field checks above.
+          </div>
+          <div style="display:flex;gap:20px;margin-top:6px;flex-wrap:wrap;align-items:center;">
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckStartTime" /><label for="mdCheckStartTime">Start time</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckStartTime">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckLegDateMismatch" /><label for="mdCheckLegDateMismatch" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Parlay leg date mismatch <span style="color:var(--ink-soft);font-weight:normal;">(leg's own event date no longer matches its parlay's -- the parlay will never grade until fixed)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLegDateMismatch">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckSyncFlagged" /><label for="mdCheckSyncFlagged" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Schedule sync flagged <span style="color:var(--ink-soft);font-weight:normal;">(unmatched or not_supported -- catches a pick whose fields all look complete but the schedule tools found a mismatch, e.g. the real game/match was on a different date than event_date currently says)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckSyncFlagged">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckLateNightRisk" /><label for="mdCheckLateNightRisk" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Late-night pick, verify event date <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/KBO -- the capper's own message timestamp was captured between 9pm-8am, so the owner's batched next-day posting may have crossed past this match's real date)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLateNightRisk">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckEventName" /><label for="mdCheckEventName" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckEventName">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckPropTeam" /><label for="mdCheckPropTeam" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Prop team <span style="color:var(--ink-soft);font-weight:normal;">(Player Prop -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckPropTeam">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckLine" /><label for="mdCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLine">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckHomeAway" /><label for="mdCheckHomeAway">Home / Away</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckHomeAway">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckClosing" checked /><label for="mdCheckClosing">Closing odds</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckClosing">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckOpening" checked /><label for="mdCheckOpening">Opening odds</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckOpening">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckUnitSize" /><label for="mdCheckUnitSize">Unit size</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckUnitSize">Only</button></div>
+            <div class="checkbox-row"><input type="checkbox" id="mdCheckNotScored" /><label for="mdCheckNotScored">Not yet scored <span style="color:var(--ink-soft);font-weight:normal;">(still Pending -- run as a final end-of-day check, not alongside the field checks above)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckNotScored">Only</button></div>
+            <button type="button" class="ghost small" id="mdSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Checks EVERY pick regardless of result — a pick can already be graded win/loss/push and still be missing a field entirely, which matters just as much for published data integrity. Click "Only" next to any field to isolate to just that one, or "Select all" to check everything at once. Results open in the same sortable, filterable, inline-editable spreadsheet used for All Picks — sort or filter by any column, edit odds/tier/unit size/event name/start time directly in the table, or export to CSV for offline research (e.g. finding historical odds via Covers/Flashscore, or a game's actual start time).
+        </div>
+        <button id="findMissingDataBtn">Find missing data</button>
       </div>
     </div>
 
-    <!-- UNDO SCHEDULE SYNC (internal, testing use only) -->
+    <!-- BULK MARK PARLAY ODDS UNAVAILABLE -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Undo schedule sync <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, testing use only</span>
-        <button class="ghost small" id="toggleUndoSyncBtn">Show tool</button>
+        Bulk mark parlay odds unavailable <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— parlays only, never guesses a price</span>
+        <button class="ghost small" id="toggleParlayOddsUnavailableBtn">Show tool</button>
       </p>
-      <div id="undoSyncPanel" style="display:none;">
+      <div id="parlayOddsUnavailablePanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          CONFIRMED direct request 2026-08-22: "if we don't have parlay odds from the cappers... should just put -110 which is not ideal as there's huge variance... we have no way of legitimately validating these on old data." A parlay's combined price compounds with every leg, so a flat default (the way Bulk-fill Standard Odds handles Spread/Totals) would look confidently precise while being wildly wrong -- an 11-leg parlay is nowhere near -110. This tool never guesses a number at all: it marks matching picks <strong>odds_unavailable</strong> instead, the same flag already used everywhere else in this system to mean "confirmed we can't get a real value for this" -- it drops them out of profit/value math and stops them re-appearing as "missing" in every future check, without ever presenting a fabricated price as if it were real. Only ever touches the PARENT parlay pick (the "N-Leg Parlay" record itself) -- never individual legs, which structurally never carry their own odds regardless of whether the parlay's real price is known, so checking a leg's own fields was never a meaningful signal (confirmed directly: two real legs showed up here once, even though their parlay already had a real price on the parent). Non-parlay picks missing odds are a different situation entirely and aren't touched here. Only ever considers a parlay with BOTH opening AND closing odds blank -- if either side already has a real value, that's a Bulk-match Odds job instead, not this tool's.
+        </div>
         <div class="row">
           <div class="field">
-            <label>Capper</label>
-            <select id="usCapper"><option value="">All cappers</option></select>
-          </div>
-          <div class="field">
             <label>Sport</label>
-            <select id="usSport"><option value="">All sports</option></select>
+            <select id="pouSport"><option value="">All sports</option></select>
           </div>
           <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
             <div style="display:flex; gap:4px; align-items:center;">
-              <input id="usFrom" type="date" style="width:auto;" />
-              <button class="ghost small" id="usFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+              <input id="pouFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="pouFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
             </div>
           </div>
           <div class="field">
             <label>To date</label>
-            <input id="usTo" type="date" />
+            <input id="pouTo" type="date" />
           </div>
           <div style="align-self:flex-end;">
-            <button id="previewUndoSyncBtn">Preview affected picks</button>
+            <button id="previewParlayOddsUnavailableBtn">Preview</button>
           </div>
         </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Clears start time, home/away, and closing odds (and the sync status flag) for whichever capper/sport/date range you set above — meant for undoing a Sync/Backfill run against the wrong date, not everyday use. This only clears what the sync tools themselves write; it never touches opening odds or anything you entered by hand. Shows you exactly which picks would be affected first — nothing changes until you explicitly confirm.
-        </div>
-        <div id="undoSyncWrap"></div>
-      </div>
-    </div>
-
-    <!-- GRADING EXCEPTIONS (internal only) -->
-    <div class="stub" data-tab="tools">
-      <p class="stub-title">
-        Grading exceptions <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— picks the auto-grader couldn't resolve</span>
-        <button class="ghost small" id="toggleGradingExceptionsBtn">Show tool</button>
-      </p>
-      <div id="gradingExceptionsPanel" style="display:none;">
-        <div class="row">
-          <div class="field">
-            <label>Capper</label>
-            <select id="geCapper"><option value="">All cappers</option></select>
-          </div>
-          <div class="field">
-            <label>Sport</label>
-            <select id="geSport"><option value="">All sports</option></select>
-          </div>
-          <div class="field">
-            <label>Event date (exact day) — leave blank for all overdue days</label>
-            <input id="geAsOf" type="date" />
-          </div>
-          <div style="align-self:flex-end;">
-            <button id="findGradingExceptionsBtn">Find exceptions</button>
-          </div>
-        </div>
-        <div class="field">
-          <div class="checkbox-row" style="margin-top:8px;">
-            <input type="checkbox" id="geIncludeUnsynced" />
-            <label for="geIncludeUnsynced">Also include picks that failed schedule sync, regardless of event date (catch date/detail problems proactively, before the event even happens)</label>
-          </div>
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          With a specific date entered: shows every pick still pending for that exact day only — since you already ran the grader on that day, anything still pending is by definition something it couldn't resolve. Working one day at a time keeps this from mixing multiple test days together into one confusing batch. Leave the date blank to instead search broadly across every day whose event date has already passed, plus anything the grader explicitly flagged as ambiguous — useful for an occasional wider sweep, not everyday use. Checking the box above catches problems earlier still — right after you run "Sync Schedule & Odds" in Pending Picks, any pick it couldn't confidently match gets included here too, whether or not its event date has passed yet, so a wrong date or unclear detail can get fixed well before grading day instead of showing up as a surprise later. Export these to CSV, work through them (in this chat, a fresh one, or however you research them), then use "Bulk Upload Manual Changes" below to bulk-apply what you find.
-        </div>
-        <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:0 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
-          &#9888; This blank-date sweep is also the correct way to catch Series Winner/Playoff Series Winner picks, and any long-term futures bet (e.g. "Blue Jays to win the World Series," placed in April at good odds, not decided until October). Both share the same shape: <strong>event_date is whenever the pick was entered, not whenever it actually resolves</strong> -- so no date-scoped grading run will ever revisit them on its own, no matter how many times it's re-run for other days. They stay correctly stuck as "pending" for as long as that takes, and this blank-date sweep will keep surfacing them the whole time (no cutoff on how old event_date is) -- nothing gets lost, it just needs this run periodically rather than assumed to happen automatically. In practice: run it whenever a major tournament/series/season you know had an active pick on it wraps up (a Finals ends, a World Cup is decided, a season's playoff picture is final) -- that's your cue to check for anything that's been quietly waiting to resolve.
-        </div>
-        <div id="gradingExceptionsWrap"></div>
+        <div id="parlayOddsUnavailableWrap" style="margin-top:12px;"></div>
       </div>
     </div>
 
@@ -2537,44 +2490,149 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
-    <!-- BULK MARK PARLAY ODDS UNAVAILABLE -->
+    <!-- GRADING CORRECTIONS (internal only) -- RENAMED 2026-08-30, direct
+         request: "trying to get away from that wording and make everything
+         a little more universal and understood by anyone who sits in front
+         of the database for editing... mainly used for bulk upload changes
+         of data." Visible label only -- ids (gradingCorrectionsPanel,
+         gradingCorrectionsInput, etc.) deliberately left unchanged, same as
+         the earlier Missing Data -> Data Validation Tool rename. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Bulk mark parlay odds unavailable <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— parlays only, never guesses a price</span>
-        <button class="ghost small" id="toggleParlayOddsUnavailableBtn">Show tool</button>
+        Bulk Upload Manual Changes <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— bulk-apply researched results/odds/fields back onto exact picks</span>
+        <button class="ghost small" id="toggleGradingCorrectionsBtn">Show tool</button>
       </p>
-      <div id="parlayOddsUnavailablePanel" style="display:none;">
+      <div id="gradingCorrectionsPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          CONFIRMED direct request 2026-08-22: "if we don't have parlay odds from the cappers... should just put -110 which is not ideal as there's huge variance... we have no way of legitimately validating these on old data." A parlay's combined price compounds with every leg, so a flat default (the way Bulk-fill Standard Odds handles Spread/Totals) would look confidently precise while being wildly wrong -- an 11-leg parlay is nowhere near -110. This tool never guesses a number at all: it marks matching picks <strong>odds_unavailable</strong> instead, the same flag already used everywhere else in this system to mean "confirmed we can't get a real value for this" -- it drops them out of profit/value math and stops them re-appearing as "missing" in every future check, without ever presenting a fabricated price as if it were real. Only ever touches the PARENT parlay pick (the "N-Leg Parlay" record itself) -- never individual legs, which structurally never carry their own odds regardless of whether the parlay's real price is known, so checking a leg's own fields was never a meaningful signal (confirmed directly: two real legs showed up here once, even though their parlay already had a real price on the parent). Non-parlay picks missing odds are a different situation entirely and aren't touched here. Only ever considers a parlay with BOTH opening AND closing odds blank -- if either side already has a real value, that's a Bulk-match Odds job instead, not this tool's.
+          Paste rows copied from a spreadsheet (or built in a chat) — first row must be column headers. <strong>Required: id</strong> only. <strong>Optional: result, event_date, event_name, line, opening_odds, closing_odds, line_flag, notes</strong> — only included columns get changed; anything left out is left alone. If <strong>result</strong> is included it must be exactly <code>win</code>, <code>loss</code>, or <code>push</code>, and marks the pick as manually graded — leave it blank entirely for an odds-only correction on a pick that's already graded (notes in that case are saved to the pick's own notes field instead, since grading wasn't touched). <strong>The line a capper gave us is always what we grade against, regardless of normal line movement between when the pick was sent and when it was researched</strong> — that's expected and never needs fixing. <strong>line</strong> should only ever be used for a genuine, obvious transcription error, and is rare; for the much more common "the line looks different than current research" situation, use <strong>line_flag</strong> (enter <code>yes</code>) instead — it doesn't change anything about the pick or hold up grading, it just adds it to the Flagged Lines list in Data Tools for an optional, unhurried look later. <strong>opening_odds / closing_odds</strong> are meant for a quick manual lookup (an AI chat search, Covers, Flashscore, or similar) when a pick's sport isn't covered by our own odds API, or historical odds are missing entirely — approximate is fine here, and if that pick is already published, this will correctly flow into the site's live win-rate and $100-per-bet totals the moment it's saved. Matching is by the exact pick <strong>id</strong>, never by name/date guessing, so there's no risk of updating the wrong pick.
         </div>
+        <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label for="gradingCorrectionsFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a CSV file directly (from this device, no copy/paste needed):</label>
+          <input type="file" id="gradingCorrectionsFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
+        </div>
+        <textarea id="gradingCorrectionsInput" rows="8" style="width:100%;font-family:monospace;font-size:12px;" placeholder="id,result,event_date,event_name,line,opening_odds,closing_odds,line_flag,notes&#10;483705c0-644c-4c2a-8693-5181fabca262,win,2026-06-07,Memorial Tournament,,,-150,,Confirmed via PGA Tour final leaderboard&#10;191a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8,win,,,,,-110,yes,Entered line was -4.5 -- graded against that as always; flagged only because -9.5 would have made more sense as a typo, worth a later glance"></textarea>
+        <div style="margin-top:10px;">
+          <button id="parseGradingCorrectionsBtn">Parse &amp; preview</button>
+        </div>
+        <div id="gradingCorrectionsWrap" style="margin-top:12px;"></div>
+      </div>
+    </div>
+    <!-- VERIFY UPLOAD AGAINST DATABASE -->
+    <!-- Direct request 2026-08-28: "a tool where I can pick a file and
+         validate whether all the information from that file is in the
+         database for all the files I happened to save from the week long
+         uploads of data I've done." A retroactive audit for exactly the
+         Iowa Kid Pix gap -- re-reads a previously-uploaded file the same
+         way Bulk Import does (same parser, same capper/sport/bet-type
+         resolution, same parlay-leg collapsing), then checks the database
+         for a matching pick using the same identity signature the live
+         Duplicate Pick Checker already uses (dupKey), instead of
+         re-implementing a second, possibly-inconsistent notion of "same
+         pick." Entirely read-only -- nothing here inserts, updates, or
+         deletes anything. -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Verify upload against database <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— read-only audit, catches anything a past upload silently missed</span>
+        <button class="ghost small" id="toggleVerifyUploadBtn">Show tool</button>
+      </p>
+      <div id="verifyUploadPanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Paste (or upload) the exact same file you originally uploaded. This re-reads every row the same way Bulk Import does, then checks whether a matching pick already exists in the database -- it never inserts, updates, or deletes anything, so it's safe to run against any file at any time, as many times as you want. Use this to sweep the backlog of files you've already uploaded and confirm nothing else silently didn't make it in.
+        </div>
+        <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label for="verifyUploadFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a spreadsheet file directly (from this device, no copy/paste needed):</label>
+          <input type="file" id="verifyUploadFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
+        </div>
+        <textarea id="verifyUploadText" placeholder="Paste the same data you originally uploaded..." style="min-height:120px;width:100%;font-family:monospace;font-size:12px;"></textarea>
+        <div class="row" style="margin-top:8px;">
+          <button id="runVerifyUploadBtn">Check against database</button>
+        </div>
+        <div id="verifyUploadWrap" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
+    <!-- GRADING EXCEPTIONS (internal only) -- RENAMED 2026-08-30, direct request, to "Unresolved Pick Results" for wording anyone at the database would understand. ids (toggleGradingExceptionsBtn, etc.) left unchanged. -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Unresolved Pick Results <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— picks the auto-grader couldn't resolve</span>
+        <button class="ghost small" id="toggleGradingExceptionsBtn">Show tool</button>
+      </p>
+      <div id="gradingExceptionsPanel" style="display:none;">
         <div class="row">
           <div class="field">
+            <label>Capper</label>
+            <select id="geCapper"><option value="">All cappers</option></select>
+          </div>
+          <div class="field">
             <label>Sport</label>
-            <select id="pouSport"><option value="">All sports</option></select>
+            <select id="geSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field">
+            <label>Event date (exact day) — leave blank for all overdue days</label>
+            <input id="geAsOf" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="findGradingExceptionsBtn">Find exceptions</button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="checkbox-row" style="margin-top:8px;">
+            <input type="checkbox" id="geIncludeUnsynced" />
+            <label for="geIncludeUnsynced">Also include picks that failed schedule sync, regardless of event date (catch date/detail problems proactively, before the event even happens)</label>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          With a specific date entered: shows every pick still pending for that exact day only — since you already ran the grader on that day, anything still pending is by definition something it couldn't resolve. Working one day at a time keeps this from mixing multiple test days together into one confusing batch. Leave the date blank to instead search broadly across every day whose event date has already passed, plus anything the grader explicitly flagged as ambiguous — useful for an occasional wider sweep, not everyday use. Checking the box above catches problems earlier still — right after you run "Sync Schedule & Odds" in Pending Picks, any pick it couldn't confidently match gets included here too, whether or not its event date has passed yet, so a wrong date or unclear detail can get fixed well before grading day instead of showing up as a surprise later. Export these to CSV, work through them (in this chat, a fresh one, or however you research them), then use "Bulk Upload Manual Changes" below to bulk-apply what you find.
+        </div>
+        <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:0 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
+          &#9888; This blank-date sweep is also the correct way to catch Series Winner/Playoff Series Winner picks, and any long-term futures bet (e.g. "Blue Jays to win the World Series," placed in April at good odds, not decided until October). Both share the same shape: <strong>event_date is whenever the pick was entered, not whenever it actually resolves</strong> -- so no date-scoped grading run will ever revisit them on its own, no matter how many times it's re-run for other days. They stay correctly stuck as "pending" for as long as that takes, and this blank-date sweep will keep surfacing them the whole time (no cutoff on how old event_date is) -- nothing gets lost, it just needs this run periodically rather than assumed to happen automatically. In practice: run it whenever a major tournament/series/season you know had an active pick on it wraps up (a Finals ends, a World Cup is decided, a season's playoff picture is final) -- that's your cue to check for anything that's been quietly waiting to resolve.
+        </div>
+        <div id="gradingExceptionsWrap"></div>
+      </div>
+    </div>
+
+    <!-- UNDO GRADING (internal, testing use only) -- RENAMED 2026-08-30, direct request, to "Undo Pick Results" for wording anyone at the database would understand. ids (toggleUndoGradingBtn, etc.) left unchanged. -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Undo Pick Results <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, testing use only</span>
+        <button class="ghost small" id="toggleUndoGradingBtn">Show tool</button>
+      </p>
+      <div id="undoGradingPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Capper</label>
+            <select id="ugCapper"><option value="">All cappers</option></select>
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="ugSport"><option value="">All sports</option></select>
           </div>
           <div class="field" style="flex: 0 0 auto; min-width: 190px;">
             <label>From date</label>
             <div style="display:flex; gap:4px; align-items:center;">
-              <input id="pouFrom" type="date" style="width:auto;" />
-              <button class="ghost small" id="pouFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+              <input id="ugFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="ugFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
             </div>
           </div>
           <div class="field">
             <label>To date</label>
-            <input id="pouTo" type="date" />
+            <input id="ugTo" type="date" />
           </div>
           <div style="align-self:flex-end;">
-            <button id="previewParlayOddsUnavailableBtn">Preview</button>
+            <button id="previewUndoGradingBtn">Preview affected picks</button>
           </div>
         </div>
-        <div id="parlayOddsUnavailableWrap" style="margin-top:12px;"></div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Resets graded picks (win/loss/push) back to pending, for whichever capper/sport/date range you set above — meant for undoing a wrong-date grading run during testing, not everyday use. This shows you exactly which picks would be affected first; nothing changes until you explicitly confirm. If any of these picks are currently published, resetting them will make that result disappear from the public "past days" view until they're graded again.
+        </div>
+        <div id="undoGradingWrap"></div>
       </div>
     </div>
 
-    <!-- BULK UNPUBLISH BY DATE RANGE -->
+    <!-- BULK UNPUBLISH BY DATE RANGE -- RENAMED 2026-08-30 to "Bulk Unpublish", direct request: "by date range" is implied, dropped for brevity. ids (toggleBulkUnpublishBtn, etc.) left unchanged. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Bulk unpublish by date range <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— pull a whole test batch back off the public site at once</span>
+        Bulk Unpublish <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— pull a whole test batch back off the public site at once</span>
         <button class="ghost small" id="toggleBulkUnpublishBtn">Show tool</button>
       </p>
       <div id="bulkUnpublishPanel" style="display:none;">
@@ -2605,6 +2663,44 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- UNDO SCHEDULE SYNC (internal, testing use only) -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Undo schedule sync <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, testing use only</span>
+        <button class="ghost small" id="toggleUndoSyncBtn">Show tool</button>
+      </p>
+      <div id="undoSyncPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Capper</label>
+            <select id="usCapper"><option value="">All cappers</option></select>
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="usSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
+            <label>From date</label>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="usFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="usFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="usTo" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="previewUndoSyncBtn">Preview affected picks</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Clears start time, home/away, and closing odds (and the sync status flag) for whichever capper/sport/date range you set above — meant for undoing a Sync/Backfill run against the wrong date, not everyday use. This only clears what the sync tools themselves write; it never touches opening odds or anything you entered by hand. Shows you exactly which picks would be affected first — nothing changes until you explicitly confirm.
+        </div>
+        <div id="undoSyncWrap"></div>
+      </div>
+    </div>
+
     <!-- FLAGGED LINES (non-blocking, whenever you have spare time) -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -2620,102 +2716,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
-    <!-- MISSING DATA / DATA VALIDATION TOOL (internal only -- unified finder for any incomplete field on any pick, regardless of grading status. Replaces the old separate Odds Exceptions and Start Time Exceptions tools -- both were the same idea (find picks with a hole in a specific field) split across separate panels, which made it easy to forget one existed while chasing the other. RENAMED 2026-08-30, direct request: "it's not really looking for missing info so much as it is validating what's there to be ready to move on" -- now also the documented pre-publish gate, linked from the Automation tools panel's new step 4 (id="goDataValidationBtn"), so a day's picks get confirmed complete before they ever go live, not just checked for missing odds. IDs left unchanged (mdCheckXxx, findMissingDataBtn, etc.) -- this is a label/positioning change, not a rebuild. -->
-    <div class="stub" data-tab="tools">
-      <p class="stub-title">
-        Data Validation Tool <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— confirm a pick's data is actually complete, not just check for missing odds</span>
-        <button class="ghost small" id="toggleMissingDataBtn">Show tool</button>
-      </p>
-      <div id="missingDataPanel" style="display:none;">
-        <div class="row">
-          <div class="field">
-            <label>Capper</label>
-            <select id="mdCapper"><option value="">All cappers</option></select>
-          </div>
-          <div class="field">
-            <label>Sport</label>
-            <select id="mdSport"><option value="">All sports</option></select>
-          </div>
-          <div class="field">
-            <label>Status</label>
-            <select id="mdStatus">
-              <option value="">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="win">Win</option>
-              <option value="loss">Loss</option>
-              <option value="push">Push</option>
-            </select>
-          </div>
-          <div class="field" style="flex: 0 0 auto; min-width: 220px;">
-            <label>From date</label>
-            <div style="display:flex; gap:4px; align-items:center;">
-              <input id="mdFrom" type="date" style="width:auto;" />
-              <button class="ghost small" id="mdFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
-            </div>
-          </div>
-          <div class="field">
-            <label>To date</label>
-            <input id="mdTo" type="date" />
-          </div>
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          This date range matches a pick whose EVENT date falls in it, or whose ENTERED date does -- so a KBO/Tennis pick entered on one day for a game the next (or previous) day shows up either way you're thinking about it, without needing to guess which one applies before you search.
-        </div>
-        <div class="field" style="margin-bottom:10px;">
-          <label>Find picks missing:</label>
-          <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:6px 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
-            &#9888; Checkboxes below are ordered left to right on purpose -- work through them in order, don't jump to a color/warning you happen to notice. <strong>Start time, Parlay leg date mismatch, Schedule sync flagged, and Late-night pick</strong> come first because a wrong date is the root cause of most other "missing" results: fix the date before you research anything else, or you'll end up researching the wrong day's game and either come up empty or resolve a win/loss/push that didn't happen on that date. <strong>Event name</strong> and <strong>Prop team</strong> come next -- resolving those narrows what schedule-sync-backfill and Add Pick's Auto-fill button have to search. The remaining fields (Line, Home/Away, odds, Unit size) come last since they don't block other lookups. <strong>Not yet scored</strong> stays last on purpose -- run it as a final end-of-day check, not alongside the field checks above.
-          </div>
-          <div style="display:flex;gap:20px;margin-top:6px;flex-wrap:wrap;align-items:center;">
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckStartTime" /><label for="mdCheckStartTime">Start time</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckStartTime">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckLegDateMismatch" /><label for="mdCheckLegDateMismatch" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Parlay leg date mismatch <span style="color:var(--ink-soft);font-weight:normal;">(leg's own event date no longer matches its parlay's -- the parlay will never grade until fixed)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLegDateMismatch">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckSyncFlagged" /><label for="mdCheckSyncFlagged" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Schedule sync flagged <span style="color:var(--ink-soft);font-weight:normal;">(unmatched or not_supported -- catches a pick whose fields all look complete but the schedule tools found a mismatch, e.g. the real game/match was on a different date than event_date currently says)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckSyncFlagged">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckLateNightRisk" /><label for="mdCheckLateNightRisk" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Late-night pick, verify event date <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/KBO -- the capper's own message timestamp was captured between 9pm-8am, so the owner's batched next-day posting may have crossed past this match's real date)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLateNightRisk">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckEventName" /><label for="mdCheckEventName" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Event name <span style="color:var(--ink-soft);font-weight:normal;">(Tennis/Golf/MMA -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckEventName">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckPropTeam" /><label for="mdCheckPropTeam" style="color:var(--stamp-amber);font-weight:bold;">&#9888; Prop team <span style="color:var(--ink-soft);font-weight:normal;">(Player Prop -- check this first)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckPropTeam">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckLine" /><label for="mdCheckLine">Line <span style="color:var(--ink-soft);font-weight:normal;">(Spread/Total/Player Prop)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckLine">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckHomeAway" /><label for="mdCheckHomeAway">Home / Away</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckHomeAway">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckClosing" checked /><label for="mdCheckClosing">Closing odds</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckClosing">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckOpening" checked /><label for="mdCheckOpening">Opening odds</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckOpening">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckUnitSize" /><label for="mdCheckUnitSize">Unit size</label><button type="button" class="ghost small md-only-btn" data-only="mdCheckUnitSize">Only</button></div>
-            <div class="checkbox-row"><input type="checkbox" id="mdCheckNotScored" /><label for="mdCheckNotScored">Not yet scored <span style="color:var(--ink-soft);font-weight:normal;">(still Pending -- run as a final end-of-day check, not alongside the field checks above)</span></label><button type="button" class="ghost small md-only-btn" data-only="mdCheckNotScored">Only</button></div>
-            <button type="button" class="ghost small" id="mdSelectAllBtn" style="border-left:1.5px solid var(--field);padding-left:16px;">Select all</button>
-          </div>
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Checks EVERY pick regardless of result — a pick can already be graded win/loss/push and still be missing a field entirely, which matters just as much for published data integrity. Click "Only" next to any field to isolate to just that one, or "Select all" to check everything at once. Results open in the same sortable, filterable, inline-editable spreadsheet used for All Picks — sort or filter by any column, edit odds/tier/unit size/event name/start time directly in the table, or export to CSV for offline research (e.g. finding historical odds via Covers/Flashscore, or a game's actual start time).
-        </div>
-        <button id="findMissingDataBtn">Find missing data</button>
-      </div>
-    </div>
-
-    <!-- GRADING CORRECTIONS (internal only) -- RENAMED 2026-08-30, direct
-         request: "trying to get away from that wording and make everything
-         a little more universal and understood by anyone who sits in front
-         of the database for editing... mainly used for bulk upload changes
-         of data." Visible label only -- ids (gradingCorrectionsPanel,
-         gradingCorrectionsInput, etc.) deliberately left unchanged, same as
-         the earlier Missing Data -> Data Validation Tool rename. -->
-    <div class="stub" data-tab="tools">
-      <p class="stub-title">
-        Bulk Upload Manual Changes <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— bulk-apply researched results/odds/fields back onto exact picks</span>
-        <button class="ghost small" id="toggleGradingCorrectionsBtn">Show tool</button>
-      </p>
-      <div id="gradingCorrectionsPanel" style="display:none;">
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Paste rows copied from a spreadsheet (or built in a chat) — first row must be column headers. <strong>Required: id</strong> only. <strong>Optional: result, event_date, event_name, line, opening_odds, closing_odds, line_flag, notes</strong> — only included columns get changed; anything left out is left alone. If <strong>result</strong> is included it must be exactly <code>win</code>, <code>loss</code>, or <code>push</code>, and marks the pick as manually graded — leave it blank entirely for an odds-only correction on a pick that's already graded (notes in that case are saved to the pick's own notes field instead, since grading wasn't touched). <strong>The line a capper gave us is always what we grade against, regardless of normal line movement between when the pick was sent and when it was researched</strong> — that's expected and never needs fixing. <strong>line</strong> should only ever be used for a genuine, obvious transcription error, and is rare; for the much more common "the line looks different than current research" situation, use <strong>line_flag</strong> (enter <code>yes</code>) instead — it doesn't change anything about the pick or hold up grading, it just adds it to the Flagged Lines list in Data Tools for an optional, unhurried look later. <strong>opening_odds / closing_odds</strong> are meant for a quick manual lookup (an AI chat search, Covers, Flashscore, or similar) when a pick's sport isn't covered by our own odds API, or historical odds are missing entirely — approximate is fine here, and if that pick is already published, this will correctly flow into the site's live win-rate and $100-per-bet totals the moment it's saved. Matching is by the exact pick <strong>id</strong>, never by name/date guessing, so there's no risk of updating the wrong pick.
-        </div>
-        <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <label for="gradingCorrectionsFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a CSV file directly (from this device, no copy/paste needed):</label>
-          <input type="file" id="gradingCorrectionsFileInput" accept=".csv,.tsv,.txt" style="font-family:inherit;font-size:11px;" />
-        </div>
-        <textarea id="gradingCorrectionsInput" rows="8" style="width:100%;font-family:monospace;font-size:12px;" placeholder="id,result,event_date,event_name,line,opening_odds,closing_odds,line_flag,notes&#10;483705c0-644c-4c2a-8693-5181fabca262,win,2026-06-07,Memorial Tournament,,,-150,,Confirmed via PGA Tour final leaderboard&#10;191a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8,win,,,,,-110,yes,Entered line was -4.5 -- graded against that as always; flagged only because -9.5 would have made more sense as a typo, worth a later glance"></textarea>
-        <div style="margin-top:10px;">
-          <button id="parseGradingCorrectionsBtn">Parse &amp; preview</button>
-        </div>
-        <div id="gradingCorrectionsWrap" style="margin-top:12px;"></div>
-      </div>
-    </div>
 
     <!-- BULK IMPORT -->
     <div class="stub" data-tab="addpicks">
@@ -15668,9 +15668,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         // matching the same exact-match check the dropdown warning above
         // already uses (line ~2889) -- only the literal "Moneyline" bet
         // type is excluded now.
+        //
+        // CONFIRMED FIX, direct request 2026-08-30: Parlay was never
+        // excluded here the way Moneyline is, so an "All bet types" run
+        // (or explicitly picking "Parlay" from the dropdown) would slap
+        // this tool's single flat default price onto a parlay too --
+        // exactly the "confidently precise while being wildly wrong"
+        // problem "Bulk mark parlay odds unavailable" exists specifically
+        // to avoid (a parlay's real combined price compounds across every
+        // leg; an 11-leg parlay is nowhere near -110). Parlay now excluded
+        // from "All bet types" the same way Moneyline already is.
         const moneylineTypeIds = betTypes.filter(b => normalizeForMatch(b.name) === 'moneyline').map(b => b.id);
-        if (moneylineTypeIds.length) {
-          query += `&bet_type_id=not.in.(${moneylineTypeIds.join(',')})`;
+        const parlayTypeIds = betTypes.filter(b => normalizeForMatch(b.name) === 'parlay').map(b => b.id);
+        const excludedTypeIds = [...moneylineTypeIds, ...parlayTypeIds];
+        if (excludedTypeIds.length) {
+          query += `&bet_type_id=not.in.(${excludedTypeIds.join(',')})`;
         }
       }
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -21195,7 +21207,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 398; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 399; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
