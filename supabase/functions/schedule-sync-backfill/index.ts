@@ -1943,6 +1943,7 @@ Deno.serve(async (req) => {
         const propLookup = new Map<string, { team: string; startTime: string }[]>();
         const propDisplayNames: string[] = [];
         let propLookupStatus = 'not_applicable';
+        let rosterFetchDebug = '';
 
         if (sportNormName === 'mlb') {
           try {
@@ -2014,23 +2015,53 @@ Deno.serve(async (req) => {
             }
           }
           if (teamsToday.size) {
-            const rosterResults = await Promise.allSettled(
-              [...teamsToday.keys()].map(id =>
-                espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnRosterSportPath}/teams/${id}/roster`).then(r => r.ok ? r.json() : null)
-              )
-            );
+            // Direct follow-up, teamsToday confirmed NON-empty (a real
+            // Edmonton Oilers team object showed up in the raw diagnostic
+            // from Fix under investigation above) yet this still ended up
+            // 'built_but_empty' -- meaning the actual failure is one step
+            // later, in the roster FETCH itself (bad HTTP status, or an
+            // ok response with an empty/differently-shaped athletes list),
+            // not in reading the game data. rosterDebugInfo below captures
+            // exactly what each team's fetch actually returned, surfaced
+            // directly in the note on the next run instead of guessing
+            // again.
+            const rosterUrls = [...teamsToday.keys()].map(id => `https://site.api.espn.com/apis/site/v2/sports/${espnRosterSportPath}/teams/${id}/roster`);
+            const rosterResponses = await Promise.allSettled(rosterUrls.map(u => espnFetch(u)));
+            const rosterDebugInfo: string[] = [];
             let i = 0;
             for (const id of teamsToday.keys()) {
-              const result = rosterResults[i++];
               const t = teamsToday.get(id)!;
-              if (result.status !== 'fulfilled' || !result.value) continue;
-              const athletes = result.value.athletes || [];
+              const res = rosterResponses[i];
+              const url = rosterUrls[i];
+              i++;
+              if (res.status !== 'fulfilled') {
+                rosterDebugInfo.push(`${t.teamName} (${url}): fetch rejected -- ${String(res.reason)}`);
+                continue;
+              }
+              const response = res.value;
+              if (!response.ok) {
+                rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status}`);
+                continue;
+              }
+              let json: any = null;
+              try { json = await response.json(); } catch (e) { rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status} but body wasn't valid JSON -- ${String(e)}`); continue; }
+              const athletes = json.athletes || [];
+              if (!athletes.length) {
+                rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status}, but 0 athletes. Top-level response keys: ${Object.keys(json).join(', ')}`);
+                continue;
+              }
+              rosterDebugInfo.push(`${t.teamName}: HTTP ${response.status}, ${athletes.length} athletes -- OK`);
               for (const a of athletes) {
                 const name = a.fullName || a.displayName;
                 if (name) { registerPlayerName(propLookup, name, { team: t.teamName, startTime: t.startTime }); propDisplayNames.push(name); }
               }
             }
             propLookupStatus = propLookup.size > 0 ? 'built' : 'built_but_empty';
+            // Kept SEPARATE from propLookupStatus (checked via exact
+            // string equality further down, e.g. === 'built_but_empty') --
+            // appending debug text there would break that comparison and
+            // silently route into the wrong, less specific note branch.
+            if (!propLookup.size) rosterFetchDebug = rosterDebugInfo.join(' ;; ');
           } else {
             propLookupStatus = 'built_but_empty';
           }
@@ -2065,14 +2096,21 @@ Deno.serve(async (req) => {
                 // Stanley Cup Final game) for NHL on the exact same date
                 // this branch is now calling "no games found" for a
                 // player prop -- a direct contradiction, since both
-                // numbers come from the same `games` array. Rather than
-                // guess a fix blind (this sandbox can't reach ESPN's API
-                // directly to inspect a real response), surface the raw
-                // shape of whatever `games` actually contains right in the
-                // note itself when this contradiction is detected, so the
-                // real cause is visible on the next run without needing
-                // separate log access.
-                if (games.length > 0) {
+                // numbers come from the same `games` array. First
+                // diagnostic pass confirmed the team DATA itself is fine
+                // (a real, complete Edmonton Oilers object) -- so the real
+                // failure is one step later, in the roster fetch itself.
+                // rosterFetchDebug (nba/wnba/nhl branch above) now captures
+                // exactly what each team's own roster fetch returned
+                // (HTTP status, athlete count, or the fetch error itself)
+                // -- surfaced directly here since it's the more specific
+                // diagnostic. Falls back to the cruder "no games at all"
+                // wording only when rosterFetchDebug has nothing (e.g.
+                // teamsToday really was empty, or this is MLB's own
+                // separate prop-lookup path which doesn't set it).
+                if (rosterFetchDebug) {
+                  note = `${ourSport.name} found ${games.length} real game(s) and identified real teams from them, but every roster fetch came back unusable -- not a wrong date. Per-team detail: ${rosterFetchDebug}`;
+                } else if (games.length > 0) {
                   const rawShape = JSON.stringify((games[0].competitions && games[0].competitions[0] && games[0].competitions[0].competitors) || 'no competitions[0].competitors at all').slice(0, 600);
                   note = `${ourSport.name} found ${games.length} real game(s), but the roster-lookup step found zero usable teams from it -- likely a real data-shape mismatch, not a wrong date. Raw first game's competitors data: ${rawShape}`;
                 } else {
