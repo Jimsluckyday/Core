@@ -1056,12 +1056,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
     </div>
 
     <!-- RECENT PICKS -->
+    <!-- CONFIRMED FIX, direct request 2026-08-30: "avoid scrolling for a
+         user unless they want to... nicer to look at on a mobile device."
+         The show/hide toggle already existed (togglePicksBtn/picksPanel)
+         but defaulted to OPEN, the opposite of every other collapsible
+         panel in this app (Automation tools, Data Validation Tool, etc.,
+         all default to display:none / "Show tool"). Now starts collapsed
+         to match, same toggle logic, no JS changes needed. -->
     <div class="stub" data-tab="pending">
       <p class="stub-title">
         Picks
-        <button class="ghost small" id="togglePicksBtn">Hide picks</button>
+        <button class="ghost small" id="togglePicksBtn">Show picks</button>
       </p>
-      <div id="picksPanel">
+      <div id="picksPanel" style="display:none;">
       <div class="row">
         <div class="field">
           <label>Status</label>
@@ -21226,7 +21233,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 400; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 401; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
