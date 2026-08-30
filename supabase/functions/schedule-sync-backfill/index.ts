@@ -733,12 +733,24 @@
 //     together as the confirming signal) -- a single-name pick like
 //     "Andreeva" got the correct suggestion in its note text
 //     ("Andreeva" -> "Mirra Andreeva") but never had it applied, needing a
-//     manual retype every single run. Extended the same guarded-auto-apply
-//     approach to the single-name case: only auto-applies when the
-//     suggested full name resolves to EXACTLY ONE real match near the
-//     date (no cross-check partner available, so this is the analogous
-//     confirming signal for a lone name) -- still falls through to the
-//     existing flagged/unmatched path, unchanged, on any real ambiguity.
+//     manual retype every single run.
+//
+//     CORRECTED same day, direct diagnosis against the real "Andreeva"
+//     case after it still failed post-deploy: the first version gated on
+//     "the suggested name has exactly one real match," which is the WRONG
+//     signal -- suggestClosestTennisPlayer returns one name even when a
+//     bare surname exactly matches TWO real players (the real Andreeva
+//     sisters, see Fix #13), picked arbitrarily by iteration order with no
+//     signal a second candidate exists. It only stayed safely unmatched by
+//     luck (the guessed sister had played multiple rounds that tournament,
+//     which happened to also fail the "exactly one match" check for an
+//     unrelated reason) -- a player with just one match so far would have
+//     silently locked in the wrong person. Fixed to check the real thing
+//     that matters: whether the suggested name's own surname is genuinely
+//     shared by more than one real player at all (reusing
+//     surnameToPlayers, the file's existing source of truth for this exact
+//     question), not how many matches that one guessed person has -- see
+//     the isTennis branch's own comment on this block for the full story.
 //
 // Deliberately does NOT touch odds/markets data -- that's schedule-sync's
 // job for anything within its own window, and closing odds for dates this
@@ -1264,28 +1276,56 @@ Deno.serve(async (req) => {
                 // opponent listed) never got the same auto-correction
                 // treatment as a two-name "A/B" pick above -- the note
                 // already suggested "Andreeva" -> "Mirra Andreeva" but never
-                // applied it, leaving every one of these needing a manual
-                // retype forever, every single run. The two-name case above
-                // cross-checks that BOTH corrected names share a real match
-                // together before trusting the guess -- that's the real
-                // confirming signal, and a lone name has no partner to
-                // cross-check against. So this only auto-applies when the
-                // suggested full name resolves to EXACTLY ONE real match
-                // near this date -- no real ambiguity to silently paper
-                // over (e.g. two different tour players who'd both fuzzy-
-                // match the same shorthand). Same "don't guess on a weak
-                // signal" principle as the KBO same-day-series decision
-                // elsewhere in this file. Multiple (or zero) candidates
-                // still falls through to the existing flagged/unmatched
-                // path below, unchanged -- and the existing
-                // TENNIS_DATE_GAP_SAFETY_DAYS check further down still
-                // catches a same-name-but-wrong-date case like Royer's,
-                // even after this auto-applies the spelling fix.
+                // applied it, needing a manual retype every single run.
+                //
+                // CORRECTED same day, found by tracing this exact code
+                // against the real "Andreeva" case rather than assuming it
+                // was safe: the first version of this fix gated on
+                // "suggestedCandidates.length === 1" (the suggested name has
+                // exactly one real match), on the theory that a genuine
+                // sibling/namesake collision like the two real Andreeva
+                // sisters (Fix #13) would naturally produce more than one
+                // candidate and get correctly excluded. That's wrong --
+                // suggestClosestTennisPlayer returns exactly ONE name even
+                // when a bare surname is an exact match for TWO different
+                // real players, picked arbitrarily by iteration order, with
+                // no signal at all that a second real candidate exists. The
+                // real "Andreeva" case only stayed correctly unmatched
+                // because Mirra happened to have played multiple rounds
+                // this tournament (multiple real match entries under her
+                // own full name) -- a player with only ONE match so far
+                // would have sailed through this gate and silently locked
+                // in the wrong sister, with schedule_sync_status='matched'
+                // and no note. Fixed to check the actual thing that
+                // matters: whether the SUGGESTED name's own surname is
+                // genuinely shared by more than one real player at all
+                // (reusing surnameToPlayers, the same source of truth the
+                // safe surname-only lookup above already trusts for this
+                // exact question) -- not how many matches/rounds that one
+                // guessed person happens to have. Multiple rounds for a
+                // genuinely unique player now correctly still resolves (via
+                // closestTennisMatch's existing same-day-or-later
+                // tiebreak, same as every other multi-match lookup in this
+                // file); a genuine multi-player surname collision now
+                // correctly declines regardless of either player's match
+                // count. The existing TENNIS_DATE_GAP_SAFETY_DAYS check
+                // further down still separately catches a same-name-but-
+                // wrong-event case like Royer's, unchanged.
                 const suggestion = suggestClosestTennisPlayer(tokens[0], tennisPlayerDisplayNames);
-                const suggestedCandidates = suggestion ? (tennisPlayerLookup.get(normalize(suggestion)) || []) : [];
-                if (suggestedCandidates.length === 1) {
-                  resolvedLists[0] = suggestedCandidates;
-                  spellingCorrections[tokens[0]] = suggestion as string;
+                if (suggestion) {
+                  const suggestionWords = suggestion.trim().split(/\s+/);
+                  const suggestionSurname = suggestionWords.length > 1
+                    ? normalize(suggestionWords[suggestionWords.length - 1])
+                    : normalize(suggestion);
+                  const realPlayersWithThisSurname = surnameToPlayers.get(suggestionSurname);
+                  const isGenuinelyAmbiguousSurname = !!realPlayersWithThisSurname && realPlayersWithThisSurname.size > 1;
+                  if (!isGenuinelyAmbiguousSurname) {
+                    const suggestedCandidates = tennisPlayerLookup.get(normalize(suggestion)) || [];
+                    if (suggestedCandidates.length) {
+                      resolvedLists[0] = suggestedCandidates;
+                      spellingCorrections[tokens[0]] = suggestion;
+                    }
+                  }
                 }
               }
             }
