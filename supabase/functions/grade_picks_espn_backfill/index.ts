@@ -1056,6 +1056,25 @@ Deno.serve(async (req) => {
             for (const tournament of (result.value.events || [])) {
               for (const grouping of (tournament.groupings || [])) {
                 for (const comp of (grouping.competitions || [])) {
+                  // CONFIRMED REAL BUG, direct report 2026-08-29: "I have
+                  // clear dates... this seems to be getting confused."
+                  // Querying ESPN for one specific date returns a Slam's
+                  // ENTIRE draw -- every round, every day, not just the
+                  // date asked for (same quirk this project's own
+                  // scheduling code already confirmed and documented,
+                  // Fix #13 above). Never filtering this down meant a
+                  // player's every real match across the whole tournament
+                  // (their 1st round, 2nd round, ... all the way to their
+                  // actual June 4th match) all landed in the same lookup,
+                  // so the ambiguity check correctly noticed "this name
+                  // points to more than one match" -- it just never
+                  // occurred to check that only ONE of those matches
+                  // actually happened on the date being graded. Filtering
+                  // to comp.date matching targetDate here, before anything
+                  // else runs, is what makes every downstream lookup
+                  // trustworthy.
+                  const compDateStr = (comp.date || '').slice(0, 10);
+                  if (compDateStr !== targetDate) continue;
                   const matchId = `${tournament.id}-${comp.id}`;
                   if (seenMatchIds.has(matchId)) continue;
                   seenMatchIds.add(matchId);
