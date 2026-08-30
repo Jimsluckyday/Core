@@ -2437,7 +2437,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          With a specific date entered: shows every pick still pending for that exact day only — since you already ran the grader on that day, anything still pending is by definition something it couldn't resolve. Working one day at a time keeps this from mixing multiple test days together into one confusing batch. Leave the date blank to instead search broadly across every day whose event date has already passed, plus anything the grader explicitly flagged as ambiguous — useful for an occasional wider sweep, not everyday use. Checking the box above catches problems earlier still — right after you run "Sync Schedule & Odds" in Pending Picks, any pick it couldn't confidently match gets included here too, whether or not its event date has passed yet, so a wrong date or unclear detail can get fixed well before grading day instead of showing up as a surprise later. Export these to CSV, work through them (in this chat, a fresh one, or however you research them), then use "Grading Corrections" below to bulk-apply what you find.
+          With a specific date entered: shows every pick still pending for that exact day only — since you already ran the grader on that day, anything still pending is by definition something it couldn't resolve. Working one day at a time keeps this from mixing multiple test days together into one confusing batch. Leave the date blank to instead search broadly across every day whose event date has already passed, plus anything the grader explicitly flagged as ambiguous — useful for an occasional wider sweep, not everyday use. Checking the box above catches problems earlier still — right after you run "Sync Schedule & Odds" in Pending Picks, any pick it couldn't confidently match gets included here too, whether or not its event date has passed yet, so a wrong date or unclear detail can get fixed well before grading day instead of showing up as a surprise later. Export these to CSV, work through them (in this chat, a fresh one, or however you research them), then use "Bulk Upload Manual Changes" below to bulk-apply what you find.
         </div>
         <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:0 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
           &#9888; This blank-date sweep is also the correct way to catch Series Winner/Playoff Series Winner picks, and any long-term futures bet (e.g. "Blue Jays to win the World Series," placed in April at good odds, not decided until October). Both share the same shape: <strong>event_date is whenever the pick was entered, not whenever it actually resolves</strong> -- so no date-scoped grading run will ever revisit them on its own, no matter how many times it's re-run for other days. They stay correctly stuck as "pending" for as long as that takes, and this blank-date sweep will keep surfacing them the whole time (no cutoff on how old event_date is) -- nothing gets lost, it just needs this run periodically rather than assumed to happen automatically. In practice: run it whenever a major tournament/series/season you know had an active pick on it wraps up (a Finals ends, a World Cup is decided, a season's playoff picture is final) -- that's your cue to check for anything that's been quietly waiting to resolve.
@@ -2689,10 +2689,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
-    <!-- GRADING CORRECTIONS (internal only) -->
+    <!-- GRADING CORRECTIONS (internal only) -- RENAMED 2026-08-30, direct
+         request: "trying to get away from that wording and make everything
+         a little more universal and understood by anyone who sits in front
+         of the database for editing... mainly used for bulk upload changes
+         of data." Visible label only -- ids (gradingCorrectionsPanel,
+         gradingCorrectionsInput, etc.) deliberately left unchanged, same as
+         the earlier Missing Data -> Data Validation Tool rename. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Grading corrections <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— bulk-apply researched results back onto exact picks</span>
+        Bulk Upload Manual Changes <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— bulk-apply researched results/odds/fields back onto exact picks</span>
         <button class="ghost small" id="toggleGradingCorrectionsBtn">Show tool</button>
       </p>
       <div id="gradingCorrectionsPanel" style="display:none;">
@@ -10270,7 +10276,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       // inline, which would just drift out of sync with it) means this
       // reminder travels with the file itself into any future chat/AI
       // session, not just this one.
-      const prefixText = 'This is a read-only reference export. To WRITE odds back onto these picks: build a separate CSV with just the columns "id,opening_odds,closing_odds" (id = the first column in this file, one row per pick needing odds), then upload or paste that file into Data Tools -> Grading Corrections in this app -- it matches strictly by id and writes opening_odds/closing_odds onto exactly those picks, ignoring any other column name. Do not edit the plain "Odds" column in this export and re-upload it -- Grading Corrections does not read that column, only opening_odds/closing_odds. If you are an AI assistant researching missing values for this file, check RESEARCH-SOURCES.md (in the telegram-pipeline project folder) FIRST for the tested sources and rules already documented there -- in particular, for any pick more than about a week old, use ONE researched number for both opening_odds and closing_odds rather than sourcing them as if they were separately findable.';
+      const prefixText = 'This is a read-only reference export. To WRITE odds back onto these picks: build a separate CSV with just the columns "id,opening_odds,closing_odds" (id = the first column in this file, one row per pick needing odds), then upload or paste that file into Data Tools -> Bulk Upload Manual Changes in this app -- it matches strictly by id and writes opening_odds/closing_odds onto exactly those picks, ignoring any other column name. Do not edit the plain "Odds" column in this export and re-upload it -- Bulk Upload Manual Changes does not read that column, only opening_odds/closing_odds. If you are an AI assistant researching missing values for this file, check RESEARCH-SOURCES.md (in the telegram-pipeline project folder) FIRST for the tested sources and rules already documented there -- in particular, for any pick more than about a week old, use ONE researched number for both opening_odds and closing_odds rather than sourcing them as if they were separately findable.';
       const csvContent = prefixText + '\\r\\n\\r\\n' + [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -10958,7 +10964,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       .flatMap(g => g.items.map(it => [it.id || '', it.capperName || '', it.sport || '', it.label || '', it.reason || '', '', '']));
     if (exportRows.length) {
       html += `<button type="button" id="automationExportCsvBtn" data-export-json="${escapeHtml(JSON.stringify(exportRows))}" data-export-label="${escapeHtml(label)}" style="font-family:inherit;font-size:11px;padding:4px 10px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;margin-bottom:4px;">&#8681; Export these ${exportRows.length} to CSV</button>`;
-      html += `<div style="font-size:10.5px;color:#55584d;margin-bottom:10px;">Fill in the blank opening_odds/closing_odds columns, then paste this same file into <strong>Data Tools &rarr; Grading Corrections</strong> to write it back -- matched by id, extra columns are ignored.</div>`;
+      html += `<div style="font-size:10.5px;color:#55584d;margin-bottom:10px;">Fill in the blank opening_odds/closing_odds columns, then paste this same file into <strong>Data Tools &rarr; Bulk Upload Manual Changes</strong> to write it back -- matched by id, extra columns are ignored.</div>`;
     }
     if (activeDateMismatchCount) {
       // Shown FIRST, ahead of failures -- these already wrote a real
@@ -11190,7 +11196,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const rows = JSON.parse(exportBtn.dataset.exportJson);
         const label = exportBtn.dataset.exportLabel || 'flagged picks';
         const safeName = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        const prefixText = 'Fill in opening_odds and closing_odds for each row below (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Grading Corrections -- it matches strictly by id and writes opening_odds/closing_odds back onto these exact picks.';
+        const prefixText = 'Fill in opening_odds and closing_odds for each row below (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Bulk Upload Manual Changes -- it matches strictly by id and writes opening_odds/closing_odds back onto these exact picks.';
         downloadCsv(`${safeName || 'automation-export'}.csv`, ['id', 'Capper', 'Sport', 'Pick', 'Issue', 'opening_odds', 'closing_odds'], rows, prefixText);
       });
     }
@@ -21189,7 +21195,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 397; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 398; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
