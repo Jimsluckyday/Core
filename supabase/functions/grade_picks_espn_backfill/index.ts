@@ -1042,6 +1042,7 @@ Deno.serve(async (req) => {
           type TennisMatchEntry = {
             matchId: string; matchup: string; completed: boolean; voided: boolean;
             playerNames: string[]; winnerByName: Map<string, boolean>; gamesByName: Map<string, number>;
+            setsPlayed: number | null;
           };
           const tennisMatches: TennisMatchEntry[] = [];
           const seenMatchIds = new Set<string>();
@@ -1063,6 +1064,12 @@ Deno.serve(async (req) => {
                   const names: string[] = [];
                   const winnerByName = new Map<string, boolean>();
                   const gamesByName = new Map<string, number>();
+                  // Number of sets actually played -- both competitors'
+                  // linescores[] arrays are the same length (one entry per
+                  // set both of them played), so either one gives the real
+                  // count; only set once, from whichever competitor is
+                  // processed first.
+                  let setsPlayed: number | null = null;
                   for (const competitor of (comp.competitors || [])) {
                     // Singles only -- a doubles competitor's names live
                     // under competitor.roster.athletes[] instead of a
@@ -1092,12 +1099,13 @@ Deno.serve(async (req) => {
                         else sawBadEntry = true;
                       }
                       if (!sawBadEntry) gamesByName.set(name, gamesSum);
+                      if (setsPlayed === null && Array.isArray(competitor.linescores)) setsPlayed = competitor.linescores.length;
                     }
                   }
                   if (names.length !== 2) continue; // not a real singles match (retirement w/o replacement, bad data, etc.)
                   tennisMatches.push({
                     matchId, matchup: names.join(' / '), completed,
-                    voided: isVoidGameStatus(statusName), playerNames: names, winnerByName, gamesByName
+                    voided: isVoidGameStatus(statusName), playerNames: names, winnerByName, gamesByName, setsPlayed
                   });
                 }
               }
@@ -1194,7 +1202,17 @@ Deno.serve(async (req) => {
             const isMoneyline = betTypeNorm === 'moneyline';
             const isSpread = betTypeNorm === 'spread';
             const isTotalType = betTypeNorm === 'total' || betTypeNorm.startsWith('overunder');
-            if (!isMoneyline && !isSpread && !isTotalType) {
+            // ADDED 2026-08-29, direct request: "build in the proper bet
+            // types... clean up the Tennis ones." A dedicated bet type
+            // (e.g. "Total (Sets)" -- normalize() strips the space/parens
+            // the same way it does for every other bet type name in this
+            // file, so exact spelling/punctuation doesn't matter) keeps a
+            // sets-total pick from ever being silently treated as a games-
+            // total by the plain "Total" branch above -- deliberately a
+            // SEPARATE bet type, not a hidden flag on the existing one,
+            // same pattern as MLB's Total First 5/First 7 already use.
+            const isTotalSets = betTypeNorm === 'totalsets';
+            if (!isMoneyline && !isSpread && !isTotalType && !isTotalSets) {
               const note = `Bet type "${betTypeName}" is not supported for Tennis grading yet -- needs manual grading.`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
               tennisSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
@@ -1240,6 +1258,27 @@ Deno.serve(async (req) => {
               const grade = combined === threshold ? 'push' : (isOver ? (combined > threshold ? 'win' : 'loss') : (combined < threshold ? 'win' : 'loss'));
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, total_games: combined });
+              continue;
+            }
+
+            if (isTotalSets) {
+              // setsPlayed is a single real count (how many sets the match
+              // actually went), not a sum of two sides -- same games-vs-
+              // sets distinction the "Total (Sets)" bet type itself exists
+              // to make explicit, so this reads the match's own count
+              // directly rather than reusing the Total(games) sum math.
+              if (typeof match.setsPlayed !== 'number' || pick.line === null || pick.line === undefined) {
+                const note = `${match.matchup} finished, but a real sets-played count or this pick's own line wasn't available -- needs manual grading.`;
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+                tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+                continue;
+              }
+              const setsLine = Number(pick.line);
+              const setsThreshold = Math.abs(setsLine);
+              const setsIsOver = setsLine < 0; // same project-wide convention: negative line = Over
+              const setsGrade = match.setsPlayed === setsThreshold ? 'push' : (setsIsOver ? (match.setsPlayed > setsThreshold ? 'win' : 'loss') : (match.setsPlayed < setsThreshold ? 'win' : 'loss'));
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setsGrade, grading_status: 'graded', grading_note: null }) });
+              tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setsGrade, matchup: match.matchup, sets_played: match.setsPlayed });
               continue;
             }
 
