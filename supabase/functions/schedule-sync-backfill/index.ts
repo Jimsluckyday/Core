@@ -2068,7 +2068,16 @@ Deno.serve(async (req) => {
         }
 
         const sportResult = {
-          sport: ourSport.name, games_found: games.length,
+          // Direct report 2026-08-29: a real batch of 14 KBO picks (entered
+          // 2025-06-04, corrected to event_date 2025-06-05, never before
+          // reviewed) produced ZERO activity on a run for date=2025-06-04
+          // -- not even the normal ambiguous-flag note, meaning the
+          // candidate query itself likely never found them, not that the
+          // matching logic mishandled them. candidates_found (the length
+          // of the OR-widened query's own result, before the parlay-
+          // wrapper filter even runs) makes that directly visible instead
+          // of inferring it from matched/unmatched both being empty.
+          sport: ourSport.name, games_found: games.length, candidates_found: picks.length,
           prop_lookup_status: propLookupStatus, prop_lookup_players_found: propLookup.size,
           matched: [] as any[], unmatched: [] as any[]
         };
