@@ -1188,43 +1188,64 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <label>Sport (used by "Find &amp; Update Teams / Tournaments", "Find Missing Odds", and "Find &amp; Update Results" — Pick Info always covers every sport)</label>
               <select id="autoSport"><option value="">All sports</option></select>
             </div>
-            <div style="align-self:flex-end;">
-              <button id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
+          </div>
+
+          <!-- Direct request 2026-08-30, real incident: "I hit the wrong
+               button and graded them... a complete error on my part."
+               Prep tools and Grading tools used to sit in the same open
+               row -- a misclick between them was one click away, and the
+               dashed divider above was only ever a visual hint, not an
+               actual barrier. Split into two INDEPENDENT collapsed
+               sub-panels, each needing its own deliberate "Show tools"
+               click -- opening one never opens or reveals the other, so
+               the Grading buttons are structurally not on screen (not
+               just visually de-emphasized) while working through Prep. -->
+          <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <strong style="font-size:12px;">1. Prep &amp; publish</strong>
+              <button type="button" class="ghost small" id="togglePrePublishToolsBtn">Show tools</button>
             </div>
-            <div style="align-self:flex-end;">
-              <button id="autoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
-            </div>
-            <div style="align-self:flex-end;">
-              <button id="autoMissingOddsBtn">Find Missing Odds</button>
-            </div>
-            <div style="align-self:flex-end;">
-              <button type="button" class="ghost" id="goDataValidationBtn" title="Takes you to the Data Validation Tool (Data Tools tab), pre-set to today's date with every relevant check ticked -- including the wrong-day checks (Schedule sync flagged, Late-night pick, Parlay leg date mismatch) that catch a KBO/Tennis pick about to publish a day early.">Data Validation Tool &rarr;</button>
+            <div id="prePublishToolsPanel" style="display:none;margin-top:10px;">
+              <div class="row">
+                <div style="align-self:flex-end;">
+                  <button id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
+                </div>
+                <div style="align-self:flex-end;">
+                  <button id="autoPropTeamBtn">Find &amp; Update Teams / Tournaments</button>
+                </div>
+                <div style="align-self:flex-end;">
+                  <button id="autoMissingOddsBtn">Find Missing Odds</button>
+                </div>
+                <div style="align-self:flex-end;">
+                  <button type="button" class="ghost" id="goDataValidationBtn" title="Takes you to the Data Validation Tool (Data Tools tab), pre-set to today's date with every relevant check ticked -- including the wrong-day checks (Schedule sync flagged, Late-night pick, Parlay leg date mismatch) that catch a KBO/Tennis pick about to publish a day early.">Data Validation Tool &rarr;</button>
+                </div>
+              </div>
+              <div style="border-top:2px dashed var(--stamp-amber);margin:14px 0 0;padding-top:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+                <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;max-width:480px;">
+                  &#9888; Once picks are live, come back and open <strong>"2. Grading"</strong> below to run "Find &amp; Update Results" -- never both sections open at once.
+                </div>
+                <button type="button" class="ghost" id="goPublishFromAutomationBtn" title="Doesn't rank or publish anything by itself -- just takes you to the Publish tab's own Rank Pending Picks tool.">Rank pending picks &rarr;</button>
+              </div>
             </div>
           </div>
-          <!-- Direct request 2026-08-22: "I can see a scenario where
-               someone forgets that you stop at finding the odds to then
-               publish the results... a good delineator that you've
-               finished looking for stuff now you need to publish your
-               work before updating the results." A plain horizontal
-               break plus this explicit stop-and-publish button sits
-               between the finding/fixing tools above and the
-               grading tools below, so the workflow reads as three
-               distinct steps instead of one undifferentiated row of
-               buttons someone could click straight through in order. -->
-          <div style="border-top:2px dashed var(--stamp-amber);margin:14px 0;padding-top:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-            <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;max-width:480px;">
-              &#9888; Stop here and publish before grading — once picks are live, come back and run "Find &amp; Update Results" below.
+
+          <div style="border:1.5px solid var(--stamp-red);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <strong style="font-size:12px;color:var(--stamp-red);">2. Grading &mdash; run the day AFTER publishing</strong>
+              <button type="button" class="ghost small" id="toggleGradingToolsBtn">Show tools</button>
             </div>
-            <button type="button" class="ghost" id="goPublishFromAutomationBtn" title="Doesn't rank or publish anything by itself -- just takes you to the Publish tab's own Rank Pending Picks tool.">Rank pending picks &rarr;</button>
-          </div>
-          <div class="row">
-            <div style="align-self:flex-end;">
-              <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
-            </div>
-            <div style="align-self:flex-end;">
-              <button id="autoGradeGolfBtn">Find &amp; Update Golf Results</button>
+            <div id="gradingToolsPanel" style="display:none;margin-top:10px;">
+              <div class="row">
+                <div style="align-self:flex-end;">
+                  <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
+                </div>
+                <div style="align-self:flex-end;">
+                  <button id="autoGradeGolfBtn">Find &amp; Update Golf Results</button>
+                </div>
+              </div>
             </div>
           </div>
+
           <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
             <!-- CONFIRMED direct request 2026-08-14: Sync Schedule & Odds
                  moved to the Old Tools tab (its own self-contained copy,
@@ -10537,6 +10558,23 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // pre-publish one). Doesn't run the search itself -- same "always
   // require an explicit click before anything happens" pattern as every
   // other automation tool in this box.
+  // Added 2026-08-30, direct report: "I hit the wrong button and graded
+  // them... a complete error on my part." Same simple show/hide pattern as
+  // toggleMissingDataBtn -- each panel only ever responds to its OWN
+  // button, so opening Prep tools never opens Grading tools or vice versa.
+  $('togglePrePublishToolsBtn').addEventListener('click', () => {
+    const panel = $('prePublishToolsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('togglePrePublishToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+  });
+  $('toggleGradingToolsBtn').addEventListener('click', () => {
+    const panel = $('gradingToolsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleGradingToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+  });
+
   $('showAutomationInstructionsBtn').addEventListener('click', openAutomationInstructionsTab);
 
   $('goDataValidationBtn').addEventListener('click', () => {
@@ -21151,7 +21189,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 396; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 397; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
