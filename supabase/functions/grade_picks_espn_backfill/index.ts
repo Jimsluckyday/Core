@@ -1042,7 +1042,7 @@ Deno.serve(async (req) => {
           type TennisMatchEntry = {
             matchId: string; matchup: string; completed: boolean; voided: boolean;
             playerNames: string[]; winnerByName: Map<string, boolean>; gamesByName: Map<string, number>;
-            setsPlayed: number | null;
+            setsPlayed: number | null; setWinnerNames: (string | null)[];
           };
           const tennisMatches: TennisMatchEntry[] = [];
           const seenMatchIds = new Set<string>();
@@ -1070,6 +1070,15 @@ Deno.serve(async (req) => {
                   // count; only set once, from whichever competitor is
                   // processed first.
                   let setsPlayed: number | null = null;
+                  // ADDED same day, direct request: "we can see scenarios
+                  // where someone picks a winner of a specific set" --
+                  // Moneyline 1st/2nd/3rd/4th/5th Set. Each competitor's
+                  // own linescores[i].winner is a per-SET boolean (already
+                  // confirmed real in the Djokovic/Zverev data used for the
+                  // games/sets totals above) -- recording which player it
+                  // belongs to, per set index, is all that's needed; no new
+                  // fetch or matching, just reading a field already in hand.
+                  const setWinnerNames: (string | null)[] = [];
                   for (const competitor of (comp.competitors || [])) {
                     // Singles only -- a doubles competitor's names live
                     // under competitor.roster.athletes[] instead of a
@@ -1094,9 +1103,11 @@ Deno.serve(async (req) => {
                       const setValues = Array.isArray(competitor.linescores) ? competitor.linescores : [];
                       let gamesSum = 0;
                       let sawBadEntry = false;
-                      for (const set of setValues) {
+                      for (let i = 0; i < setValues.length; i++) {
+                        const set = setValues[i];
                         if (set && typeof set.value === 'number' && Number.isFinite(set.value)) gamesSum += set.value;
                         else sawBadEntry = true;
+                        if (set && set.winner === true) setWinnerNames[i] = name;
                       }
                       if (!sawBadEntry) gamesByName.set(name, gamesSum);
                       if (setsPlayed === null && Array.isArray(competitor.linescores)) setsPlayed = competitor.linescores.length;
@@ -1105,7 +1116,7 @@ Deno.serve(async (req) => {
                   if (names.length !== 2) continue; // not a real singles match (retirement w/o replacement, bad data, etc.)
                   tennisMatches.push({
                     matchId, matchup: names.join(' / '), completed,
-                    voided: isVoidGameStatus(statusName), playerNames: names, winnerByName, gamesByName, setsPlayed
+                    voided: isVoidGameStatus(statusName), playerNames: names, winnerByName, gamesByName, setsPlayed, setWinnerNames
                   });
                 }
               }
@@ -1195,6 +1206,17 @@ Deno.serve(async (req) => {
             return { match: null, ownName: null, reason: `"${selectionText}" doesn't resolve to two opponents in the same real singles match today -- may be a doubles pairing (not yet supported for grading) or two unrelated players.` };
           }
 
+          // ADDED same day, direct request: "we can build in the Moneyline
+          // 1st Set, 2nd set, 3rd or 4th set." Kept as separate bet_type
+          // rows (e.g. "Moneyline 2nd Set"), same pattern as every other
+          // bet-type split in this project -- not a qualifier on plain
+          // Moneyline. 5th Set included proactively (not explicitly asked
+          // for) since a men's best-of-5 match can genuinely go the
+          // distance; harmless to have if never used.
+          const SET_ORDINAL_TO_INDEX: Record<string, number> = {
+            moneyline1stset: 0, moneyline2ndset: 1, moneyline3rdset: 2, moneyline4thset: 3, moneyline5thset: 4
+          };
+
           for (const pick of (tennisPicks || [])) {
             const betTypeName = pick.bet_types ? pick.bet_types.name : '';
             const betTypeNorm = normalize(betTypeName);
@@ -1202,6 +1224,8 @@ Deno.serve(async (req) => {
             const isMoneyline = betTypeNorm === 'moneyline';
             const isSpread = betTypeNorm === 'spread';
             const isTotalType = betTypeNorm === 'total' || betTypeNorm.startsWith('overunder');
+            const setMoneylineIndex = SET_ORDINAL_TO_INDEX[betTypeNorm];
+            const isSetMoneyline = setMoneylineIndex !== undefined;
             // ADDED 2026-08-29, direct request: "build in the proper bet
             // types... clean up the Tennis ones." A dedicated bet type
             // (e.g. "Total (Sets)" -- normalize() strips the space/parens
@@ -1212,13 +1236,13 @@ Deno.serve(async (req) => {
             // SEPARATE bet type, not a hidden flag on the existing one,
             // same pattern as MLB's Total First 5/First 7 already use.
             const isTotalSets = betTypeNorm === 'totalsets';
-            if (!isMoneyline && !isSpread && !isTotalType && !isTotalSets) {
+            if (!isMoneyline && !isSpread && !isTotalType && !isTotalSets && !isSetMoneyline) {
               const note = `Bet type "${betTypeName}" is not supported for Tennis grading yet -- needs manual grading.`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
               tennisSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
               continue;
             }
-            if ((isMoneyline || isSpread) && pick.selection.includes('/')) {
+            if ((isMoneyline || isSpread || isSetMoneyline) && pick.selection.includes('/')) {
               const note = `"${pick.selection}" -- can't tell which side this ${betTypeName} pick actually backs from a two-name selection alone (or this is a doubles pairing, not yet supported). Needs manual grading.`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
               tennisSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
@@ -1302,6 +1326,37 @@ Deno.serve(async (req) => {
               }
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, own_games: ownGames, opp_games: oppGames });
+              continue;
+            }
+
+            if (isSetMoneyline) {
+              const ownName = resolved.ownName;
+              if (!ownName) {
+                const note = `Could not confirm which real player "${pick.selection}" refers to for this set -- needs manual grading.`;
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+                tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+                continue;
+              }
+              // A set index beyond how many were actually played (e.g. a
+              // "4th Set" pick on a match that finished in straight sets)
+              // means that set never happened -- standard sportsbook
+              // convention for a market that never came into play is no
+              // action, graded push, not left pending or lost.
+              if (match.setsPlayed !== null && setMoneylineIndex >= match.setsPlayed) {
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
+                continue;
+              }
+              const setWinnerName = match.setWinnerNames[setMoneylineIndex];
+              if (!setWinnerName) {
+                const note = `${match.matchup} finished, but set ${setMoneylineIndex + 1}'s own winner wasn't clearly recorded -- needs manual grading.`;
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+                tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+                continue;
+              }
+              const setGrade = setWinnerName === ownName ? 'win' : 'loss';
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setGrade, grading_status: 'graded', grading_note: null }) });
+              tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setGrade, matchup: match.matchup, set_index: setMoneylineIndex + 1 });
               continue;
             }
 
