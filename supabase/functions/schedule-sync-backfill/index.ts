@@ -716,6 +716,30 @@
 //     reliable only for the future live-listener pipeline, not historical/
 //     bulk data) was discussed as a possible later refinement, not built.
 //
+// 34. CONFIRMED FIX, direct request: "you can automate these? If so then
+//     yes as any automation should always be explored so we don't have to
+//     do all this manual work." Three separate, permanent root-cause fixes
+//     for three separate one-off failure notes surfaced in the same run:
+//     (a) NHL props always fell through to propLookupStatus's
+//     'not_applicable' default, permanently marking every NHL prop
+//     schedule_sync_status='not_supported' -- not a real limitation, NHL
+//     just was never added alongside NBA/WNBA's roster-lookup branch even
+//     though ESPN exposes the identical team-roster endpoint for hockey.
+//     (b) Soccer's SOCCER_COMPETITION_SLUGS had every other major UEFA
+//     competition but never 'uefa.nations' -- missed the real 2025-06-04
+//     Germany/Portugal Nations League Final Four semifinal entirely.
+//     (c) Tennis's spelling-auto-correction only ever ran for two-name "A/B"
+//     picks (cross-checking both corrected names share a real match
+//     together as the confirming signal) -- a single-name pick like
+//     "Andreeva" got the correct suggestion in its note text
+//     ("Andreeva" -> "Mirra Andreeva") but never had it applied, needing a
+//     manual retype every single run. Extended the same guarded-auto-apply
+//     approach to the single-name case: only auto-applies when the
+//     suggested full name resolves to EXACTLY ONE real match near the
+//     date (no cross-check partner available, so this is the analogous
+//     confirming signal for a lone name) -- still falls through to the
+//     existing flagged/unmatched path, unchanged, on any real ambiguity.
+//
 // Deliberately does NOT touch odds/markets data -- that's schedule-sync's
 // job for anything within its own window, and closing odds for dates this
 // old generally aren't recoverable from any live-odds API regardless of
@@ -879,6 +903,12 @@ const SOCCER_COMPETITION_SLUGS = [
   'fifa.friendly', 'fifa.world',
   'fifa.worldq.uefa', 'fifa.worldq.concacaf', 'fifa.worldq.conmebol', 'fifa.worldq.afc', 'fifa.worldq.caf',
   'uefa.euro', 'conmebol.america', 'concacaf.gold',
+  // CONFIRMED FIX, direct report 2026-08-29: "Germany/Portugal" (a real
+  // 2025-06-04 UEFA Nations League Final Four semifinal) came back as "no
+  // matching game found" -- this list had every other major UEFA
+  // competition (Champions League, Europa League, Euro Championship) but
+  // never included the Nations League itself.
+  'uefa.nations',
 ];
 
 const KBO_TEAM_NAMES: Record<string, { location: string; name: string }> = {
@@ -1228,6 +1258,35 @@ Deno.serve(async (req) => {
                 } else {
                   for (const k of Object.keys(spellingCorrections)) delete spellingCorrections[k];
                 }
+              } else if (tokens.length === 1 && stillMissingIdx.length === 1) {
+                // CONFIRMED FIX, direct report 2026-08-29: a single-name pick
+                // (a straight bet or Player Prop with just "Andreeva", no
+                // opponent listed) never got the same auto-correction
+                // treatment as a two-name "A/B" pick above -- the note
+                // already suggested "Andreeva" -> "Mirra Andreeva" but never
+                // applied it, leaving every one of these needing a manual
+                // retype forever, every single run. The two-name case above
+                // cross-checks that BOTH corrected names share a real match
+                // together before trusting the guess -- that's the real
+                // confirming signal, and a lone name has no partner to
+                // cross-check against. So this only auto-applies when the
+                // suggested full name resolves to EXACTLY ONE real match
+                // near this date -- no real ambiguity to silently paper
+                // over (e.g. two different tour players who'd both fuzzy-
+                // match the same shorthand). Same "don't guess on a weak
+                // signal" principle as the KBO same-day-series decision
+                // elsewhere in this file. Multiple (or zero) candidates
+                // still falls through to the existing flagged/unmatched
+                // path below, unchanged -- and the existing
+                // TENNIS_DATE_GAP_SAFETY_DAYS check further down still
+                // catches a same-name-but-wrong-date case like Royer's,
+                // even after this auto-applies the spelling fix.
+                const suggestion = suggestClosestTennisPlayer(tokens[0], tennisPlayerDisplayNames);
+                const suggestedCandidates = suggestion ? (tennisPlayerLookup.get(normalize(suggestion)) || []) : [];
+                if (suggestedCandidates.length === 1) {
+                  resolvedLists[0] = suggestedCandidates;
+                  spellingCorrections[tokens[0]] = suggestion as string;
+                }
               }
             }
             const missingTokens = tokens.filter((t, i) => resolvedLists[i].length === 0);
@@ -1287,8 +1346,11 @@ Deno.serve(async (req) => {
                 tennisSportResult.unmatched.push({ id: pick.id, selection: isProp ? pick.prop_player : pick.selection, reason: note });
                 continue;
               }
+              const correctionConfirmedBy = tokens.length > 1
+                ? 'confirmed by a real shared match with the other name on this pick'
+                : 'confirmed as the only real match for that name near this date';
               const correctionNote = Object.keys(spellingCorrections).length
-                ? `Auto-corrected spelling: ${Object.entries(spellingCorrections).map(([k, v]) => `"${k}" -> "${v}"`).join(', ')} -- confirmed by a real shared match with the other name on this pick, but please double-check this was the intended player. `
+                ? `Auto-corrected spelling: ${Object.entries(spellingCorrections).map(([k, v]) => `"${k}" -> "${v}"`).join(', ')} -- ${correctionConfirmedBy}, but please double-check this was the intended player. `
                 : '';
               const dateDifferNote = dateDiffers
                 ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${targetDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`
@@ -1674,8 +1736,18 @@ Deno.serve(async (req) => {
           } catch (e) {
             propLookupStatus = `build_threw_error: ${String(e)}`;
           }
-        } else if (sportNormName === 'nba' || sportNormName === 'wnba') {
-          const espnRosterSportPath = sportNormName === 'wnba' ? 'basketball/wnba' : 'basketball/nba';
+        } else if (sportNormName === 'nba' || sportNormName === 'wnba' || sportNormName === 'nhl') {
+          // CONFIRMED FIX, direct report 2026-08-29: NHL props always fell
+          // through to propLookupStatus's default 'not_applicable', which
+          // permanently marked every NHL prop schedule_sync_status =
+          // 'not_supported' with a "no player roster data source available"
+          // note -- not a real limitation, just never built. ESPN exposes
+          // the exact same team-roster endpoint for NHL as it does for NBA/
+          // WNBA (already used elsewhere in this file for NHL's own
+          // scoreboard via ESPN_SPORT_MAP's 'hockey/nhl' entry), so this
+          // reuses the identical NBA/WNBA roster-lookup logic below,
+          // unchanged, just adding the NHL sport path.
+          const espnRosterSportPath = sportNormName === 'wnba' ? 'basketball/wnba' : sportNormName === 'nhl' ? 'hockey/nhl' : 'basketball/nba';
           const teamsToday = new Map<string, { teamName: string; startTime: string }>();
           for (const g of games) {
             const competitors = (g.competitions && g.competitions[0] && g.competitions[0].competitors) || [];
