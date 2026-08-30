@@ -6327,7 +6327,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // If someone manually sets/edits the start time by hand here, treat that
     // as authoritative -- mark it matched so the sync job (which only
     // touches rows that AREN'T already 'matched') leaves it alone going forward.
-    if (gameStartTimeVal) {
+    // CONFIRMED REAL BUG, direct report 2026-08-29: this used to only fire
+    // when gameStartTimeVal itself was filled in -- so manually fixing
+    // everything else about a flagged pick (event name, prop team, home/
+    // away -- whatever the ACTUAL issue was) while leaving that one field
+    // untouched left schedule_sync_status exactly as it was. The next run
+    // of Find & Update Pick Info would see it still wasn't 'matched', retry,
+    // fail the same way it always fails (no NHL roster source, an
+    // uncovered soccer competition, whatever), and silently overwrite the
+    // note right back -- with zero indication the manual fix never stuck.
+    // Saving an EXISTING pick at all is a human reviewing and confirming it
+    // right here (the current schedule_sync_note is shown directly in this
+    // form, see pickScheduleSyncNote below) -- same "an explicit save is
+    // authoritative" treatment the inline-selection/prop-player/prop-team
+    // editors already give unconditionally elsewhere in this file. Only a
+    // brand-new pick (no editingId yet) still keys strictly off
+    // gameStartTimeVal, since there's no prior automation flag to honor yet.
+    if (gameStartTimeVal || editingId) {
       payload.schedule_sync_status = 'matched';
       payload.schedule_sync_note = null;
     }
@@ -21049,7 +21065,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 390; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 391; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
