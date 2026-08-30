@@ -16,9 +16,9 @@
 // matching generic scoreboard endpoint, or because it's not a team-vs-
 // team sport this function's Moneyline/Spread/Total logic could ever
 // grade anyway. Tennis is the one exception, added 2026-08-29 (see the
-// isTennis branch's own comment) -- Singles Moneyline only, its own
-// dedicated ATP/WTA fetch and matching entirely separate from everything
-// else here, since it has no flat scoreboard endpoint to add to
+// isTennis branch's own comment) -- Moneyline, Spread, and Total, Singles
+// only, its own dedicated ATP/WTA fetch and matching entirely separate
+// from everything else here, since it has no flat scoreboard endpoint to add to
 // ESPN_SPORT_MAP the way every other sport does.
 //
 // ADDED MMA (UFC) Moneyline grading, 2026-08-22, direct request: "every
@@ -1004,30 +1004,36 @@ Deno.serve(async (req) => {
     for (const ourSport of ourSports) {
       const sportNormName = normalize(ourSport.name);
 
-      // ---- Tennis Moneyline grading -- direct report 2026-08-29: "Djokovic
-      // played on Jun 4" (a real, clear French Open QF result) sat pending
-      // forever, because this whole function's header explicitly documents
-      // Tennis as "not a team-vs-team sport this function's logic could
-      // ever grade anyway" -- a genuine, permanent gap, not a matching
-      // failure. Tennis has no flat scoreboard endpoint the way every
-      // other sport here does (ESPN splits it across separate ATP/WTA
-      // feeds, nested tournament -> grouping -> match, with no single
-      // sport/league URL segment to add to ESPN_SPORT_MAP), so it needs
-      // its own fetch and its own matching entirely, same reasoning MMA
-      // already established for individual-vs-individual sports (a match
-      // has two players, not a home/away team pair, and ESPN's own
-      // per-competitor `winner` boolean makes this simpler than score
-      // math once the right player is found). Scoped to SINGLES Moneyline
-      // only for now, same "don't guess on real-money grading" principle
-      // as everywhere else in this project -- a doubles pick (two names)
-      // is explicitly flagged unsupported rather than guessed at, since
-      // determining which specific pairing a bare "A/B" text means and
-      // whether that maps cleanly to one specific real doubles match is a
-      // materially harder problem than singles, not yet built. Runs a
-      // single day's completed matches only (targetDate, no widened
-      // window) -- by the time a pick reaches grading, schedule-sync's own
-      // work is what's responsible for event_date already being correct;
-      // this only needs to find what ACTUALLY happened that day, not
+      // ---- Tennis grading (Moneyline, Spread, Total) -- direct report
+      // 2026-08-29: "Djokovic played on Jun 4" (a real, clear French Open
+      // QF result) sat pending forever, because this whole function's
+      // header explicitly documented Tennis as "not a team-vs-team sport
+      // this function's logic could ever grade anyway" -- a genuine,
+      // permanent gap, not a matching failure. Tennis has no flat
+      // scoreboard endpoint the way every other sport here does (ESPN
+      // splits it across separate ATP/WTA feeds, nested tournament ->
+      // grouping -> match, with no single sport/league URL segment to add
+      // to ESPN_SPORT_MAP), so it needs its own fetch and its own matching
+      // entirely, same reasoning MMA already established for individual-
+      // vs-individual sports. Started as Moneyline-only (ESPN's own per-
+      // competitor `winner` boolean, no score math needed), then extended
+      // same-day, direct follow-up ("will this only catch moneyline bets
+      // or can it catch Spreads and over/under bets") once each
+      // competitor's own linescores[] (one entry per set, .value = games
+      // won that set) was CONFIRMED directly against the real Djokovic/
+      // Zverev match -- summed, this gives a real total-games count for
+      // Total grading and a real per-player games count for Spread, not a
+      // guess. Scoped to SINGLES only across all three bet types, same
+      // "don't guess on real-money grading" principle as everywhere else
+      // in this project -- a doubles pick is explicitly flagged
+      // unsupported rather than guessed at, since determining which
+      // specific pairing a bare "A/B" text means and whether that maps
+      // cleanly to one specific real doubles match is a materially harder
+      // problem than singles, not yet built. Runs a single day's completed
+      // matches only (targetDate, no widened window) -- by the time a pick
+      // reaches grading, schedule-sync's own work is what's responsible
+      // for event_date already being correct; this only needs to find
+      // what ACTUALLY happened that day, not
       // resolve a date ambiguity.
       if (sportNormName === 'tennis') {
         try {
@@ -1035,7 +1041,7 @@ Deno.serve(async (req) => {
           const TENNIS_TOURS = ['atp', 'wta'];
           type TennisMatchEntry = {
             matchId: string; matchup: string; completed: boolean; voided: boolean;
-            playerNames: string[]; winnerByName: Map<string, boolean>;
+            playerNames: string[]; winnerByName: Map<string, boolean>; gamesByName: Map<string, number>;
           };
           const tennisMatches: TennisMatchEntry[] = [];
           const seenMatchIds = new Set<string>();
@@ -1056,6 +1062,7 @@ Deno.serve(async (req) => {
                   const statusName: string | null = (comp.status && comp.status.type && comp.status.type.name) || null;
                   const names: string[] = [];
                   const winnerByName = new Map<string, boolean>();
+                  const gamesByName = new Map<string, number>();
                   for (const competitor of (comp.competitors || [])) {
                     // Singles only -- a doubles competitor's names live
                     // under competitor.roster.athletes[] instead of a
@@ -1065,12 +1072,32 @@ Deno.serve(async (req) => {
                       const name = competitor.athlete.displayName;
                       names.push(name);
                       if (typeof competitor.winner === 'boolean') winnerByName.set(name, competitor.winner);
+                      // CONFIRMED directly against a real match (Djokovic
+                      // bt Zverev 4-6 6-3 6-2 6-4, 2025-06-04): each
+                      // competitor's own linescores[] has one entry per SET
+                      // PLAYED with a real .value = games THAT competitor
+                      // won in that set (Djokovic's own linescores were
+                      // exactly [4,6,6,6], matching the real final score
+                      // digit for digit) -- summing them is a genuine total
+                      // games count for Total(games)/Spread(games)
+                      // grading, not a guess. Missing/non-numeric entries
+                      // are skipped rather than treated as 0, so a data gap
+                      // makes the sum null (never a silently-wrong number)
+                      // rather than undercounting.
+                      const setValues = Array.isArray(competitor.linescores) ? competitor.linescores : [];
+                      let gamesSum = 0;
+                      let sawBadEntry = false;
+                      for (const set of setValues) {
+                        if (set && typeof set.value === 'number' && Number.isFinite(set.value)) gamesSum += set.value;
+                        else sawBadEntry = true;
+                      }
+                      if (!sawBadEntry) gamesByName.set(name, gamesSum);
                     }
                   }
                   if (names.length !== 2) continue; // not a real singles match (retirement w/o replacement, bad data, etc.)
                   tennisMatches.push({
                     matchId, matchup: names.join(' / '), completed,
-                    voided: isVoidGameStatus(statusName), playerNames: names, winnerByName
+                    voided: isVoidGameStatus(statusName), playerNames: names, winnerByName, gamesByName
                   });
                 }
               }
@@ -1119,37 +1146,73 @@ Deno.serve(async (req) => {
             sport: ourSport.name, matches_found: tennisMatches.length,
             graded: [] as any[], ambiguous: [] as any[], not_final_yet: [] as any[], unsupported_bet_type: [] as any[]
           };
+          // Resolves free-typed selection text to a real match, for
+          // Moneyline/Spread (single player name, e.g. "Djokovic") AND
+          // Total (a "PlayerA/PlayerB" identifying pair, since a Total
+          // isn't "about" either side, just needs to name the match) --
+          // returns the match plus, when resolved via one specific name,
+          // that name (needed for Moneyline/Spread's own-side math).
+          // Ambiguous/not-found cases return a human-readable reason
+          // instead of throwing, so the caller always has something to
+          // write to grading_note.
+          function resolveTennisSelection(selectionText: string): { match: TennisMatchEntry | null; ownName: string | null; reason: string | null } {
+            if (!selectionText.includes('/')) {
+              const key = normalize(selectionText);
+              if (tennisAmbiguousKeys.has(key)) {
+                return { match: null, ownName: null, reason: `"${selectionText}" matches more than one real player's match today -- needs manual review to confirm which match this pick actually means.` };
+              }
+              const match = tennisPlayerLookup.get(key);
+              if (!match) {
+                return { match: null, ownName: null, reason: `Could not find "${selectionText}" on today's ATP/WTA schedule -- may be a name spelling issue, a Challenger/lower-tier event this data source doesn't cover, or the wrong event_date.` };
+              }
+              const ownName = match.playerNames.find(n => normalize(n) === key || normalize(n.trim().split(/\s+/).pop() || '') === key) || null;
+              return { match, ownName, reason: null };
+            }
+            // Two-name form: only trusted as "these are the two real
+            // opponents in one singles match" when BOTH names resolve to
+            // the exact SAME match -- otherwise this is either a genuine
+            // doubles pairing (two partners, not opponents) or two
+            // unrelated players, and guessing which is worse than asking
+            // for manual review.
+            const [nameA, nameB] = selectionText.split('/').map(s => s.trim());
+            const keyA = normalize(nameA), keyB = normalize(nameB);
+            if (tennisAmbiguousKeys.has(keyA) || tennisAmbiguousKeys.has(keyB)) {
+              return { match: null, ownName: null, reason: `"${selectionText}" -- one of these names matches more than one real match today, needs manual review.` };
+            }
+            const matchA = tennisPlayerLookup.get(keyA);
+            const matchB = tennisPlayerLookup.get(keyB);
+            if (matchA && matchB && matchA.matchId === matchB.matchId) {
+              return { match: matchA, ownName: null, reason: null };
+            }
+            return { match: null, ownName: null, reason: `"${selectionText}" doesn't resolve to two opponents in the same real singles match today -- may be a doubles pairing (not yet supported for grading) or two unrelated players.` };
+          }
+
           for (const pick of (tennisPicks || [])) {
             const betTypeName = pick.bet_types ? pick.bet_types.name : '';
             const betTypeNorm = normalize(betTypeName);
             if (betTypeNorm === 'parlay') continue;
             const isMoneyline = betTypeNorm === 'moneyline';
-            if (!isMoneyline) {
+            const isSpread = betTypeNorm === 'spread';
+            const isTotalType = betTypeNorm === 'total' || betTypeNorm.startsWith('overunder');
+            if (!isMoneyline && !isSpread && !isTotalType) {
               const note = `Bet type "${betTypeName}" is not supported for Tennis grading yet -- needs manual grading.`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
               tennisSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
               continue;
             }
-            if (pick.selection.includes('/')) {
-              const note = `"${pick.selection}" looks like a doubles pairing -- doubles Tennis grading isn't supported yet, needs manual grading.`;
+            if ((isMoneyline || isSpread) && pick.selection.includes('/')) {
+              const note = `"${pick.selection}" -- can't tell which side this ${betTypeName} pick actually backs from a two-name selection alone (or this is a doubles pairing, not yet supported). Needs manual grading.`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
               tennisSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
               continue;
             }
-            const key = normalize(pick.selection);
-            if (tennisAmbiguousKeys.has(key)) {
-              const note = `"${pick.selection}" matches more than one real player's match today -- needs manual review to confirm which match this pick actually means.`;
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
-              tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+            const resolved = resolveTennisSelection(pick.selection);
+            if (!resolved.match) {
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: resolved.reason }) });
+              tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: resolved.reason });
               continue;
             }
-            const match = tennisPlayerLookup.get(key);
-            if (!match) {
-              const note = `Could not find "${pick.selection}" on today's ATP/WTA schedule -- may be a name spelling issue, a Challenger/lower-tier event this data source doesn't cover, or the wrong event_date.`;
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
-              tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
-              continue;
-            }
+            const match = resolved.match;
             if (!match.completed) {
               if (match.voided) {
                 await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
@@ -1159,12 +1222,52 @@ Deno.serve(async (req) => {
               tennisSportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: match.matchup, reason: `Matched to ${match.matchup}, but ESPN has not marked this match final yet -- not a name-matching issue, check back later.` });
               continue;
             }
-            // Look up this specific named player's own winner flag -- the
-            // exact display name matched via tennisPlayerLookup's key,
-            // which could be the full name OR a safe unique surname, so
-            // find whichever of the match's two playerNames actually
-            // normalizes to this key.
-            const ownName = match.playerNames.find(n => normalize(n) === key || normalize(n.trim().split(/\s+/).pop() || '') === key);
+
+            if (isTotalType) {
+              const [nameA, nameB] = match.playerNames;
+              const gamesA = match.gamesByName.get(nameA);
+              const gamesB = match.gamesByName.get(nameB);
+              if (typeof gamesA !== 'number' || typeof gamesB !== 'number' || pick.line === null || pick.line === undefined) {
+                const note = `${match.matchup} finished, but a real total-games count or this pick's own line wasn't available -- needs manual grading.`;
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+                tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+                continue;
+              }
+              const combined = gamesA + gamesB;
+              const line = Number(pick.line);
+              const threshold = Math.abs(line);
+              const isOver = line < 0; // project-wide convention: negative line = Over
+              const grade = combined === threshold ? 'push' : (isOver ? (combined > threshold ? 'win' : 'loss') : (combined < threshold ? 'win' : 'loss'));
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+              tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, total_games: combined });
+              continue;
+            }
+
+            if (isSpread) {
+              const ownName = resolved.ownName;
+              const oppName = ownName ? match.playerNames.find(n => n !== ownName) : null;
+              const ownGames = ownName ? match.gamesByName.get(ownName) : undefined;
+              const oppGames = oppName ? match.gamesByName.get(oppName) : undefined;
+              if (typeof ownGames !== 'number' || typeof oppGames !== 'number' || pick.line === null || pick.line === undefined) {
+                const note = `${match.matchup} finished, but a real per-player games count or this pick's own line wasn't available -- needs manual grading.`;
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+                tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+                continue;
+              }
+              const grade = gradeSpreadPeriod(ownGames, oppGames, true, Number(pick.line));
+              if (!grade) {
+                const note = `${match.matchup} finished, but the games spread couldn't be confidently graded -- needs manual review.`;
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+                tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+                continue;
+              }
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+              tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, own_games: ownGames, opp_games: oppGames });
+              continue;
+            }
+
+            // Moneyline
+            const ownName = resolved.ownName;
             const won = ownName ? match.winnerByName.get(ownName) : undefined;
             if (typeof won !== 'boolean') {
               const note = `${match.matchup} finished with no clear winner recorded (retirement, walkover, or a data gap) -- needs manual grading.`;
