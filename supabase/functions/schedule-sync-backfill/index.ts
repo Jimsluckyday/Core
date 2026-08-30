@@ -757,6 +757,29 @@
 // old generally aren't recoverable from any live-odds API regardless of
 // provider.
 //
+// 35. CONFIRMED FIX, direct follow-up to the "Andreeva sisters" case above:
+//     "my big issue with sisters etc is that the cappers aren't specific
+//     so how do I know their intention... sometimes the tournament but
+//     that's all they usually give us on a given day." A bare surname
+//     shared by more than one real player is genuinely unresolvable by
+//     name alone -- but the pick's own event_name (the tournament the
+//     capper actually named, already captured at data entry) is real
+//     information, not a guess, and every real match already carries its
+//     own tournamentName. Now: when a single ambiguous surname's real
+//     candidates are narrowed down to just the pick's DECLARED tournament
+//     and that leaves exactly one DISTINCT real player (counting distinct
+//     players, not raw matches -- the same widened-window multi-round
+//     trap Fix #13(b) already had to account for elsewhere), it's trusted
+//     as a genuine resolution using what the capper told us, not a fuzzy
+//     guess -- same confidence tier as a confirmed spelling correction.
+//     Checked before the single-name typo-correction path added in Fix
+//     #34(c)/its same-day correction, so a declared tournament always
+//     gets first crack at resolving a real ambiguity before falling back
+//     to edit-distance suggestion. Still declines (falls through
+//     unchanged) when no tournament is declared, or when both ambiguous
+//     players happen to be at the same declared tournament -- that's a
+//     genuine remaining ambiguity, not something this fix claims to solve.
+//
 // Run it once per date you want to catch up: POST /schedule-sync-backfill?date=2026-06-01
 // Optionally add &sport=MLB to run just one sport at a time, or &skipProps=true
 // to only touch game_start_time/home_away and never prop_team/event_name.
@@ -1243,6 +1266,47 @@ Deno.serve(async (req) => {
                 if (fallback && fallback.length) resolvedLists[i] = fallback;
               }
             }
+            // CONFIRMED FIX, direct request 2026-08-29: "sometimes the
+            // tournament but that's all they usually give us on a given
+            // day" -- a bare surname genuinely shared by more than one real
+            // player (e.g. the two real Andreeva sisters) is unresolvable
+            // by name alone, but the pick's OWN event_name (the tournament
+            // the capper actually named) is real information already
+            // captured at data entry, not a guess -- and every real match
+            // in tennisSurnameAllCandidates already carries its own
+            // tournamentName. If narrowing this surname's real candidates
+            // down to just the DECLARED tournament leaves exactly one
+            // DISTINCT real player (not just one match -- the same widened-
+            // window multi-round trap Fix #13(b) already had to fix
+            // elsewhere counts here too), that's a genuine resolution using
+            // what the capper told us, not a fuzzy suggestion -- safe to
+            // trust the same way a confirmed spelling correction is.
+            // Deliberately only attempted when the safe/typo paths above
+            // and below found nothing (this sits before spellingCorrections
+            // is even computed), and only for a single bare name -- a
+            // multi-name pick already has a much stronger disambiguator
+            // (the other player) via the fallback just above.
+            let resolvedViaDeclaredTournament = false;
+            if (tokens.length === 1 && resolvedLists[0].length === 0 && pick.event_name) {
+              const surnameCandidates = tennisSurnameAllCandidates.get(normalize(tokens[0]));
+              if (surnameCandidates && surnameCandidates.length) {
+                const wantedTournament = normalize(pick.event_name);
+                const filtered = surnameCandidates.filter(m => m.tournamentName && normalize(m.tournamentName) === wantedTournament);
+                if (filtered.length) {
+                  const distinctPlayers = new Set<string>();
+                  for (const m of filtered) {
+                    for (const n of m.playerNames) {
+                      const words = n.trim().split(/\s+/);
+                      if (words.length > 1 && normalize(words[words.length - 1]) === normalize(tokens[0])) distinctPlayers.add(normalize(n));
+                    }
+                  }
+                  if (distinctPlayers.size === 1) {
+                    resolvedLists[0] = filtered;
+                    resolvedViaDeclaredTournament = true;
+                  }
+                }
+              }
+            }
             const spellingCorrections: Record<string, string> = {};
             {
               const stillMissingIdx = tokens.map((_, i) => i).filter(i => resolvedLists[i].length === 0);
@@ -1391,7 +1455,9 @@ Deno.serve(async (req) => {
                 : 'confirmed as the only real match for that name near this date';
               const correctionNote = Object.keys(spellingCorrections).length
                 ? `Auto-corrected spelling: ${Object.entries(spellingCorrections).map(([k, v]) => `"${k}" -> "${v}"`).join(', ')} -- ${correctionConfirmedBy}, but please double-check this was the intended player. `
-                : '';
+                : resolvedViaDeclaredTournament
+                  ? `Resolved a name shared by more than one real player using this pick's own declared tournament ("${pick.event_name}") -- only one of them was actually playing there, but please double-check this was the intended player if there's any doubt. `
+                  : '';
               const dateDifferNote = dateDiffers
                 ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${targetDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`
                 : '';
