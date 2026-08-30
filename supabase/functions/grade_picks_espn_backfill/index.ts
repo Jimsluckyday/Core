@@ -512,6 +512,29 @@ Deno.serve(async (req) => {
       // summed reading for a real June 3 2025 batch (a player with 2 hits
       // and 0 HR is a loss here, a win under the summed convention).
       hr2hits: [{ key: '', group: 'batting' }],
+      // CONFIRMED REAL GAP, direct report 2026-08-29: failed to find Juan
+      // Soto's "Hits Runs & RBI" combo (line -1.5) for 2025-06-04. Same
+      // "sum of already-available keys" pattern as hrrbi/hrhits above --
+      // a literal count of hits + runs + RBI, same PrizePicks/Underdog-
+      // style combo convention (double-counting is expected, e.g. a solo
+      // HR is 1 hit + 1 run + 1 RBI = 3 toward this total).
+      // COLLISION RISK, worth remembering if this stat ever comes back
+      // wrong: normalize() strips all non-alphanumeric characters, so if
+      // a capper ever abbreviates this as "H+R+RBI" instead of writing it
+      // out, that ALSO normalizes to "hrrbi" -- identical to the existing,
+      // completely different HR+RBI combo just above. Only safe because
+      // "Hits Runs & RBI" (this real case) normalizes to "hitsrunsrbi",
+      // a distinct key -- if a future pick's prop_stat is the abbreviated
+      // form, it will silently grade as Home Run + RBI instead of Hits +
+      // Runs + RBI. Not fixed here (no real case of the abbreviated form
+      // seen yet, and guessing which of two real, differently-shaped
+      // markets an ambiguous abbreviation means would be worse than
+      // leaving it -- same "don't guess on real-money grading" principle
+      // as HR & Hits vs HR & 2 Hits earlier this project) -- if that
+      // collision ever actually happens, it needs a real disambiguating
+      // signal (e.g. the line's typical range differs a lot between the
+      // two markets), not a coin flip.
+      hitsrunsrbi: [{ key: '', group: 'batting' }],
       runs: [{ key: 'runs', group: 'batting' }],
       strikeouts: [{ key: 'strikeouts', group: 'pitching' }, { key: 'strikeouts', group: 'batting' }],
       earnedrunsallowed: [{ key: 'earnedRuns', group: 'pitching' }],
@@ -880,6 +903,12 @@ Deno.serve(async (req) => {
           const hr = hrIdx >= 0 ? espnStatToNumber(row.stats[hrIdx]) : null;
           const hits = hitsIdx >= 0 ? espnStatToNumber(row.stats[hitsIdx]) : null;
           value = (hr !== null && hits !== null) ? ((hr >= 1 && hits >= 2) ? 1 : 0) : null;
+        } else if (statNorm === 'hitsrunsrbi') {
+          const hitsIdx = row.keys.indexOf('hits'), runsIdx = row.keys.indexOf('runs'), rbiIdx = row.keys.indexOf('RBIs');
+          const hits = hitsIdx >= 0 ? espnStatToNumber(row.stats[hitsIdx]) : null;
+          const runsVal = runsIdx >= 0 ? espnStatToNumber(row.stats[runsIdx]) : null;
+          const rbi = rbiIdx >= 0 ? espnStatToNumber(row.stats[rbiIdx]) : null;
+          value = (hits !== null && runsVal !== null && rbi !== null) ? hits + runsVal + rbi : null;
         } else if (statNorm === 'pointsreboundsassists' || statNorm === 'pointsrebounds' || statNorm === 'pointsassists' || statNorm === 'reboundsassists'
           || statNorm === 'ptsrebassists' || statNorm === 'ptsreb' || statNorm === 'ptsassists' || statNorm === 'rebassists'
           || statNorm === 'ptsreboundsassists') {
