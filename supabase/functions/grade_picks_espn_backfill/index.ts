@@ -261,26 +261,54 @@ Deno.serve(async (req) => {
               const legIds = (links || []).map((l: any) => l.leg_pick_id);
               if (!legIds.length) continue;
 
-              const legs = await db(`picks?select=id,result,grading_status&id=in.(${legIds.join(',')})`);
+              // CONFIRMED REAL BUG, direct report 2026-08-29: "I have no
+              // way of knowing where that pick is without digging through
+              // a bunch of data... the parlays need to be shown better on
+              // the failure report." A real case: one leg (a real matchup
+              // that already had a clear result) was correctly graded, but
+              // a SECOND leg (a Tennis Moneyline pick, "Djokovic") was
+              // never graded at all -- and the old report only ever said
+              // "one or more legs not final yet" on the PARLAY itself, with
+              // zero indication which leg, or that it wasn't even an
+              // ambiguity/date problem, just a sport this function has
+              // never supported. Now fetches each leg's own selection/
+              // event_date/grading_note (not just result/grading_status)
+              // and attaches the full per-leg breakdown directly onto every
+              // still_pending/errors entry, so the actual blocking leg(s)
+              // are named right in the report -- no separate query needed
+              // to find them.
+              const legs = await db(`picks?select=id,selection,event_date,result,grading_status,grading_note&id=in.(${legIds.join(',')})`);
               const anyLoss = legs.some((l: any) => l.result === 'loss');
               const anyAmbiguous = legs.some((l: any) => l.grading_status === 'ambiguous');
               const allDecided = legs.every((l: any) => l.result === 'win' || l.result === 'loss' || l.result === 'push');
               const allWinOrPush = legs.every((l: any) => l.result === 'win' || l.result === 'push');
               const anyWin = legs.some((l: any) => l.result === 'win');
+              const legSummary = (l: any) => ({
+                id: l.id, selection: l.selection, event_date: l.event_date,
+                result: l.result, grading_status: l.grading_status, grading_note: l.grading_note
+              });
+              // Each leg's own id is embedded directly in the text (not
+              // just its own JSON field) so it's pasteable straight into a
+              // SQL lookup or the picks-list search from the CSV export
+              // alone, without needing to open the raw JSON.
+              const legsBrief = legs.map((l: any) =>
+                `"${l.selection}" (${l.event_date}, id ${l.id}): ${l.result}${l.grading_status === 'ambiguous' ? ' [ambiguous' + (l.grading_note ? ' -- ' + l.grading_note : '') + ']' : ''}`
+              ).join(' | ');
+              const notFinalLegs = legs.filter((l: any) => l.result !== 'win' && l.result !== 'loss' && l.result !== 'push');
 
               if (anyLoss) {
                 await db(`picks?id=eq.${parlay.id}`, {
                   method: 'PATCH',
                   body: JSON.stringify({ result: 'loss', grading_status: 'graded', grading_note: null })
                 });
-                parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: 'loss' });
+                parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: 'loss', legs: legs.map(legSummary) });
               } else if (allDecided && allWinOrPush) {
                 const grade = anyWin ? 'win' : 'push';
                 await db(`picks?id=eq.${parlay.id}`, {
                   method: 'PATCH',
                   body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null })
                 });
-                parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: grade });
+                parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: grade, legs: legs.map(legSummary) });
               } else if (anyAmbiguous) {
                 await db(`picks?id=eq.${parlay.id}`, {
                   method: 'PATCH',
@@ -289,9 +317,17 @@ Deno.serve(async (req) => {
                     grading_note: 'At least one linked leg could not be confidently graded -- resolve that leg first.'
                   })
                 });
-                parlayRollup.still_pending.push({ id: parlay.id, selection: parlay.selection, reason: 'a leg is ambiguous' });
+                parlayRollup.still_pending.push({
+                  id: parlay.id, selection: parlay.selection, reason: `a leg is ambiguous -- legs: ${legsBrief}`,
+                  legs: legs.map(legSummary)
+                });
               } else {
-                parlayRollup.still_pending.push({ id: parlay.id, selection: parlay.selection, reason: 'one or more legs not final yet' });
+                const blockerNames = notFinalLegs.map((l: any) => `"${l.selection}" (${l.event_date}, id ${l.id})`).join(', ');
+                parlayRollup.still_pending.push({
+                  id: parlay.id, selection: parlay.selection,
+                  reason: `still pending on: ${blockerNames} -- full legs: ${legsBrief}`,
+                  legs: legs.map(legSummary)
+                });
               }
             } catch (legErr) {
               parlayRollup.errors.push({ id: parlay.id, selection: parlay.selection, reason: String(legErr) });
