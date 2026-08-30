@@ -10,12 +10,16 @@
 // window going forward; this one is for the backlog specifically.
 //
 // Only sports with a real ESPN scoreboard mapping below are attempted --
-// anything else (Golf, Tennis, Cricket, KBO, CBA, Euro Basketball,
-// Soccer, etc.) is safely skipped, same "not covered" pattern as
-// grade_picks already uses for TheRundown-uncovered sports -- either
-// because ESPN has no matching generic scoreboard endpoint, or because
-// it's not a team-vs-team sport this function's Moneyline/Spread/Total
-// logic could ever grade anyway.
+// anything else (Golf, Cricket, KBO, CBA, Euro Basketball, Soccer, etc.)
+// is safely skipped, same "not covered" pattern as grade_picks already
+// uses for TheRundown-uncovered sports -- either because ESPN has no
+// matching generic scoreboard endpoint, or because it's not a team-vs-
+// team sport this function's Moneyline/Spread/Total logic could ever
+// grade anyway. Tennis is the one exception, added 2026-08-29 (see the
+// isTennis branch's own comment) -- Singles Moneyline only, its own
+// dedicated ATP/WTA fetch and matching entirely separate from everything
+// else here, since it has no flat scoreboard endpoint to add to
+// ESPN_SPORT_MAP the way every other sport does.
 //
 // ADDED MMA (UFC) Moneyline grading, 2026-08-22, direct request: "every
 // piece we can automate is time saved from manual work." Straight
@@ -998,7 +1002,188 @@ Deno.serve(async (req) => {
     const espnDate = targetDate.replace(/-/g, '');
 
     for (const ourSport of ourSports) {
-      const espnPath = ESPN_SPORT_MAP[normalize(ourSport.name)];
+      const sportNormName = normalize(ourSport.name);
+
+      // ---- Tennis Moneyline grading -- direct report 2026-08-29: "Djokovic
+      // played on Jun 4" (a real, clear French Open QF result) sat pending
+      // forever, because this whole function's header explicitly documents
+      // Tennis as "not a team-vs-team sport this function's logic could
+      // ever grade anyway" -- a genuine, permanent gap, not a matching
+      // failure. Tennis has no flat scoreboard endpoint the way every
+      // other sport here does (ESPN splits it across separate ATP/WTA
+      // feeds, nested tournament -> grouping -> match, with no single
+      // sport/league URL segment to add to ESPN_SPORT_MAP), so it needs
+      // its own fetch and its own matching entirely, same reasoning MMA
+      // already established for individual-vs-individual sports (a match
+      // has two players, not a home/away team pair, and ESPN's own
+      // per-competitor `winner` boolean makes this simpler than score
+      // math once the right player is found). Scoped to SINGLES Moneyline
+      // only for now, same "don't guess on real-money grading" principle
+      // as everywhere else in this project -- a doubles pick (two names)
+      // is explicitly flagged unsupported rather than guessed at, since
+      // determining which specific pairing a bare "A/B" text means and
+      // whether that maps cleanly to one specific real doubles match is a
+      // materially harder problem than singles, not yet built. Runs a
+      // single day's completed matches only (targetDate, no widened
+      // window) -- by the time a pick reaches grading, schedule-sync's own
+      // work is what's responsible for event_date already being correct;
+      // this only needs to find what ACTUALLY happened that day, not
+      // resolve a date ambiguity.
+      if (sportNormName === 'tennis') {
+        try {
+          await sleep(500);
+          const TENNIS_TOURS = ['atp', 'wta'];
+          type TennisMatchEntry = {
+            matchId: string; matchup: string; completed: boolean; voided: boolean;
+            playerNames: string[]; winnerByName: Map<string, boolean>;
+          };
+          const tennisMatches: TennisMatchEntry[] = [];
+          const seenMatchIds = new Set<string>();
+          const tourResults = await Promise.allSettled(
+            TENNIS_TOURS.map(tour =>
+              espnFetch(`https://site.api.espn.com/apis/site/v2/sports/tennis/${tour}/scoreboard?dates=${espnDate}`).then(r => r.ok ? r.json() : null)
+            )
+          );
+          for (const result of tourResults) {
+            if (result.status !== 'fulfilled' || !result.value) continue;
+            for (const tournament of (result.value.events || [])) {
+              for (const grouping of (tournament.groupings || [])) {
+                for (const comp of (grouping.competitions || [])) {
+                  const matchId = `${tournament.id}-${comp.id}`;
+                  if (seenMatchIds.has(matchId)) continue;
+                  seenMatchIds.add(matchId);
+                  const completed = !!(comp.status && comp.status.type && comp.status.type.completed);
+                  const statusName: string | null = (comp.status && comp.status.type && comp.status.type.name) || null;
+                  const names: string[] = [];
+                  const winnerByName = new Map<string, boolean>();
+                  for (const competitor of (comp.competitors || [])) {
+                    // Singles only -- a doubles competitor's names live
+                    // under competitor.roster.athletes[] instead of a
+                    // single competitor.athlete, deliberately not handled
+                    // here (see this branch's own top comment on scope).
+                    if (competitor.athlete && competitor.athlete.displayName) {
+                      const name = competitor.athlete.displayName;
+                      names.push(name);
+                      if (typeof competitor.winner === 'boolean') winnerByName.set(name, competitor.winner);
+                    }
+                  }
+                  if (names.length !== 2) continue; // not a real singles match (retirement w/o replacement, bad data, etc.)
+                  tennisMatches.push({
+                    matchId, matchup: names.join(' / '), completed,
+                    voided: isVoidGameStatus(statusName), playerNames: names, winnerByName
+                  });
+                }
+              }
+            }
+          }
+
+          // Same safety pattern as schedule-sync-backfill's own tennis
+          // matching: a bare surname is only a safe lookup key when it's
+          // unique across everyone who actually played that day -- the
+          // real Andreeva-sisters case (two different real players
+          // sharing a surname) must stay ambiguous, never silently
+          // resolved to whichever one registered first.
+          const surnameToPlayers = new Map<string, Set<string>>();
+          for (const m of tennisMatches) {
+            for (const n of m.playerNames) {
+              const words = n.trim().split(/\s+/);
+              if (words.length > 1) {
+                const surname = normalize(words[words.length - 1]);
+                if (!surnameToPlayers.has(surname)) surnameToPlayers.set(surname, new Set());
+                surnameToPlayers.get(surname)!.add(normalize(n));
+              }
+            }
+          }
+          const tennisPlayerLookup = new Map<string, TennisMatchEntry>();
+          const tennisAmbiguousKeys = new Set<string>();
+          const registerTennisKey = (key: string, match: TennisMatchEntry, ownName: string) => {
+            const existing = tennisPlayerLookup.get(key);
+            if (existing && existing.matchId !== match.matchId) { tennisAmbiguousKeys.add(key); return; }
+            tennisPlayerLookup.set(key, match);
+          };
+          for (const m of tennisMatches) {
+            for (const n of m.playerNames) {
+              registerTennisKey(normalize(n), m, n);
+              const words = n.trim().split(/\s+/);
+              if (words.length > 1) {
+                const surname = normalize(words[words.length - 1]);
+                if ((surnameToPlayers.get(surname)?.size || 0) === 1) registerTennisKey(surname, m, n);
+              }
+            }
+          }
+
+          const tennisPicks = await db(
+            `picks?select=id,selection,bet_type_id,bet_types!inner(name,is_futures)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending&bet_types.is_futures=eq.false`
+          );
+          const tennisSportResult = {
+            sport: ourSport.name, matches_found: tennisMatches.length,
+            graded: [] as any[], ambiguous: [] as any[], not_final_yet: [] as any[], unsupported_bet_type: [] as any[]
+          };
+          for (const pick of (tennisPicks || [])) {
+            const betTypeName = pick.bet_types ? pick.bet_types.name : '';
+            const betTypeNorm = normalize(betTypeName);
+            if (betTypeNorm === 'parlay') continue;
+            const isMoneyline = betTypeNorm === 'moneyline';
+            if (!isMoneyline) {
+              const note = `Bet type "${betTypeName}" is not supported for Tennis grading yet -- needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
+              tennisSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
+              continue;
+            }
+            if (pick.selection.includes('/')) {
+              const note = `"${pick.selection}" looks like a doubles pairing -- doubles Tennis grading isn't supported yet, needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
+              tennisSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
+              continue;
+            }
+            const key = normalize(pick.selection);
+            if (tennisAmbiguousKeys.has(key)) {
+              const note = `"${pick.selection}" matches more than one real player's match today -- needs manual review to confirm which match this pick actually means.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const match = tennisPlayerLookup.get(key);
+            if (!match) {
+              const note = `Could not find "${pick.selection}" on today's ATP/WTA schedule -- may be a name spelling issue, a Challenger/lower-tier event this data source doesn't cover, or the wrong event_date.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            if (!match.completed) {
+              if (match.voided) {
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
+                continue;
+              }
+              tennisSportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: match.matchup, reason: `Matched to ${match.matchup}, but ESPN has not marked this match final yet -- not a name-matching issue, check back later.` });
+              continue;
+            }
+            // Look up this specific named player's own winner flag -- the
+            // exact display name matched via tennisPlayerLookup's key,
+            // which could be the full name OR a safe unique surname, so
+            // find whichever of the match's two playerNames actually
+            // normalizes to this key.
+            const ownName = match.playerNames.find(n => normalize(n) === key || normalize(n.trim().split(/\s+/).pop() || '') === key);
+            const won = ownName ? match.winnerByName.get(ownName) : undefined;
+            if (typeof won !== 'boolean') {
+              const note = `${match.matchup} finished with no clear winner recorded (retirement, walkover, or a data gap) -- needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const grade = won ? 'win' : 'loss';
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+            tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup });
+          }
+          overall.sports_processed.push(tennisSportResult);
+        } catch (tennisErr) {
+          overall.sports_processed.push({ sport: ourSport.name, error: String(tennisErr) });
+        }
+        continue;
+      }
+
+      const espnPath = ESPN_SPORT_MAP[sportNormName];
       if (!espnPath) {
         overall.sports_skipped.push({ sport: ourSport.name, reason: 'No ESPN scoreboard mapping for this sport.' });
         continue;
