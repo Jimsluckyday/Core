@@ -780,6 +780,25 @@
 //     players happen to be at the same declared tournament -- that's a
 //     genuine remaining ambiguity, not something this fix claims to solve.
 //
+// 36. CONFIRMED FIX, direct request: "if I've already preset this as Jun 4
+//     for Jun 5 is there a reason I need to put in the start time... should
+//     it not know that I meant the 5th... we do not need a secondary
+//     validation if it's done so and should be trusted." Fix #33's "always
+//     ask, never auto-narrow" rule was specifically about a FRESH, never-
+//     reviewed date -- trusting an unverified guess risked silently
+//     locking in the wrong game with no note. But a pick that already
+//     carries a schedule_sync_note from a PRIOR run of this check has
+//     already been read by a human, who had the chance to correct
+//     event_date in response to it -- that's the exact verification Fix
+//     #33 wanted, already done. A second pass finding exactly one real
+//     game on the CURRENT (already-corrected) event_date now trusts it
+//     instead of re-asking the same question a human already answered by
+//     hand. Only relaxes the SECOND ask -- a first-ever pass (no note yet)
+//     or a corrected date that still has more than one real candidate (a
+//     genuine same-date doubleheader) still falls through to the
+//     unchanged, always-ask flagging. See the isKBO branch's own comment
+//     on this block for the implementation.
+//
 // Run it once per date you want to catch up: POST /schedule-sync-backfill?date=2026-06-01
 // Optionally add &sport=MLB to run just one sport at a time, or &skipProps=true
 // to only touch game_start_time/home_away and never prop_team/event_name.
@@ -1887,7 +1906,7 @@ Deno.serve(async (req) => {
         }
 
         const allPicks = await db(
-          `picks?select=id,selection,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+          `picks?select=id,selection,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,schedule_sync_note,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
         );
         const picks = (allPicks || []).filter((p: any) => {
           const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
@@ -2107,13 +2126,45 @@ Deno.serve(async (req) => {
           } else if (isKBO) {
             const sameDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) === targetDate);
             const otherDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) !== targetDate);
-            const suggestions = otherDateGames.map(g => `did you mean ${formatEtDateTime(g.start_time)} instead (${g.matchup})?`);
-            const sameDateNote = sameDateGames.length
-              ? `One real game IS on ${targetDate} (${sameDateGames.map(g => g.matchup).join(', ')}). `
-              : '';
-            const note = `${candidateGames.length} possible games matched "${pick.selection}" -- entered as ${targetDate}, but KBO's evening KST games often land on the pick's US calendar day one day early or late. ${sameDateNote}${suggestions.join(' ')} If a later/earlier date is right, update this pick's Event date and re-run -- needs manual review.`;
-            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
-            sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
+            // CONFIRMED FIX, direct request 2026-08-29: "if I've already
+            // preset this as Jun 4 for Jun 5 is there a reason I need to
+            // put in the start time... should it not know that I meant
+            // the 5th." Fix #33's "always ask, never auto-narrow" rule was
+            // specifically about a FRESH, never-reviewed date -- trusting
+            // an unverified guess risked silently locking in the wrong
+            // game. But a pick that already carries a schedule_sync_note
+            // from a PRIOR run of this exact check has already been read
+            // by a human, who had the chance to correct event_date in
+            // response to it -- that IS the verification Fix #33 wanted,
+            // already done. A second pass finding exactly one real game on
+            // the CURRENT (already-corrected) event_date can trust it
+            // instead of re-asking the same question a human already
+            // answered by hand. Only relaxes the SECOND ask -- a first-
+            // ever pass (no note yet) or a corrected date that still has
+            // more than one real candidate (a genuine same-date
+            // doubleheader) falls through to the unchanged flagging below.
+            if (pick.schedule_sync_note && sameDateGames.length === 1) {
+              const chosen = sameDateGames[0];
+              const rematch = !hasSlash ? findMatchingGames(pick.selection).find(m => m.game.event_id === chosen.event_id) : null;
+              const updatePayload: Record<string, unknown> = {
+                game_start_time: chosen.start_time, schedule_sync_status: 'matched',
+                schedule_sync_note: `Auto-confirmed on a re-check of this already-reviewed pick -- exactly one real game matches the event date you corrected it to (${chosen.matchup}).`
+              };
+              if (rematch) updatePayload.home_away = rematch.isHome ? 'home' : 'away';
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
+              sportResult.matched.push({
+                id: pick.id, selection: pick.selection, start_time: chosen.start_time,
+                home_away: rematch ? (rematch.isHome ? 'home' : 'away') : null, reconfirmed_after_review: true
+              });
+            } else {
+              const suggestions = otherDateGames.map(g => `did you mean ${formatEtDateTime(g.start_time)} instead (${g.matchup})?`);
+              const sameDateNote = sameDateGames.length
+                ? `One real game IS on ${targetDate} (${sameDateGames.map(g => g.matchup).join(', ')}). `
+                : '';
+              const note = `${candidateGames.length} possible games matched "${pick.selection}" -- entered as ${targetDate}, but KBO's evening KST games often land on the pick's US calendar day one day early or late. ${sameDateNote}${suggestions.join(' ')} If a later/earlier date is right, update this pick's Event date and re-run -- needs manual review.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
+            }
           } else {
             const note = `${candidateGames.length} possible games matched "${pick.selection}" on ${targetDate}: [${candidateGames.map(g => `${g.matchup} (${g.start_time})`).join(' | ')}] -- needs manual review.`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
