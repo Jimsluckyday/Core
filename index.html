@@ -2511,7 +2511,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </p>
       <div id="gradingCorrectionsPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Paste rows copied from a spreadsheet (or built in a chat) — first row must be column headers. <strong>Required: id</strong> only. <strong>Optional: result, event_date, event_name, line, opening_odds, closing_odds, line_flag, notes</strong> — only included columns get changed; anything left out is left alone. If <strong>result</strong> is included it must be exactly <code>win</code>, <code>loss</code>, or <code>push</code>, and marks the pick as manually graded — leave it blank entirely for an odds-only correction on a pick that's already graded (notes in that case are saved to the pick's own notes field instead, since grading wasn't touched). <strong>The line a capper gave us is always what we grade against, regardless of normal line movement between when the pick was sent and when it was researched</strong> — that's expected and never needs fixing. <strong>line</strong> should only ever be used for a genuine, obvious transcription error, and is rare; for the much more common "the line looks different than current research" situation, use <strong>line_flag</strong> (enter <code>yes</code>) instead — it doesn't change anything about the pick or hold up grading, it just adds it to the Flagged Lines list in Data Tools for an optional, unhurried look later. <strong>opening_odds / closing_odds</strong> are meant for a quick manual lookup (an AI chat search, Covers, Flashscore, or similar) when a pick's sport isn't covered by our own odds API, or historical odds are missing entirely — approximate is fine here, and if that pick is already published, this will correctly flow into the site's live win-rate and $100-per-bet totals the moment it's saved. Matching is by the exact pick <strong>id</strong>, never by name/date guessing, so there's no risk of updating the wrong pick.
+          Paste rows copied from a spreadsheet (or built in a chat) — first row must be column headers. <strong>Required: id</strong> only. <strong>Optional: result, event_date, event_name, game_start_time_et, prop_team, line, opening_odds, closing_odds, line_flag, notes</strong> — only included columns get changed; anything left out is left alone. If <strong>result</strong> is included it must be exactly <code>win</code>, <code>loss</code>, or <code>push</code>, and marks the pick as manually graded — leave it blank entirely for an odds-only correction on a pick that's already graded (notes in that case are saved to the pick's own notes field instead, since grading wasn't touched). <strong>The line a capper gave us is always what we grade against, regardless of normal line movement between when the pick was sent and when it was researched</strong> — that's expected and never needs fixing. <strong>line</strong> should only ever be used for a genuine, obvious transcription error, and is rare; for the much more common "the line looks different than current research" situation, use <strong>line_flag</strong> (enter <code>yes</code>) instead — it doesn't change anything about the pick or hold up grading, it just adds it to the Flagged Lines list in Data Tools for an optional, unhurried look later. <strong>opening_odds / closing_odds</strong> are meant for a quick manual lookup (an AI chat search, Covers, Flashscore, or similar) when a pick's sport isn't covered by our own odds API, or historical odds are missing entirely — approximate is fine here, and if that pick is already published, this will correctly flow into the site's live win-rate and $100-per-bet totals the moment it's saved. Including <strong>event_date, event_name, game_start_time_et, or prop_team</strong> also marks the pick reviewed for schedule sync (clears any old "unmatched" flag and note) — a human supplying that information here is treated the same as fixing it directly on the pick, so it stops getting re-checked and re-flagged by the next automation run. Matching is by the exact pick <strong>id</strong>, never by name/date guessing, so there's no risk of updating the wrong pick.
         </div>
         <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label for="gradingCorrectionsFileInput" style="font-size:11px;color:var(--ink-soft);">Or upload a CSV file directly (from this device, no copy/paste needed):</label>
@@ -11211,7 +11211,21 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         const rows = JSON.parse(exportBtn.dataset.exportJson);
         const label = exportBtn.dataset.exportLabel || 'flagged picks';
         const safeName = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        const prefixText = 'Fill in opening_odds and closing_odds for each row below (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Bulk Upload Manual Changes -- it matches strictly by id and writes opening_odds/closing_odds back onto these exact picks.';
+        // CONFIRMED REAL BUG, direct report 2026-08-30: this ONE prefix
+        // text is shared by every automation export (Pick Info, Teams/
+        // Tournaments, Results, Missing Odds, etc.) regardless of what the
+        // actual Issue column is about -- so a Teams/Tournaments export
+        // (a schedule/roster/tournament mismatch, never an odds problem)
+        // still told you to "fill in opening_odds and closing_odds," which
+        // was never the actual fix needed. Rewritten to be general-purpose
+        // and to name the fields that ALSO mark a pick reviewed for
+        // schedule sync when filled in via Bulk Upload Manual Changes (see
+        // that tool's own updated description) -- direct report: "why
+        // would it re-check and report an error if the information is
+        // there" -- filling in event_date/event_name/game_start_time_et/
+        // prop_team through this same import now stops that pick from
+        // being re-flagged by the next automation run.
+        const prefixText = 'Read the Issue column for each row below to see what actually needs fixing -- not every failure here is a missing-odds problem. Depending on the Issue, add whichever of these columns apply: opening_odds, closing_odds, event_date, event_name, game_start_time_et, prop_team (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Bulk Upload Manual Changes -- it matches strictly by id and writes only the columns you included back onto these exact picks. Filling in event_date, event_name, game_start_time_et, or prop_team also marks the pick reviewed for schedule sync, so it stops being re-flagged by the next automation run.';
         downloadCsv(`${safeName || 'automation-export'}.csv`, ['id', 'Capper', 'Sport', 'Pick', 'Issue', 'opening_odds', 'closing_odds'], rows, prefixText);
       });
     }
@@ -17064,6 +17078,28 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
             if (r.closing_odds !== undefined) payload.closing_odds = r.closing_odds;
             if (r.game_start_time) payload.game_start_time = r.game_start_time;
             if (r.prop_team) payload.prop_team = r.prop_team;
+            // CONFIRMED REAL BUG, direct report 2026-08-30: "it shouldn't
+            // auto re-check if I've put in info... this causes extra work
+            // as now I have to stop and investigate picks that legitimately
+            // have the information requested." Root cause: this tool never
+            // touched schedule_sync_status/schedule_sync_note no matter
+            // what got corrected, so a pick flagged 'unmatched' stayed
+            // 'unmatched' forever -- the next automation run re-selects it
+            // (candidate queries everywhere exclude only status='matched')
+            // and re-runs the exact same check, which can fail again for
+            // reasons unrelated to whatever was just fixed (e.g. Tennis's
+            // date-gap check never even reads event_name). Same fix
+            // already shipped for savePick() and for the exact same
+            // reason: a human explicitly supplying schedule-related fields
+            // through ANY editing path should count as reviewed, not just
+            // editing through the main Add/Edit Pick form. Scoped to only
+            // the fields that are actually schedule-sync's own domain --
+            // an odds-only or line-only correction has nothing to do with
+            // schedule sync and must never mark it "matched" on its say-so.
+            if (r.event_date || r.event_name || r.game_start_time || r.prop_team) {
+              payload.schedule_sync_status = 'matched';
+              payload.schedule_sync_note = null;
+            }
             return rest(`picks?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
           }));
           wrap.innerHTML = `<div class="msg ok">Applied ${matchedRows.length} correction${matchedRows.length === 1 ? '' : 's'}.</div>`;
@@ -21233,7 +21269,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 401; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 402; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
