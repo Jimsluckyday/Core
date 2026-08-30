@@ -125,23 +125,22 @@ Deno.serve(async (req) => {
       });
     }
 
-    // LIKELY FIX, NOT independently confirmed against a real response (same
-    // honesty standard as this file's own top-of-file caveat) -- direct
-    // report: "Matthew Tchachuk was not found on any current roster playing
-    // on 2025-06-04" for a real Stanley Cup Final game. /current always
-    // returns the CURRENT (as-of-whenever-this-runs) roster, not a
-    // historical snapshot for the actual backfill date -- the exact same
-    // bug already found and fixed for MLB (see this repo's schedule-sync-
-    // backfill Fix #4, which found MLB's Stats API accepts a real date=
-    // param). The NHL's api-web.nhle.com doesn't expose an equivalent date
-    // parameter on /roster, but does expose a season-specific roster
-    // endpoint (/roster/{team}/{season}, season formatted like
-    // "20242025") -- computed here from targetDate assuming the standard
-    // NHL season boundary (a season starting in year Y runs roughly July Y
-    // through June Y+1). Falls back to /current if the season-specific
-    // fetch fails for any reason, so this can only ever help, never make a
-    // working case newly fail. Needs a real re-run against this exact
-    // Tchachuk case to confirm the season endpoint actually resolves it.
+    // CONFIRMED FIX, verified live 2026-08-30 (was previously shipped as
+    // "likely, not confirmed"): direct report -- "Matthew Tchachuk was not
+    // found on any current roster playing on 2025-06-04" for a real
+    // Stanley Cup Final game. /current always returns the CURRENT (as-of-
+    // whenever-this-runs) roster, not a historical snapshot for the actual
+    // backfill date -- the exact same bug already found and fixed for MLB
+    // (see this repo's schedule-sync-backfill Fix #4, which found MLB's
+    // Stats API accepts a real date= param). Directly queried
+    // https://api-web.nhle.com/v1/roster/FLA/20242025 just now: Matthew
+    // Tkachuk (correct spelling -- the original report's "Tchachuk" was
+    // also a typo) is genuinely present in that season's real roster,
+    // confirming this endpoint actually returns historical data, unlike
+    // ESPN's equivalent team-roster endpoint (tested separately the same
+    // day for NBA -- ESPN's ?season= param returns HTTP 200 with a
+    // deliberately empty roster, no working historical data at all). Falls
+    // back to /current if the season-specific fetch fails for any reason.
     function nhlSeasonFor(dateStr: string): string {
       const [y, m] = dateStr.split('-').map(Number);
       const startYear = m >= 7 ? y : y - 1;

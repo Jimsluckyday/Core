@@ -2056,6 +2056,20 @@ Deno.serve(async (req) => {
           // scoreboard via ESPN_SPORT_MAP's 'hockey/nhl' entry), so this
           // reuses the identical NBA/WNBA roster-lookup logic below,
           // unchanged, just adding the NHL sport path.
+          //
+          // CONFIRMED REAL LIMITATION, direct report 2026-08-30: this
+          // fetch has NO date parameter -- it always returns whatever
+          // ESPN currently has as TODAY's roster, never the roster as of
+          // the pick's own (possibly much older) event_date. Confirmed
+          // live: Bennedict Mathurin (a real Indiana Pacer, playing in the
+          // actual 2025-06-05 NBA Finals) is missing from today's current
+          // Pacers roster fetch. Tried a season-scoped variant
+          // (.../roster?season=2025) live too -- it returns HTTP 200 with
+          // a genuinely empty athletes array, not real historical data, so
+          // there's no working fix available today. Any prop pick more
+          // than roughly a season old can fail this check even with a
+          // perfectly correct name -- see the staleRosterCaveat text below
+          // for the honest message this now surfaces on the pick itself.
           const espnRosterSportPath = sportNormName === 'wnba' ? 'basketball/wnba' : sportNormName === 'nhl' ? 'hockey/nhl' : 'basketball/nba';
           const teamsToday = new Map<string, { teamName: string; startTime: string }>();
           for (const g of games) {
@@ -2220,7 +2234,26 @@ Deno.serve(async (req) => {
               continue;
             }
             const propSuggestion = suggestClosestPlayer(pick.prop_player, propDisplayNames);
-            const note = `"${pick.prop_player}" was not found on any ${ourSport.name} active roster playing on ${pick.event_date || targetDate} -- may be a name spelling issue, or the player may not be active/on this team.${propSuggestion ? ` Closest name on today's rosters: "${propSuggestion}".` : ''}`;
+            // CONFIRMED REAL LIMITATION, direct report 2026-08-30: "Pete
+            // Alonso"/"Bennedict Mathurin" both flagged not-found despite
+            // being genuinely active, correctly-spelled players on the
+            // real date. Confirmed live: MLB's roster-by-date endpoint
+            // (which this file DOES pass the pick's own event_date to)
+            // simply doesn't reliably return an accurate historical
+            // snapshot that far back. Worse for NBA/WNBA/NHL -- their
+            // roster fetch (below, espnRosterSportPath) has NO date
+            // parameter at all, always returns TODAY's current roster;
+            // tested a season-scoped variant live, it returns HTTP 200
+            // with an empty roster, so there's no working historical
+            // alternative to fall back to. Any prop pick more than
+            // roughly a season old can fail this check even when the
+            // name is 100% correct -- this caveat says so plainly instead
+            // of implying a spelling problem every time.
+            const isDateSensitiveRosterSport = sportNormName === 'nba' || sportNormName === 'wnba' || sportNormName === 'nhl';
+            const staleRosterCaveat = isDateSensitiveRosterSport
+              ? ` This sport's roster lookup only reflects TODAY's current roster, not ${pick.event_date || targetDate}'s -- if this pick is more than about a season old, a real, correctly-spelled player can still fail this check (confirmed limitation, no working historical roster source found).`
+              : '';
+            const note = `"${pick.prop_player}" was not found on any ${ourSport.name} active roster playing on ${pick.event_date || targetDate} -- may be a name spelling issue, or the player may not be active/on this team.${propSuggestion ? ` Closest name on today's rosters: "${propSuggestion}".` : ''}${staleRosterCaveat}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
             sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
             continue;
