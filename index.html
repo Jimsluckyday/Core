@@ -1323,27 +1323,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
                  problem across every sport in one pass, before spending
                  any effort on prop/tournament lookups for a pick that
                  might turn out to belong to a different day entirely. -->
-            <ol style="font-size:13px;color:var(--ink);margin:0 0 4px;padding-left:20px;line-height:1.7;">
-              <li><strong>Pick Info</strong> — fixes wrong-day picks first</li>
-              <li><strong>Teams / Tournaments</strong></li>
-              <li><strong>Find Missing Odds</strong></li>
-              <li><strong>Data Validation Tool</strong> — confirm everything's actually complete, catches an early KBO/Tennis publish too</li>
-              <li>Publish from the <strong>Publish tab</strong></li>
-            </ol>
-            <p style="font-size:11px;color:var(--ink-soft);margin:0 0 10px;">
-              Next day, separately: <strong>Find &amp; Update Results</strong> / <strong>Golf Results</strong> to grade what published.
-            </p>
-            <details style="font-size:11px;color:var(--ink-soft);">
-              <summary style="cursor:pointer;font-weight:bold;">Exactly what each step does &amp; why this order &#9662;</summary>
-              <div style="margin-top:8px;">
-                <p style="margin:0 0 8px;"><strong>1. Find &amp; Update Pick Info</strong> — run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after.</p>
-                <p style="margin:0 0 8px;"><strong>2. Find &amp; Update Teams / Tournaments</strong> — run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it.</p>
-                <p style="margin:0 0 8px;"><strong>3. Find Missing Odds</strong> — run this third, once matchups/tournaments are filled in. Never calls a live odds source (no paid odds API is wired in yet, same as the rest of this box being test data until one is) — it only finds and sorts picks still missing an opening or closing price on that date. Straight Moneyline picks (never period-qualified variants like "Moneyline First5", those move far less) come back separately, flagged as needing a real researched number — a flat default price is never safe for a market that can swing hundreds of points between a favorite and an underdog. Everything else is flagged as safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools instead of a one-by-one manual price.</p>
-                <p style="margin:0 0 8px;"><strong>4. Data Validation Tool</strong> — added 2026-08-30 as the actual pre-publish gate, not just an odds check. Publishing an incomplete pick (missing start time, odds, event name, etc.) looks unprofessional on the public site even after the 3 checks above, and this is also the last line of defense against a KBO/Tennis pick going live a day early -- it re-checks Schedule sync flagged, Late-night pick, and Parlay leg date mismatch alongside every other field. The button above jumps you to Data Tools with today's date and every relevant box pre-checked (excluding "Not yet scored", which doesn't apply before anything's published) -- review what it finds, fix it, then move on.</p>
-                <p style="margin:0 0 8px;"><strong>5. Find &amp; Update Results</strong> checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — also grades straight MMA (UFC) Moneyline picks, winner-take-all only, matched by fighter name against that day's real card (method/round/other MMA bet types still need manual grading). Tennis, Soccer, Golf, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all.</p>
-                <p style="margin:0;"><strong>6. Find &amp; Update Golf Results</strong> is separate from step 5 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.</p>
-              </div>
-            </details>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:12px;color:var(--ink-soft);">Pick Info &rarr; Teams/Tournaments &rarr; Missing Odds &rarr; Data Validation &rarr; Publish</span>
+              <button type="button" class="ghost small" id="showAutomationInstructionsBtn">View step-by-step instructions &#8599;</button>
+            </div>
           </div>
           <div id="automationResultsWrap"></div>
         </div>
@@ -10554,6 +10537,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // pre-publish one). Doesn't run the search itself -- same "always
   // require an explicit click before anything happens" pattern as every
   // other automation tool in this box.
+  $('showAutomationInstructionsBtn').addEventListener('click', openAutomationInstructionsTab);
+
   $('goDataValidationBtn').addEventListener('click', () => {
     switchTab('tools');
     const panel = $('missingDataPanel');
@@ -11783,6 +11768,66 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       <div style="font-size:10px;color:var(--ink-soft);margin-top:8px;">
         Ranked by win % first, then by more wins, then by fewer losses to break a tie — cappers below the rank line either have fewer than ${minPicks} graded picks or are at 0%, both too small/extreme a sample to rank meaningfully, and are listed by volume just for reference. Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. Straight/Parlay shows how many of Total picks were the capper's own standalone bets vs. whole combined parlays (e.g. "9/1") — individual parlay legs are never counted separately here. Wins/Losses/Pushes stay combined across both — a parlay counts as one win, loss, or push against its own overall result, same as any straight bet. Click the arrow on any column to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the report.
       </div>`;
+  }
+
+  // Added 2026-08-30, direct request: the Automation panel's step-by-step
+  // instructions were too small/condensed inside the panel itself to
+  // realistically get read. Same "open a plain new tab and document.write
+  // a self-contained page" pattern as openLeaderboardTab below -- a real
+  // new tab, not a nested template literal inside another pop-out's own
+  // document.write (that nesting is what broke production twice before;
+  // this one is a single, flat level, called directly from the main
+  // script, so there's nothing to nest it inside).
+  function openAutomationInstructionsTab() {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Automation Workflow -- Step by Step</title>
+<style>
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 40px; max-width: 720px; margin: 0 auto; font-size: 17px; line-height: 1.75; }
+  h1 { font-size: 26px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 14px; margin-bottom: 20px; }
+  h2 { font-size: 19px; color: #234d35; margin: 34px 0 8px; }
+  ol.overview { font-size: 19px; line-height: 2; padding-left: 26px; margin: 0 0 8px; }
+  ol.overview li strong { color: #234d35; }
+  .next-day { font-size: 15px; color: #55584d; margin: 4px 0 0; }
+  p { margin: 0 0 14px; }
+  .step { border-top: 1px dashed #b9b09a; padding-top: 18px; margin-top: 18px; }
+  .step:first-of-type { border-top: none; padding-top: 0; }
+</style>
+</head><body>
+  <h1>Automation Workflow</h1>
+  <p>Run these in order to get a day's picks from entered to published, clean and complete:</p>
+  <ol class="overview">
+    <li><strong>Pick Info</strong> — fixes wrong-day picks first</li>
+    <li><strong>Teams / Tournaments</strong></li>
+    <li><strong>Find Missing Odds</strong></li>
+    <li><strong>Data Validation Tool</strong> — confirms everything's actually complete</li>
+    <li>Publish from the <strong>Publish tab</strong></li>
+  </ol>
+  <p class="next-day">Next day, separately: <strong>Find &amp; Update Results</strong> / <strong>Golf Results</strong> to grade what published.</p>
+
+  <h2 class="step" style="border-top:none;">1. Find &amp; Update Pick Info</h2>
+  <p>Run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after.</p>
+
+  <h2 class="step">2. Find &amp; Update Teams / Tournaments</h2>
+  <p>Run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it.</p>
+
+  <h2 class="step">3. Find Missing Odds</h2>
+  <p>Run this third, once matchups/tournaments are filled in. Never calls a live odds source (no paid odds API is wired in yet, same as the rest of this box being test data until one is) — it only finds and sorts picks still missing an opening or closing price on that date. Straight Moneyline picks (never period-qualified variants like "Moneyline First5", those move far less) come back separately, flagged as needing a real researched number — a flat default price is never safe for a market that can swing hundreds of points between a favorite and an underdog. Everything else is flagged as safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools instead of a one-by-one manual price.</p>
+
+  <h2 class="step">4. Data Validation Tool</h2>
+  <p>Added 2026-08-30 as the actual pre-publish gate, not just an odds check. Publishing an incomplete pick (missing start time, odds, event name, etc.) looks unprofessional on the public site even after the 3 checks above, and this is also the last line of defense against a KBO/Tennis pick going live a day early — it re-checks Schedule sync flagged, Late-night pick, and Parlay leg date mismatch alongside every other field. The button next to this one jumps you to Data Tools with today's date and every relevant box pre-checked (excluding "Not yet scored", which doesn't apply before anything's published) — review what it finds, fix it, then move on.</p>
+
+  <h2 class="step">5. Find &amp; Update Results</h2>
+  <p>Checks final scores and grades Moneyline/Spread/Total picks for every sport on that date — Player Props and other custom bet types are never auto-graded, on purpose. Covers MLB, NHL, NBA, NFL, WNBA, NCAA Football/Basketball/Baseball, and CFL — also grades straight MMA (UFC) Moneyline picks, winner-take-all only, matched by fighter name against that day's real card (method/round/other MMA bet types still need manual grading). Tennis, Soccer, Golf, Cricket, KBO, CBA, and Euro Basketball have no ESPN scoreboard mapping and are skipped here; those still need the legacy TheRundown-based Grade Results in Old Tools (or manual research) if they need automated grading at all.</p>
+
+  <h2 class="step">6. Find &amp; Update Golf Results</h2>
+  <p>Separate from step 5 — it grades the 3 golf-specific Player Prop stats ("Round Matchup", "Tournament Matchup", "Tournament Winner") using ESPN's real PGA Tour leaderboard, since Player Props are never touched by the Moneyline/Spread/Total grader. LPGA/Champions/Korn Ferry/European Tour picks aren't covered yet (PGA Tour only) and will come back unmatched with a clear reason rather than a wrong grade.</p>
+</body></html>`);
+    win.document.close();
   }
 
   function openLeaderboardTab(rows, filterSummary, minPicks) {
@@ -21092,7 +21137,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 394; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 395; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
