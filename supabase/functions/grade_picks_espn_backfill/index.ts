@@ -79,13 +79,23 @@
 // innings -- now explicitly excluded from that bucket and routed to their
 // own period-scoped grading functions instead.
 //
-// CFL: investigated a real reported "0 games found" case (user supplied a
-// screenshot proving a real CFL game existed for that date). Confirmed
-// directly against ESPN's own CFL scoreboard endpoint that the sport
-// mapping itself is correct, but ESPN genuinely has zero events indexed
-// for CFL on that date -- a real data-coverage gap, not a bug in this
-// function. No working alternate free source found (checked TheSportsDB).
-// Parked the same way KBO already is: documented, not blocking.
+// CFL: investigated a real reported "no matching game found" case (user
+// confirmed Ottawa Redblacks genuinely played that day). Confirmed
+// directly, 2026-08-30: the sport mapping (football/cfl) is correct, but
+// ESPN's own scoreboard endpoint returns ZERO events for EVERY date
+// tested -- not just this one. Checked five different 2025 dates spread
+// across the whole season plus a real, known in-season 2023 date
+// (2023-06-08, CFL Week 1 per the endpoint's own calendar metadata) and
+// every single one came back with an empty events array. The endpoint's
+// season metadata is itself permanently frozen at {"year":2023} regardless
+// of the dates= param passed in. This is not a per-date coverage gap
+// (that undersold it) -- ESPN's public CFL scoreboard feed is effectively
+// dead / abandoned, full stop. No working alternate free source found
+// (checked TheSportsDB). Parked the same way KBO already is: documented,
+// not blocking -- but unlike KBO, there is currently no date, past or
+// present, where this endpoint has ever been confirmed to return a real
+// CFL game. Every CFL pick needs manual grading until ESPN fixes this or
+// another source is found.
 //
 // ADDED: Player Prop grading for MLB + WNBA, folded directly into this
 // same function/button rather than a new separate tool -- direct request:
@@ -1971,8 +1981,15 @@ Deno.serve(async (req) => {
             // matched twice" (a dedup bug in candidateGames) from
             // "genuinely two different games matched" (a real substring
             // collision in findMatchingGames).
+            // CFL gets its own wording, not the generic "no matching game"
+            // message -- confirmed directly (see this file's header
+            // comment) that ESPN's CFL scoreboard returns zero events for
+            // literally every date tested, so this is never a real
+            // labeling/spelling problem with the pick's own selection.
             const note = candidateGames.length === 0
-              ? `No matching ${ourSport.name} game found for "${pick.selection}" on ${targetDate}.`
+              ? (sportNormName === 'cfl'
+                ? `ESPN has no CFL schedule data at all (confirmed, not specific to this pick or date) -- needs manual grading. Not a labeling issue with "${pick.selection}".`
+                : `No matching ${ourSport.name} game found for "${pick.selection}" on ${targetDate}.`)
               : `${candidateGames.length} possible games matched "${pick.selection}" -- needs manual review. Matched: ${candidateGames.map(g => `[${g.event_id}] ${g.matchup}`).join(' | ')}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
             sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
