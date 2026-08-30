@@ -6105,15 +6105,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const localNumber = summaryRow ? summaryRow.parlay_local_number : null;
     const parlayLabel = localNumber ? `Parlay #${localNumber} - ` : '';
 
-    // Same odds-collapsing rule as the pipeline: if EVERY leg has odds
-    // entered and they're all identical, that's the combined parlay price
-    // copy-pasted onto each leg, not each leg's own separate price -- move
-    // it to the summary row and clear it off the individual legs. Any
-    // other pattern (blank, or genuinely different per-leg prices) is left
-    // exactly as entered.
+    // Same odds-collapsing rule as the pipeline: whichever legs actually
+    // HAVE odds entered all agree on the same value, that's the combined
+    // parlay price -- move it to the summary row and clear it off the
+    // individual legs. Only genuinely different non-null values (real
+    // disagreement) are left alone for manual review.
+    //
+    // CONFIRMED REAL BUG, direct report 2026-08-30: "I've seen where one
+    // line holds an odds value and it didn't carry over to the full
+    // parlay." Root cause -- this used to also require EVERY leg to have
+    // odds (allHaveOdds), so the single most common real case (a capper
+    // quotes the combined price once, attached to just one leg's line, the
+    // rest blank) never qualified as "all same" and the parlay's own odds
+    // silently stayed null while that one real value sat stranded on its
+    // leg. A lone value trivially "agrees with itself" -- requiring every
+    // leg to chime in added nothing except throwing away real information.
     const oddsValues = legs.map(l => l.opening_odds).filter(v => v !== null && v !== undefined);
-    const allHaveOdds = oddsValues.length === legs.length && legs.length > 0;
-    const allSame = allHaveOdds && oddsValues.every(v => v === oddsValues[0]);
+    const allSame = oddsValues.length > 0 && oddsValues.every(v => v === oddsValues[0]);
 
     const patch = { selection: `${parlayLabel}${legs.length} Leg${legs.length === 1 ? '' : 's'}` };
     if (allSame) {
@@ -20231,8 +20239,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const parlayBetType = findByNameCI(betTypes, 'Parlay');
     const summaries = [];
     for (const { number, members } of byNumber.values()) {
+      // CONFIRMED REAL BUG, direct report 2026-08-30: "I've seen where one
+      // line holds an odds value and it didn't carry over to the full
+      // parlay." This used to also require EVERY member to have odds --
+      // the single most common real case (a capper quotes the combined
+      // price once, on just one leg's line, the rest blank) never
+      // qualified, so the parlay's own odds silently stayed null while
+      // that one real value sat stranded on its leg. Now trusts whichever
+      // members actually HAVE odds as long as they all agree -- a lone
+      // value trivially agrees with itself. Genuinely different non-null
+      // values across members still correctly falls through to null,
+      // left for manual review same as before.
       const oddsValues = members.map(m => m.odds).filter(o => o !== null && o !== undefined);
-      const allSame = oddsValues.length === members.length && members.length > 0 && oddsValues.every(o => o === oddsValues[0]);
+      const allSame = oddsValues.length > 0 && oddsValues.every(o => o === oddsValues[0]);
       if (allSame) {
         for (const m of members) {
           // Only clear a single-membership leg here -- a multi-membership
@@ -21207,7 +21226,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 399; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 400; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
