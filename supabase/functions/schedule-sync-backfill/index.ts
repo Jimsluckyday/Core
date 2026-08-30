@@ -793,11 +793,25 @@
 //     #33 wanted, already done. A second pass finding exactly one real
 //     game on the CURRENT (already-corrected) event_date now trusts it
 //     instead of re-asking the same question a human already answered by
-//     hand. Only relaxes the SECOND ask -- a first-ever pass (no note yet)
-//     or a corrected date that still has more than one real candidate (a
-//     genuine same-date doubleheader) still falls through to the
-//     unchanged, always-ask flagging. See the isKBO branch's own comment
-//     on this block for the implementation.
+//     hand.
+//
+//     CORRECTED same day, direct follow-up: "so I have to run these
+//     twice? I have to let it fail then try again?" -- this only relaxed
+//     the SECOND ask (required an existing schedule_sync_note), which
+//     conflicts directly with Fix #37 just below: a pick that's ALREADY
+//     correctly split (date_entered != event_date) from the moment it's
+//     entered -- whether by a human's own upfront research or "the
+//     transcriber wired up correctly... validated for tomorrow's games
+//     automatically" -- would still always fail its first check with zero
+//     benefit from either fix, needing a manual re-run every single time
+//     regardless. date_entered/event_date already differing is its own
+//     real evidence a deliberate decision was made, exactly as valid as a
+//     prior review -- neither is a naive guess. Now trusts an exact
+//     single match on event_date whenever EITHER signal is present, on
+//     the first pass, not just a second one. The one case that still
+//     always asks, unchanged: date_entered === event_date, the genuine
+//     "nobody's made a call either way yet" case Fix #33 exists for. See
+//     the isKBO branch's own comment on this block for the implementation.
 //
 // 37. CONFIRMED FIX, direct request: "if I enter the pick on the 4th [it
 //     should] find the start time" even for a major tournament or NHL
@@ -1772,7 +1786,7 @@ Deno.serve(async (req) => {
         // it stays flagged, same as always, exactly to avoid silently
         // matching "a tennis match from a week ago" onto today's entry.
         const allPicks = await db(
-          `picks?select=id,selection,event_date,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,schedule_sync_note,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
+          `picks?select=id,selection,event_date,date_entered,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,schedule_sync_note,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
         );
         const picks = (allPicks || []).filter((p: any) => {
           const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
@@ -2326,29 +2340,43 @@ Deno.serve(async (req) => {
             const pickOwnDate = pick.event_date || targetDate;
             const sameDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) === pickOwnDate);
             const otherDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) !== pickOwnDate);
-            // CONFIRMED FIX, direct request 2026-08-29: "if I've already
-            // preset this as Jun 4 for Jun 5 is there a reason I need to
-            // put in the start time... should it not know that I meant
-            // the 5th." Fix #33's "always ask, never auto-narrow" rule was
-            // specifically about a FRESH, never-reviewed date -- trusting
-            // an unverified guess risked silently locking in the wrong
-            // game. But a pick that already carries a schedule_sync_note
-            // from a PRIOR run of this exact check has already been read
-            // by a human, who had the chance to correct event_date in
-            // response to it -- that IS the verification Fix #33 wanted,
-            // already done. A second pass finding exactly one real game on
-            // the CURRENT (already-corrected) event_date can trust it
-            // instead of re-asking the same question a human already
-            // answered by hand. Only relaxes the SECOND ask -- a first-
-            // ever pass (no note yet) or a corrected date that still has
-            // more than one real candidate (a genuine same-date
-            // doubleheader) falls through to the unchanged flagging below.
-            if (pick.schedule_sync_note && sameDateGames.length === 1) {
+            // CONFIRMED FIX, direct request 2026-08-29, CORRECTED same day:
+            // "if I've already preset this as Jun 4 for Jun 5 is there a
+            // reason I need to put in the start time... should it not know
+            // that I meant the 5th." Fix #33's "always ask, never auto-
+            // narrow" rule was specifically about a FRESH date where
+            // date_entered and event_date are the SAME value -- that's the
+            // genuine "did the capper mean today or tomorrow, and nobody's
+            // made a call either way yet" case, with zero signal either
+            // direction. The first version of this fix only recognized ONE
+            // kind of evidence that a call HAD been made: a human editing
+            // event_date in response to an existing schedule_sync_note.
+            // That missed the equally valid case direct follow-up
+            // surfaced: date_entered and event_date already DIFFERING is
+            // its own real evidence a deliberate decision was made --
+            // either a human corrected it up front, or (the actual goal:
+            // "if we have the transcriber wired up correctly we can have
+            // the data validated for tomorrow's games automatically...
+            // without having to stop, verify, run again, verify, post")
+            // the transcriber's own KST-push logic already split them
+            // before this ever ran, with no prior flag involved at all.
+            // Neither is a naive guess -- both are real signal, so both now
+            // trust an exact single match on the FIRST pass, not just a
+            // second one. Still only relaxes the SAME-DATE-single-match
+            // case: a pick where date_entered === event_date (no decision
+            // made yet) still always asks; a corrected date with more than
+            // one real candidate (a genuine same-date doubleheader) still
+            // falls through to the unchanged flagging below; a date with
+            // literally no real game at all is handled by the separate
+            // candidateGames.length===0 branch above this one, unaffected.
+            const dateWasDeliberatelySet = !!pick.schedule_sync_note
+              || (!!pick.date_entered && !!pick.event_date && pick.date_entered !== pick.event_date);
+            if (dateWasDeliberatelySet && sameDateGames.length === 1) {
               const chosen = sameDateGames[0];
               const rematch = !hasSlash ? findMatchingGames(pick.selection).find(m => m.game.event_id === chosen.event_id) : null;
               const updatePayload: Record<string, unknown> = {
                 game_start_time: chosen.start_time, schedule_sync_status: 'matched',
-                schedule_sync_note: `Auto-confirmed on a re-check of this already-reviewed pick -- exactly one real game matches the event date you corrected it to (${chosen.matchup}).`
+                schedule_sync_note: `Auto-confirmed -- exactly one real game matches this pick's own event date (${chosen.matchup}), and its date_entered/event_date split (or a prior review) is real evidence that date was deliberately set, not a raw guess.`
               };
               if (rematch) updatePayload.home_away = rematch.isHome ? 'home' : 'away';
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
