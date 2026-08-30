@@ -799,6 +799,38 @@
 //     unchanged, always-ask flagging. See the isKBO branch's own comment
 //     on this block for the implementation.
 //
+// 37. CONFIRMED FIX, direct request: "if I enter the pick on the 4th [it
+//     should] find the start time" even for a major tournament or NHL
+//     Playoff game entered a day or two early -- "I don't have to re-do
+//     my work and go find it again later or run a 2nd query... unless
+//     that specific tournament/time isn't known." Every candidate-picks
+//     query in this file now matches on EITHER event_date OR date_entered
+//     equal to the searched date, not event_date alone -- so a pick
+//     entered today, correctly dated for a real game 1-2 days out, is
+//     found by searching today, not whatever real date it ends up on.
+//     For Tennis/Soccer/Cricket, the existing ±30-day tournament/series
+//     window already covers that real date once the pick is in the
+//     candidate set at all -- no other change needed there. For KBO and
+//     the generic team-sports branch (MLB/NBA/NFL/NHL/etc, both
+//     previously single-day-only fetches) and MLB's own prop roster
+//     lookup, the schedule/roster fetch itself now covers the UNION of
+//     each distinct real event_date found among today's candidates (see
+//     distinctEventDates, computed BEFORE the schedule fetch specifically
+//     so this is possible) -- almost always still just one date, the
+//     unchanged normal case, only widening when an early-entered pick is
+//     actually present. Every per-pick date COMPARISON (KBO's ambiguity
+//     check, Tennis's gap-safety check, the Soccer/KBO date-corrected
+//     note) was also switched from the global targetDate to that specific
+//     pick's own event_date, since different picks in one batch can now
+//     legitimately have different real dates. IMPORTANT SAFETY BOUNDARY,
+//     direct request: this only widens WHICH DATES GET FETCHED, never
+//     what counts as a match -- a pick still has to land on its OWN
+//     stated event_date specifically to auto-resolve; a genuinely unclear
+//     date still can't be resolved by guessing the closest real game in
+//     the wider pool, it stays flagged exactly as before, specifically to
+//     avoid ever silently matching e.g. a tennis match from a week ago
+//     onto today's entry.
+//
 // Run it once per date you want to catch up: POST /schedule-sync-backfill?date=2026-06-01
 // Optionally add &sport=MLB to run just one sport at a time, or &skipProps=true
 // to only touch game_start_time/home_away and never prop_team/event_name.
@@ -1094,8 +1126,6 @@ Deno.serve(async (req) => {
 
     function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-    const espnDate = targetDate.replace(/-/g, '');
-
     const overall = {
       date: targetDate,
       sports_processed: [] as any[],
@@ -1112,7 +1142,7 @@ Deno.serve(async (req) => {
       if (!isSoccer && !isTennis && !isKBO && !isCricket && !espnPath) {
         const needsHomeAwayHere = !NO_HOME_AWAY_SPORTS.includes(sportNormName);
         const unsupportedPicks = await db(
-          `picks?select=id,selection,home_away,game_start_time,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+          `picks?select=id,selection,home_away,game_start_time,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
         );
         const applicable = (unsupportedPicks || []).filter((p: any) => {
           const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
@@ -1251,8 +1281,17 @@ Deno.serve(async (req) => {
             return best;
           }
 
+          // Matches on EITHER event_date or date_entered equal to the
+          // searched date (see the same fix's fuller comment further down
+          // in this file, above the generic sports' own candidate query)
+          // -- a Tennis pick entered today for a match a day or two out
+          // (e.g. a major that runs multiple weeks) is found by searching
+          // today, not whatever real date it's actually on. The existing
+          // 30-day tournament window below already covers that real date
+          // once the pick is even in the candidate set -- no change needed
+          // there, only to which picks get considered at all.
           const allTennisPicks = await db(
-            `picks?select=id,selection,prop_player,bet_type_id,event_name,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
           );
           const tennisPicks = (allTennisPicks || []).filter((p: any) => {
             const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
@@ -1438,12 +1477,19 @@ Deno.serve(async (req) => {
               continue;
             }
 
+            // Compares against THIS pick's own event_date, not the global
+            // targetDate you searched with -- an early-entered pick (see
+            // the date_entered fix on allTennisPicks' query above) can have
+            // its own real event_date genuinely differ from targetDate,
+            // and it's that real date a match needs to land near, not the
+            // date you happened to search on.
+            const pickOwnDate = pick.event_date || targetDate;
             let matched: typeof tennisMatches[0] | null = null;
             if (tokens.length === 1) {
               const candidates = resolvedLists[0];
               const singles = candidates.filter(m => m.playerNames.length === 2);
               const pool = singles.length ? singles : candidates;
-              if (pool.length) matched = closestTennisMatch(pool, targetDate);
+              if (pool.length) matched = closestTennisMatch(pool, pickOwnDate);
             } else {
               let commonIds = new Set(resolvedLists[0].map(m => m.matchId));
               for (const lst of resolvedLists.slice(1)) {
@@ -1452,19 +1498,19 @@ Deno.serve(async (req) => {
               }
               if (commonIds.size) {
                 const candidateMatches = resolvedLists[0].filter(m => commonIds.has(m.matchId));
-                matched = closestTennisMatch(candidateMatches, targetDate);
+                matched = closestTennisMatch(candidateMatches, pickOwnDate);
               }
             }
 
             if (matched) {
               const matchedDateStr = (matched.startTime || '').slice(0, 10);
-              const dateDiffers = !!matchedDateStr && matchedDateStr !== targetDate;
+              const dateDiffers = !!matchedDateStr && matchedDateStr !== pickOwnDate;
               const gapDays = matchedDateStr
-                ? Math.round((new Date(matchedDateStr + 'T00:00:00Z').getTime() - new Date(targetDate + 'T00:00:00Z').getTime()) / 86400000)
+                ? Math.round((new Date(matchedDateStr + 'T00:00:00Z').getTime() - new Date(pickOwnDate + 'T00:00:00Z').getTime()) / 86400000)
                 : 0;
               const TENNIS_DATE_GAP_SAFETY_DAYS = 2;
               if (Math.abs(gapDays) > TENNIS_DATE_GAP_SAFETY_DAYS) {
-                const note = `Found a same-name match on ${matchedDateStr} (${matched.matchup}, ${matched.tournamentName || 'tournament unknown'}), but that's ${Math.abs(gapDays)} days from this pick's own event_date (${targetDate}) -- too far to auto-confirm this is the same match. This may be a real event outside this system's data source (e.g. a Challenger/lower-tier tournament ESPN doesn't cover), not the tour-level match found here. Needs manual verification before trusting this date.`;
+                const note = `Found a same-name match on ${matchedDateStr} (${matched.matchup}, ${matched.tournamentName || 'tournament unknown'}), but that's ${Math.abs(gapDays)} days from this pick's own event_date (${pickOwnDate}) -- too far to auto-confirm this is the same match. This may be a real event outside this system's data source (e.g. a Challenger/lower-tier tournament ESPN doesn't cover), not the tour-level match found here. Needs manual verification before trusting this date.`;
                 await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
                 tennisSportResult.unmatched.push({ id: pick.id, selection: isProp ? pick.prop_player : pick.selection, reason: note });
                 continue;
@@ -1478,7 +1524,7 @@ Deno.serve(async (req) => {
                   ? `Resolved a name shared by more than one real player using this pick's own declared tournament ("${pick.event_name}") -- only one of them was actually playing there, but please double-check this was the intended player if there's any doubt. `
                   : '';
               const dateDifferNote = dateDiffers
-                ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${targetDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`
+                ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`
                 : '';
               const note = (correctionNote || dateDifferNote) ? `${correctionNote}${dateDifferNote}`.trim() : null;
               const updatePayload: Record<string, unknown> = {
@@ -1499,8 +1545,12 @@ Deno.serve(async (req) => {
         }
 
         if (isCricket) {
+          // Same event_date-OR-date_entered widening as Tennis/the generic
+          // sports below -- a Cricket pick entered today for a match a day
+          // or two out is found by searching today, relying on the
+          // existing 30-day series window to actually cover its real date.
           const cricketPicks = ((await db(
-            `picks?select=id,selection,prop_player,bet_type_id,event_name,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
+            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
           )) || []).filter((p: any) => {
             const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
             return !betTypeName.includes('parlay');
@@ -1649,16 +1699,21 @@ Deno.serve(async (req) => {
             if (!candidates.length) {
               const suggestion = suggestClosest(rawName, cricketTeamDisplayNames);
               const ownError = cricketSearchErrors.get(rawName) || cricketInfoError;
-              const note = `Could not find "${rawName}" on any Cricket series covering ${targetDate} (checked matching series within ${CRICKET_DATE_BUFFER_DAYS} days of it)${ownError ? ` -- a lookup hit an error: ${ownError}` : ''}.${suggestion ? ` "${rawName}" -> "${suggestion}".` : ''}`;
+              const note = `Could not find "${rawName}" on any Cricket series covering ${pick.event_date || targetDate} (checked matching series within ${CRICKET_DATE_BUFFER_DAYS} days of it)${ownError ? ` -- a lookup hit an error: ${ownError}` : ''}.${suggestion ? ` "${rawName}" -> "${suggestion}".` : ''}`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
               cricketSportResult.unmatched.push({ id: pick.id, selection: rawName, reason: note });
               continue;
             }
-            const matched = closestCricketMatch(candidates, targetDate);
+            // Compares against THIS pick's own event_date (falling back to
+            // targetDate only if it's somehow missing), same reasoning as
+            // Tennis's pickOwnDate just above -- an early-entered pick's
+            // real date can differ from the date you searched with.
+            const pickOwnDate = pick.event_date || targetDate;
+            const matched = closestCricketMatch(candidates, pickOwnDate);
             const matchedDateStr = (matched.startTime || '').slice(0, 10);
-            const dateDiffers = !!matchedDateStr && matchedDateStr !== targetDate;
+            const dateDiffers = !!matchedDateStr && matchedDateStr !== pickOwnDate;
             const correctionNote = usedSuggestion ? `Auto-corrected spelling: "${rawName}" -> "${usedSuggestion}" -- confirmed by a real match on the covering series, but please double-check this was the intended team. ` : '';
-            const dateDifferNote = dateDiffers ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${targetDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.` : '';
+            const dateDifferNote = dateDiffers ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.` : '';
             const note = (correctionNote || dateDifferNote) ? `${correctionNote}${dateDifferNote}`.trim() : null;
 
             const betTypeName = (pick.bet_types && pick.bet_types.name) || '';
@@ -1692,6 +1747,40 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        // CONFIRMED FIX, direct request 2026-08-29: "if I enter the pick
+        // on the 4th [it should] find the start time" even for a major
+        // tournament or NHL Playoff game entered a day or two early --
+        // "I don't have to re-do my work and go find it again later or
+        // run a 2nd query... unless that specific tournament/time isn't
+        // known." Candidate picks are now fetched by EITHER event_date OR
+        // date_entered matching the date you searched -- so a pick you
+        // enter today, correctly dated for a game 1-2 days out, is found
+        // by searching today's date, not whatever real date it ends up on.
+        // Moved this query ABOVE the games-fetch below (it used to run
+        // after) specifically so the real event_date(s) actually present
+        // in today's batch are known BEFORE deciding which date(s) to
+        // fetch schedule data for -- KBO's day-before/after window and the
+        // generic single-day ESPN fetch below both now search the UNION of
+        // each distinct real event_date's own window, not just the single
+        // date typed in. IMPORTANT SAFETY BOUNDARY, direct request: this
+        // only widens WHICH DATES GET FETCHED, never what counts as a
+        // match -- every per-pick comparison below still requires landing
+        // on THAT pick's own stated event_date specifically (or, for KBO,
+        // the already-reviewed-pick exact-match check added earlier
+        // tonight). A pick with no clear event_date still can't be
+        // resolved by guessing the closest real game in the wider pool --
+        // it stays flagged, same as always, exactly to avoid silently
+        // matching "a tennis match from a week ago" onto today's entry.
+        const allPicks = await db(
+          `picks?select=id,selection,event_date,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,schedule_sync_note,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
+        );
+        const picks = (allPicks || []).filter((p: any) => {
+          const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
+          return !betTypeName.includes('parlay');
+        });
+        const distinctEventDates = [...new Set(picks.map((p: any) => p.event_date).filter(Boolean))] as string[];
+        if (!distinctEventDates.length) distinctEventDates.push(targetDate);
+
         let games: any[];
         if (isSoccer) {
           const candidateDates = await getCandidateQueryDates(db, ourSport.id, targetDate, 30);
@@ -1714,11 +1803,20 @@ Deno.serve(async (req) => {
             }
           }
         } else if (isKBO) {
-          const kboDates = [-1, 0, 1].map(offset => {
-            const d = new Date(targetDate + 'T00:00:00Z');
-            d.setUTCDate(d.getUTCDate() + offset);
-            return d.toISOString().slice(0, 10);
-          });
+          // Widened from a single ±1-day window around targetDate to the
+          // UNION of that window around EVERY distinct real event_date
+          // found among today's candidates (see the comment above
+          // distinctEventDates) -- a pick entered today for a game 2 days
+          // out needs THAT day's window fetched too, not just today's.
+          const kboDateSet = new Set<string>();
+          for (const ed of distinctEventDates) {
+            for (const offset of [-1, 0, 1]) {
+              const d = new Date(ed + 'T00:00:00Z');
+              d.setUTCDate(d.getUTCDate() + offset);
+              kboDateSet.add(d.toISOString().slice(0, 10));
+            }
+          }
+          const kboDates = [...kboDateSet];
           const kboResults = await Promise.allSettled(
             kboDates.map(d =>
               fetch(`https://api-gw.sports.naver.com/schedule/games?fields=basic&fromDate=${d}&toDate=${d}&upperCategoryId=kbaseball&categoryId=kbo`)
@@ -1755,13 +1853,33 @@ Deno.serve(async (req) => {
             }
           }
         } else {
-          const eventsRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${espnDate}`);
-          if (!eventsRes.ok) {
-            overall.sports_processed.push({ sport: ourSport.name, error: `ESPN request failed (${eventsRes.status})` });
+          // Widened from a single fetch for targetDate to one fetch PER
+          // distinct real event_date found among today's candidates (see
+          // distinctEventDates above), deduped by event id -- same reason
+          // as KBO's widened window just above: a pick entered today for a
+          // playoff/scheduled game 1-2 days out needs THAT day's ESPN
+          // scoreboard fetched too. Almost always just one fetch (the
+          // normal case, unchanged), only more when an early-entered pick
+          // is actually present in this batch.
+          const espnDates = distinctEventDates.map(d => d.replace(/-/g, ''));
+          const eventsResults = await Promise.allSettled(
+            espnDates.map(d => espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${d}`).then(r => r.ok ? r.json() : null))
+          );
+          const seenEspnEventIds = new Set<string>();
+          games = [];
+          let anyFetchFailed = false;
+          for (const result of eventsResults) {
+            if (result.status !== 'fulfilled' || !result.value) { anyFetchFailed = true; continue; }
+            for (const ev of (result.value.events || [])) {
+              if (seenEspnEventIds.has(ev.id)) continue;
+              seenEspnEventIds.add(ev.id);
+              games.push(ev);
+            }
+          }
+          if (anyFetchFailed && !games.length) {
+            overall.sports_processed.push({ sport: ourSport.name, error: `ESPN request failed for one or more of: ${espnDates.join(', ')}` });
             continue;
           }
-          const eventsData = await eventsRes.json();
-          games = eventsData.events || [];
         }
 
         const allTeamsToday: any[] = [];
@@ -1828,21 +1946,34 @@ Deno.serve(async (req) => {
 
         if (sportNormName === 'mlb') {
           try {
-            const mlbScheduleRes = await fetch(`https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${targetDate}`);
-            if (mlbScheduleRes.ok) {
+            // Widened from a single schedule/roster fetch for targetDate to
+            // one per distinct real event_date among today's candidates
+            // (see distinctEventDates above) -- an MLB prop entered today
+            // for a game 1-2 days out needs that day's own schedule AND
+            // its own roster snapshot (per-date, not today's active
+            // roster -- same reasoning as Fix #4 above, just applied per
+            // distinct date instead of a single shared one).
+            const teamGamePairs: { teamId: number; teamName: string; startTime: string; rosterDate: string }[] = [];
+            let anyScheduleOk = false;
+            let lastScheduleStatus = 0;
+            for (const ed of distinctEventDates) {
+              const mlbScheduleRes = await fetch(`https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${ed}`);
+              if (!mlbScheduleRes.ok) { lastScheduleStatus = mlbScheduleRes.status; continue; }
+              anyScheduleOk = true;
               const mlbScheduleData = await mlbScheduleRes.json();
               const mlbGames = (mlbScheduleData.dates && mlbScheduleData.dates[0] && mlbScheduleData.dates[0].games) || [];
-              const teamGamePairs: { teamId: number; teamName: string; startTime: string }[] = [];
               for (const g of mlbGames) {
                 const away = g.teams && g.teams.away && g.teams.away.team;
                 const home = g.teams && g.teams.home && g.teams.home.team;
                 const startTime = g.gameDate;
                 if (!startTime) continue;
-                if (away) teamGamePairs.push({ teamId: away.id, teamName: away.name, startTime });
-                if (home) teamGamePairs.push({ teamId: home.id, teamName: home.name, startTime });
+                if (away) teamGamePairs.push({ teamId: away.id, teamName: away.name, startTime, rosterDate: ed });
+                if (home) teamGamePairs.push({ teamId: home.id, teamName: home.name, startTime, rosterDate: ed });
               }
+            }
+            if (anyScheduleOk) {
               const rosterResults = await Promise.allSettled(
-                teamGamePairs.map(t => fetch(`https://statsapi.mlb.com/api/v1/teams/${t.teamId}/roster?rosterType=active&date=${targetDate}`).then(r => r.ok ? r.json() : null))
+                teamGamePairs.map(t => fetch(`https://statsapi.mlb.com/api/v1/teams/${t.teamId}/roster?rosterType=active&date=${t.rosterDate}`).then(r => r.ok ? r.json() : null))
               );
               for (let i = 0; i < teamGamePairs.length; i++) {
                 const result = rosterResults[i];
@@ -1856,7 +1987,7 @@ Deno.serve(async (req) => {
               }
               propLookupStatus = propLookup.size > 0 ? 'built' : 'built_but_empty';
             } else {
-              propLookupStatus = `schedule_fetch_failed (status ${mlbScheduleRes.status})`;
+              propLookupStatus = `schedule_fetch_failed (status ${lastScheduleStatus})`;
             }
           } catch (e) {
             propLookupStatus = `build_threw_error: ${String(e)}`;
@@ -1905,14 +2036,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        const allPicks = await db(
-          `picks?select=id,selection,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,schedule_sync_note,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&or=(schedule_sync_status.is.null,schedule_sync_status.neq.matched)`
-        );
-        const picks = (allPicks || []).filter((p: any) => {
-          const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
-          return !betTypeName.includes('parlay');
-        });
-
         const sportResult = {
           sport: ourSport.name, games_found: games.length,
           prop_lookup_status: propLookupStatus, prop_lookup_players_found: propLookup.size,
@@ -1932,6 +2055,7 @@ Deno.serve(async (req) => {
             if (!propLookup.size) {
               const isPermanent = propLookupStatus === 'not_applicable';
               const isEmptyNotError = propLookupStatus === 'built_but_empty';
+              const pickOwnDate = pick.event_date || targetDate;
               let note: string;
               if (isPermanent) {
                 note = `No player roster data source available for ${ourSport.name} props -- start time needs manual entry.`;
@@ -1950,12 +2074,12 @@ Deno.serve(async (req) => {
                 // separate log access.
                 if (games.length > 0) {
                   const rawShape = JSON.stringify((games[0].competitions && games[0].competitions[0] && games[0].competitions[0].competitors) || 'no competitions[0].competitors at all').slice(0, 600);
-                  note = `${ourSport.name} found ${games.length} real game(s) on ${targetDate}, but the roster-lookup step found zero usable teams from it -- likely a real data-shape mismatch, not a wrong date. Raw first game's competitors data: ${rawShape}`;
+                  note = `${ourSport.name} found ${games.length} real game(s), but the roster-lookup step found zero usable teams from it -- likely a real data-shape mismatch, not a wrong date. Raw first game's competitors data: ${rawShape}`;
                 } else {
-                  note = `No ${ourSport.name} games found on ${targetDate} (or the day after) -- if this pick's event_date is wrong (e.g. entered before a playoff series/Finals actually started), correct it and re-run. If a game really is scheduled that day, this may be a temporary data gap worth retrying.`;
+                  note = `No ${ourSport.name} games found on ${pickOwnDate} (or the day after) -- if this pick's event_date is wrong (e.g. entered before a playoff series/Finals actually started), correct it and re-run. If a game really is scheduled that day, this may be a temporary data gap worth retrying.`;
                 }
               } else {
-                note = `Could not build a ${ourSport.name} player roster for ${targetDate} this run (${propLookupStatus}) -- try running the backfill again, or enter start time manually.`;
+                note = `Could not build a ${ourSport.name} player roster for ${pickOwnDate} this run (${propLookupStatus}) -- try running the backfill again, or enter start time manually.`;
               }
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: isPermanent ? 'not_supported' : 'unmatched', schedule_sync_note: note }) });
               sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
@@ -1991,13 +2115,13 @@ Deno.serve(async (req) => {
               continue;
             }
             if (propMatches && propMatches.length > 1) {
-              const note = `"${pick.prop_player}"'s team plays more than once on ${targetDate} (possible start times: ${propMatches.map(m => m.startTime).join(', ')}) -- set this pick's Doubleheader game # (1 or 2) and re-run to resolve automatically, or fill in Start Time manually.`;
+              const note = `"${pick.prop_player}"'s team plays more than once around this pick's own event_date (possible start times: ${propMatches.map(m => m.startTime).join(', ')}) -- set this pick's Doubleheader game # (1 or 2) and re-run to resolve automatically, or fill in Start Time manually.`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
               sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
               continue;
             }
             const propSuggestion = suggestClosestPlayer(pick.prop_player, propDisplayNames);
-            const note = `"${pick.prop_player}" was not found on any ${ourSport.name} active roster playing on ${targetDate} -- may be a name spelling issue, or the player may not be active/on this team.${propSuggestion ? ` Closest name on today's rosters: "${propSuggestion}".` : ''}`;
+            const note = `"${pick.prop_player}" was not found on any ${ourSport.name} active roster playing on ${pick.event_date || targetDate} -- may be a name spelling issue, or the player may not be active/on this team.${propSuggestion ? ` Closest name on today's rosters: "${propSuggestion}".` : ''}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
             sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
             continue;
@@ -2079,10 +2203,15 @@ Deno.serve(async (req) => {
             // skip that check just because it took a different path here.
             let dnbDateCorrected = false;
             if (isSoccer || isKBO) {
+              // Compares against THIS pick's own event_date, not the
+              // global targetDate you searched with -- see the same
+              // reasoning on pickOwnDate in the Tennis/Cricket branches
+              // above.
+              const pickOwnDate = pick.event_date || targetDate;
               const matchedDateStr = (candidateGames[0].start_time || '').slice(0, 10);
-              if (matchedDateStr && matchedDateStr !== targetDate) {
+              if (matchedDateStr && matchedDateStr !== pickOwnDate) {
                 dnbDateCorrected = true;
-                updatePayload.schedule_sync_note = `Found on ${matchedDateStr} -- this pick's event_date is currently ${targetDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`;
+                updatePayload.schedule_sync_note = `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`;
               }
             }
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
@@ -2102,10 +2231,11 @@ Deno.serve(async (req) => {
             if (matchedIsHome !== null) updatePayload.home_away = matchedIsHome ? 'home' : 'away';
             let dateCorrected = false;
             if (isSoccer || isKBO) {
+              const pickOwnDate = pick.event_date || targetDate;
               const matchedDateStr = (candidateGames[0].start_time || '').slice(0, 10);
-              if (matchedDateStr && matchedDateStr !== targetDate) {
+              if (matchedDateStr && matchedDateStr !== pickOwnDate) {
                 dateCorrected = true;
-                updatePayload.schedule_sync_note = `Found on ${matchedDateStr} -- this pick's event_date is currently ${targetDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`;
+                updatePayload.schedule_sync_note = `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`;
               }
             }
             if (!skipProps && isSoccer && !pick.event_name && candidateGames[0].competition_name) {
@@ -2134,15 +2264,21 @@ Deno.serve(async (req) => {
               const s = suggestClosest(pick.selection, allTeamDisplayNamesToday);
               if (s) suggestionText = ` Closest team playing today: "${s}" -- possible spelling issue.`;
             }
-            let dateNote = ` on ${targetDate}`;
-            if (isSoccer) dateNote = ` (checked ${targetDate} plus any real tournament windows within 30 days of it)`;
-            else if (isKBO) dateNote = ` (checked ${targetDate} plus the day before and after)`;
+            const pickOwnDate = pick.event_date || targetDate;
+            let dateNote = ` on ${pickOwnDate}`;
+            if (isSoccer) dateNote = ` (checked ${pickOwnDate} plus any real tournament windows within 30 days of it)`;
+            else if (isKBO) dateNote = ` (checked ${pickOwnDate} plus the day before and after)`;
             const note = `No matching ${ourSport.name} game found for "${pick.selection}"${dateNote}.${suggestionText}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
             sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
           } else if (isKBO) {
-            const sameDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) === targetDate);
-            const otherDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) !== targetDate);
+            // Compares against THIS pick's own event_date, not the global
+            // targetDate you searched with -- an early-entered KBO pick's
+            // real event_date can differ from the date you searched, same
+            // reasoning as every other pickOwnDate use in this file.
+            const pickOwnDate = pick.event_date || targetDate;
+            const sameDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) === pickOwnDate);
+            const otherDateGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) !== pickOwnDate);
             // CONFIRMED FIX, direct request 2026-08-29: "if I've already
             // preset this as Jun 4 for Jun 5 is there a reason I need to
             // put in the start time... should it not know that I meant
@@ -2176,14 +2312,14 @@ Deno.serve(async (req) => {
             } else {
               const suggestions = otherDateGames.map(g => `did you mean ${formatEtDateTime(g.start_time)} instead (${g.matchup})?`);
               const sameDateNote = sameDateGames.length
-                ? `One real game IS on ${targetDate} (${sameDateGames.map(g => g.matchup).join(', ')}). `
+                ? `One real game IS on ${pickOwnDate} (${sameDateGames.map(g => g.matchup).join(', ')}). `
                 : '';
-              const note = `${candidateGames.length} possible games matched "${pick.selection}" -- entered as ${targetDate}, but KBO's evening KST games often land on the pick's US calendar day one day early or late. ${sameDateNote}${suggestions.join(' ')} If a later/earlier date is right, update this pick's Event date and re-run -- needs manual review.`;
+              const note = `${candidateGames.length} possible games matched "${pick.selection}" -- entered as ${pickOwnDate}, but KBO's evening KST games often land on the pick's US calendar day one day early or late. ${sameDateNote}${suggestions.join(' ')} If a later/earlier date is right, update this pick's Event date and re-run -- needs manual review.`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
               sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
             }
           } else {
-            const note = `${candidateGames.length} possible games matched "${pick.selection}" on ${targetDate}: [${candidateGames.map(g => `${g.matchup} (${g.start_time})`).join(' | ')}] -- needs manual review.`;
+            const note = `${candidateGames.length} possible games matched "${pick.selection}" on ${pick.event_date || targetDate}: [${candidateGames.map(g => `${g.matchup} (${g.start_time})`).join(' | ')}] -- needs manual review.`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
             sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
           }
