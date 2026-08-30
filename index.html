@@ -1222,14 +1222,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button id="autoGradeGolfBtn">Find &amp; Update Golf Results</button>
             </div>
           </div>
-          <div class="row">
-            <div style="align-self:flex-end;">
-              <button type="button" class="ghost" id="testTennisBreaksBtn" title="Read-only -- never writes to any pick. Cross-checks stats.tennismylife.org against ESPN's own results for the same real matches and logs the comparison, so this new source can be watched for a while before it's ever used to grade anything.">Test Tennis Breaks Source</button>
-            </div>
-            <div style="align-self:flex-end;">
-              <button type="button" class="ghost" id="tennisBreaksSummaryBtn" title="Rolls up everything logged by the button to the left over the last several days into one report -- run this after letting it check for a week or more.">View Tennis Breaks Validation Summary</button>
-            </div>
-          </div>
           <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
             <!-- CONFIRMED direct request 2026-08-14: Sync Schedule & Odds
                  moved to the Old Tools tab (its own self-contained copy,
@@ -11324,87 +11316,6 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   });
 
-  // Read-only diagnostic, added 2026-08-30 in response to a direct
-  // question about stats.tennismylife.org as a possible future source for
-  // "Breaks" bets (ESPN has no breaks data at all). This never touches
-  // `picks` -- it only logs a per-match comparison against ESPN's own
-  // results into tennis_breaks_validation_log, so it's meant to be run
-  // once a day for a while (no confirm dialog -- nothing here can hurt
-  // real data) and reviewed as a rolled-up report later via the summary
-  // button below, not line by line each day.
-  $('testTennisBreaksBtn').addEventListener('click', async () => {
-    const date = $('autoDate').value;
-    if (!date) { alert('Pick a date first — this will not run without one.'); return; }
-    const btn = $('testTennisBreaksBtn');
-    btn.disabled = true;
-    btn.textContent = 'Checking...';
-    $('automationResultsWrap').innerHTML = '<div class="empty-state">Comparing stats.tennismylife.org against ESPN for this date...</div>';
-    try {
-      const data = await invokeEdgeFunction('test-tennis-breaks-source', `?date=${date}`);
-      const rows = [
-        ['ESPN completed matches found', data.espn_completed_matches],
-        ['Checked against TennisMyLife', data.checked],
-        ['Found in TennisMyLife', data.found_in_source],
-        ['Not found (coverage gap)', data.not_found],
-        ['Winner agreed', data.winner_agree],
-        ['Winner DISAGREED', data.winner_disagree],
-      ];
-      $('automationResultsWrap').innerHTML = `
-        <div class="empty-state" style="text-align:left;">
-          <strong>Tennis Breaks Source test for ${date}</strong>${data.error ? `<div style="color:#8a2f3a;margin-top:6px;">${data.error}</div>` : ''}
-          <table style="margin-top:10px;font-size:12px;"><tbody>
-            ${rows.map(([label, val]) => `<tr><td style="padding:2px 12px 2px 0;color:var(--ink-soft);">${label}</td><td style="font-weight:bold;${label.includes('DISAGREED') && val > 0 ? 'color:#8a2f3a;' : ''}">${val}</td></tr>`).join('')}
-          </tbody></table>
-          <div style="font-size:11px;color:var(--ink-soft);margin-top:8px;">Logged, not graded -- nothing was written to any pick. Run this daily for a while, then use "View Tennis Breaks Validation Summary" to see the rolled-up results.</div>
-        </div>`;
-    } catch (e) {
-      alert('Tennis Breaks Source test failed: ' + e.message);
-      $('automationResultsWrap').innerHTML = '';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Test Tennis Breaks Source';
-    }
-  });
-
-  $('tennisBreaksSummaryBtn').addEventListener('click', async () => {
-    const btn = $('tennisBreaksSummaryBtn');
-    btn.disabled = true;
-    btn.textContent = 'Loading...';
-    $('automationResultsWrap').innerHTML = '<div class="empty-state">Rolling up Tennis Breaks Source validation history...</div>';
-    try {
-      const data = await invokeEdgeFunction('test-tennis-breaks-source', `?summary=true&days=7`);
-      const listHtml = (items, renderRow) => items.length
-        ? `<ul style="margin:6px 0 0 18px;padding:0;">${items.map(renderRow).join('')}</ul>`
-        : '<div style="color:var(--ink-soft);">None.</div>';
-      $('automationResultsWrap').innerHTML = `
-        <div class="empty-state" style="text-align:left;">
-          <strong>Tennis Breaks Source validation summary -- last ${data.window_days} days</strong>
-          <div style="font-size:11px;color:var(--ink-soft);margin:4px 0 10px;">Days actually run: ${data.days_run && data.days_run.length ? data.days_run.join(', ') : 'none yet'}</div>
-          <table style="font-size:12px;"><tbody>
-            <tr><td style="padding:2px 12px 2px 0;color:var(--ink-soft);">Total matches checked</td><td style="font-weight:bold;">${data.total_matches_checked}</td></tr>
-            <tr><td style="padding:2px 12px 2px 0;color:var(--ink-soft);">Found in TennisMyLife</td><td style="font-weight:bold;">${data.found_in_tennismylife} (${data.coverage_rate_pct ?? '--'}% coverage)</td></tr>
-            <tr><td style="padding:2px 12px 2px 0;color:var(--ink-soft);">Winner agreement rate</td><td style="font-weight:bold;">${data.winner_agreement_rate_pct ?? '--'}%</td></tr>
-            <tr><td style="padding:2px 12px 2px 0;color:var(--ink-soft);">Total-games agreement rate</td><td style="font-weight:bold;">${data.games_agreement_rate_pct ?? '--'}%</td></tr>
-          </tbody></table>
-          <div style="margin-top:12px;"><strong style="color:#8a2f3a;">Winner disagreements (worth a manual look):</strong>
-            ${listHtml(data.winner_disagreements, r => `<li>${r.date} -- ${r.players}: ESPN says ${r.espn_winner}, TennisMyLife says ${r.tennismylife_winner}</li>`)}
-          </div>
-          <div style="margin-top:10px;"><strong>Total-games disagreements:</strong>
-            ${listHtml(data.games_disagreements, r => `<li>${r.date} -- ${r.players}: ESPN ${r.espn_total_games} games, TennisMyLife ${r.tennismylife_total_games} games</li>`)}
-          </div>
-          <div style="margin-top:10px;"><strong>Coverage-gap examples (not found in TennisMyLife at all):</strong>
-            ${listHtml(data.not_found_examples, r => `<li>${r.date} -- ${r.tour}: ${r.players}</li>`)}
-          </div>
-        </div>`;
-    } catch (e) {
-      alert('Loading the Tennis Breaks Source summary failed: ' + e.message);
-      $('automationResultsWrap').innerHTML = '';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'View Tennis Breaks Validation Summary';
-    }
-  });
-
   $('autoBackfillBtn').addEventListener('click', async () => {
     const date = $('autoDate').value;
     if (!date) { alert('Pick a date first — this will not run without one.'); return; }
@@ -21154,7 +21065,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 392; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 393; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
