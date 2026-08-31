@@ -633,6 +633,12 @@ Deno.serve(async (req) => {
       // Pointers Made" above) normalizes to "3ptmade" and had no entry --
       // same stat, just a third phrasing nobody had typed yet.
       '3ptmade': [{ key: 'threePointFieldGoalsMade-threePointFieldGoalsAttempted', group: 'batting' }],
+      // CONFIRMED REAL GAP, direct report 2026-08-30 (NBA, but this table
+      // is shared with WNBA via NBA_STAT_SPECS below): "3-Pointers Made"
+      // typed with the numeral "3" (not spelled-out "Three") normalizes to
+      // "3pointersmade" -- a fourth real phrasing of the same stat, still
+      // distinct from threepointersmade/threesmade/3ptmade above.
+      '3pointersmade': [{ key: 'threePointFieldGoalsMade-threePointFieldGoalsAttempted', group: 'batting' }],
       pointsreboundsassists: [{ key: '', group: 'batting' }],
       pointsrebounds: [{ key: '', group: 'batting' }],
       pointsassists: [{ key: '', group: 'batting' }],
