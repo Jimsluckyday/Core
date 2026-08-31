@@ -659,6 +659,12 @@ Deno.serve(async (req) => {
       // from both "pointsreboundsassists" (all spelled out) and
       // "ptsrebassists" (all abbreviated) above. Same underlying stat.
       ptsreboundsassists: [{ key: '', group: 'batting' }],
+      // CONFIRMED REAL GAP, direct report 2026-08-31: "Pts/Assists/Rebounds"
+      // (Rebounds and Assists swapped from the phrasing above) normalizes to
+      // "ptsassistsrebounds" -- same 3-stat combo, just written in a
+      // different order. Order doesn't change the math (p+r+a either way),
+      // just needs to be recognized as the same stat.
+      ptsassistsrebounds: [{ key: '', group: 'batting' }],
       // ADDED 2026-08-23, direct request: "anything we can do to get this
       // done automatically." Confirmed directly against a real box score
       // (Spurs @ Knicks, 2026-06-08) that ESPN's stat keys are
@@ -736,16 +742,40 @@ Deno.serve(async (req) => {
       return fullInnings * 3 + partialOuts;
     }
 
-    async function fetchBoxscore(espnPath: string, eventId: string, cache: Record<string, any>) {
+    // Direct request 2026-08-31: "1st Quarter Points" needs to be added to
+    // the list of stats this grader can handle -- unlike every other prop
+    // stat, there's no single box-score category for "points scored in
+    // period 1 only." Confirmed directly (curled a real NBA summary?event=
+    // response) that the SAME summary endpoint already fetched for the box
+    // score also returns a full play-by-play array (`plays`), where each
+    // scoring play carries `period.number`, `scoreValue`, and
+    // `participants[0].athlete.id` for the scorer (confirmed against real
+    // "X makes Y (Z assists)" plays -- participants[0] is always the
+    // scorer, participants[1] the assister, when present). Summing
+    // scoreValue for period 1's scoring plays by athlete id gives a real
+    // 1st-quarter points total. Rather than fetch the same summary URL
+    // twice (once for boxscore, once for plays), the cache now stores the
+    // FULL summary response -- fetchBoxscore's own return value is
+    // unchanged (still just the .boxscore piece), this only adds a second
+    // reader (fetchGamePlays) of the same cached fetch.
+    async function fetchGameSummary(espnPath: string, eventId: string, cache: Record<string, any>) {
       if (eventId in cache) return cache[eventId];
       await new Promise(resolve => setTimeout(resolve, 250));
       try {
         const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${eventId}`);
-        cache[eventId] = res.ok ? (await res.json()).boxscore || null : null;
+        cache[eventId] = res.ok ? await res.json() : null;
       } catch {
         cache[eventId] = null;
       }
       return cache[eventId];
+    }
+    async function fetchBoxscore(espnPath: string, eventId: string, cache: Record<string, any>) {
+      const summary = await fetchGameSummary(espnPath, eventId, cache);
+      return summary ? summary.boxscore || null : null;
+    }
+    async function fetchGamePlays(espnPath: string, eventId: string, cache: Record<string, any>) {
+      const summary = await fetchGameSummary(espnPath, eventId, cache);
+      return summary ? summary.plays || [] : [];
     }
 
     // Direct report 2026-08-29: "I see on their website it's listed on the
@@ -876,6 +906,75 @@ Deno.serve(async (req) => {
         return { grade: null, note: `No player named "${pick.prop_player}" found in any MLB Stats API box score on this date -- check spelling, or needs manual grading.` };
       }
 
+      // Direct request 2026-08-31: "1st Quarter Points" -- same
+      // "check-every-game, only accept a unique match" discipline as the
+      // generic box-score path below, but reading play-by-play instead of
+      // a box-score category, since ESPN's box score has no per-quarter
+      // split for an individual player. First locates the player's real
+      // ESPN athlete id via the box score (same displayName/shortName/
+      // surname matching as the generic path), then sums scoreValue over
+      // that one game's period-1 scoring plays credited to that id.
+      if (statNorm === '1stquarterpoints' && (sportNorm === 'nba' || sportNorm === 'wnba')) {
+        let foundInAnyGame = false;
+        let foundInNotFinalGame = false;
+        let foundInVoidedGame = false;
+        const matches: { athleteId: string; displayName: string; gameId: string }[] = [];
+        for (const g of games) {
+          const completed = !!(g.status && g.status.type && g.status.type.completed);
+          const gStatusName: string | null = (g.status && g.status.type && g.status.type.name) || null;
+          const box = await fetchBoxscore(espnPath, g.id, boxCache);
+          if (!box || !box.players) continue;
+          box.players.forEach((teamBlock: any) => {
+            (teamBlock.statistics || []).forEach((sg: any) => {
+              (sg.athletes || []).forEach((a: any) => {
+                const rawDisplayName = (a.athlete && a.athlete.displayName) || '';
+                if (!rawDisplayName) return;
+                const displayNorm = normalize(rawDisplayName);
+                const shortNorm = normalize((a.athlete && a.athlete.shortName) || '');
+                const nameTokens = rawDisplayName.trim().split(/\s+/);
+                const surnameNorm = nameTokens.length ? normalize(nameTokens[nameTokens.length - 1]) : '';
+                if (displayNorm === playerNorm || (shortNorm && shortNorm === playerNorm) || (surnameNorm && surnameNorm === playerNorm)) {
+                  foundInAnyGame = true;
+                  if (!completed) {
+                    if (isVoidGameStatus(gStatusName)) foundInVoidedGame = true;
+                    else foundInNotFinalGame = true;
+                    return;
+                  }
+                  matches.push({ athleteId: String(a.athlete && a.athlete.id), displayName: rawDisplayName, gameId: g.id });
+                }
+              });
+            });
+          });
+        }
+        if (!foundInAnyGame) {
+          return { grade: null, note: `No player named "${pick.prop_player}" found in any ${sportNorm.toUpperCase()} box score on this date -- check spelling, or needs manual grading.` };
+        }
+        if (matches.length === 0 && foundInVoidedGame) return { grade: 'push', note: null };
+        if (matches.length === 0 && foundInNotFinalGame) {
+          return { grade: null, note: 'Matched to a game today, but ESPN has not marked it final yet -- check back later.', notFinal: true };
+        }
+        if (matches.length > 1) {
+          return { grade: null, note: `"${pick.prop_player}" matched more than one ${sportNorm.toUpperCase()} box score row on this date -- needs manual review.` };
+        }
+        const match = matches[0];
+        const plays = await fetchGamePlays(espnPath, match.gameId, boxCache);
+        const value = plays
+          .filter((p: any) => p.scoringPlay && p.period && p.period.number === 1
+            && Array.isArray(p.participants) && p.participants[0] && p.participants[0].athlete
+            && String(p.participants[0].athlete.id) === match.athleteId)
+          .reduce((sum: number, p: any) => sum + (Number(p.scoreValue) || 0), 0);
+        const line = Number(pick.line);
+        const threshold = Math.abs(line);
+        const isOver = normalize(pick.selection) === 'over';
+        const isUnder = normalize(pick.selection) === 'under';
+        if (!isOver && !isUnder) {
+          return { grade: null, note: `Selection "${pick.selection}" isn't a recognized Over/Under call -- needs manual review.` };
+        }
+        if (value === threshold) return { grade: 'push', note: null };
+        const won = isOver ? value > threshold : value < threshold;
+        return { grade: won ? 'win' : 'loss', note: null };
+      }
+
       const STAT_SPECS_BY_SPORT: Record<'mlb' | 'wnba' | 'nba', Record<string, StatSpec[]>> = {
         mlb: MLB_STAT_SPECS, wnba: WNBA_STAT_SPECS, nba: NBA_STAT_SPECS
       };
@@ -1000,12 +1099,12 @@ Deno.serve(async (req) => {
           value = (hits !== null && runsVal !== null && rbi !== null) ? hits + runsVal + rbi : null;
         } else if (statNorm === 'pointsreboundsassists' || statNorm === 'pointsrebounds' || statNorm === 'pointsassists' || statNorm === 'reboundsassists'
           || statNorm === 'ptsrebassists' || statNorm === 'ptsreb' || statNorm === 'ptsassists' || statNorm === 'rebassists'
-          || statNorm === 'ptsreboundsassists') {
+          || statNorm === 'ptsreboundsassists' || statNorm === 'ptsassistsrebounds') {
           const pIdx = row.keys.indexOf('points'), rIdx = row.keys.indexOf('rebounds'), aIdx = row.keys.indexOf('assists');
           const p = pIdx >= 0 ? espnStatToNumber(row.stats[pIdx]) : null;
           const r = rIdx >= 0 ? espnStatToNumber(row.stats[rIdx]) : null;
           const a = aIdx >= 0 ? espnStatToNumber(row.stats[aIdx]) : null;
-          if (statNorm === 'pointsreboundsassists' || statNorm === 'ptsrebassists' || statNorm === 'ptsreboundsassists') value = (p !== null && r !== null && a !== null) ? p + r + a : null;
+          if (statNorm === 'pointsreboundsassists' || statNorm === 'ptsrebassists' || statNorm === 'ptsreboundsassists' || statNorm === 'ptsassistsrebounds') value = (p !== null && r !== null && a !== null) ? p + r + a : null;
           else if (statNorm === 'pointsrebounds' || statNorm === 'ptsreb') value = (p !== null && r !== null) ? p + r : null;
           else if (statNorm === 'pointsassists' || statNorm === 'ptsassists') value = (p !== null && a !== null) ? p + a : null;
           else value = (r !== null && a !== null) ? r + a : null;
