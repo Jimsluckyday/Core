@@ -930,6 +930,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <label id="selectionLabel">Choice / selection</label>
           <input id="pickSelection" list="selectionSuggestions" placeholder="e.g. Chiefs" />
           <datalist id="selectionSuggestions"></datalist>
+          <div id="tennisTotalHint" style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin-top:6px;display:none;padding:6px;border:1px dashed var(--stamp-amber);border-radius:3px;">&#9888; Fill in the Line now -- if it's ever missing later, there's no way to tell from the data alone whether this was meant as "Total" (games, usually high teens-20s) or "Total (Sets)" (almost always 2.5), especially on an auto-uploaded pick where nobody who saw the capper's original message is looking at it. Also put BOTH players here (e.g. "Gauff/Boisson"), not just one -- unlike Moneyline/Spread, a Total doesn't care who's favored, only which exact match, and two names let this system find that match far more reliably than a single name can.</div>
         </div>
         <div class="field" id="lineField" style="display:none;">
           <label id="lineLabel">Line</label>
@@ -4424,6 +4425,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['CONFIRMED REAL GAP, direct report 2026-08-24: earlier versions of this template had only ONE team/player field, so an Over/Under pick (which genuinely needs both teams) or a Tennis match (needs both players) had nowhere to put the second one -- forcing it into Notes instead, which nothing downstream actually reads.', false, 10],
         ['Put the side you\'d naturally lead with in "Team 1 / Player" (e.g. the team whose total you\'re tracking, or the player you\'re picking). Put the other side in "Team 2 / Opponent". Leave Team 2 BLANK for anything one-sided -- Moneyline, Spread, a single-team Team Total, or a Player Prop.', false, 10],
         ['Example -- Yankees/Dodgers Over 8.5: Team 1 = "New York Yankees", Team 2 = "Los Angeles Dodgers". Example -- Tennis, Rune vs an opponent: Team 1 = "Holger Rune", Team 2 = the opponent\'s name (Tennis has no registered team list, so both will show "n/a" on the check column -- that\'s expected, not an error).', false, 10],
+        ['Direct request 2026-08-30: for a Tennis Total specifically, put BOTH players in Team 1/Team 2 even if the capper\'s own message only named one -- unlike Moneyline/Spread, a Total doesn\'t care who\'s favored, only which exact match, so a single name is pure unnecessary risk of an ambiguous or failed auto-match this system otherwise has to guess at. Also always fill in Line for a Tennis Total/Total (Sets) -- if it\'s ever missing later on an auto-uploaded pick, there\'s no way to tell from the data alone whether it meant "Total" (games, usually high teens-20s) or "Total (Sets)" (almost always 2.5), since nobody reviewing it afterward has the capper\'s original message to fall back on.', false, 10],
         ['', false, 10],
         ['PARLAYS -- a note on odds', true, 12],
         ['You\'re already doing the main thing right: every leg of the SAME parlay gets the SAME number in the "Parlay" column. One more thing that matters for a parlay\'s COMBINED odds (e.g. a big multi-leg payout) to be recognized correctly: put that SAME combined odds number on EVERY leg of that parlay, not just one of them -- the system only treats it as the parlay\'s shared price when every leg agrees. If only one leg has odds and the rest are blank, it won\'t be recognized as the parlay\'s price.', false, 10],
@@ -5615,7 +5617,33 @@ These are almost always the same day, so "Date entered" only fills in a starting
     updatePropPlayerDatalist();
     updateGolfPropSelectionField();
     updateMatchupFields();
+    updateTennisTotalHint();
   }
+
+  // Added 2026-08-30, direct request: "if we didn't put in the pick and
+  // are relying off an auto upload we wouldn't know what that total is
+  // especially if the line is missing" -- Total (games) and Total (Sets)
+  // are only distinguishable after the fact by the line's own magnitude
+  // (see the tool that reminds you of this same convention elsewhere);
+  // once the line itself is missing, that signal is gone too, and nobody
+  // reviewing an auto-uploaded pick later has the capper's original
+  // message to fall back on. Same prompt also covers a related direct
+  // question: "should we not have both participants" for a Total, since
+  // (unlike Moneyline/Spread) neither side's identity matters for
+  // grading a Total -- only which exact match -- so a single name is
+  // pure unnecessary risk of the exact ambiguous/no-match failures seen
+  // all session, when two names would resolve unambiguously instead.
+  // Shown for every bet type in the "Total" family (Total, Total (Sets),
+  // Total 1st-5th Set) -- matched by normalized-name prefix, same
+  // convention this whole system already uses to group them.
+  function updateTennisTotalHint() {
+    const bt = currentBetType();
+    const sport = sports.find(s => String(s.id) === String($('pickSport').value));
+    const isTennis = !!sport && normalizeForMatch(sport.name) === 'tennis';
+    const isTotalFamily = !!bt && normalizeForMatch(bt.name).startsWith('total');
+    $('tennisTotalHint').style.display = (isTennis && isTotalFamily) ? 'block' : 'none';
+  }
+  $('pickSport').addEventListener('change', updateTennisTotalHint);
 
   // CONFIRMED direct request 2026-08-15: "Team 1 then Team 2 as different
   // boxes" for combined-game bets (Over/Under, No Run First Inning, Both
@@ -21300,7 +21328,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 403; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 404; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
