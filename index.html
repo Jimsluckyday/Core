@@ -9732,14 +9732,14 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   // group/phone and edit as you go" workflow this table exists for. A tiny
   // inline status word next to the control gives feedback without needing
   // a popup that would interrupt moving straight to the next row.
-  function flashSaveStatus(el, ok, errMsg) {
+  function flashSaveStatus(el, ok, errMsg, okMsg) {
     const prev = el.nextElementSibling && el.nextElementSibling.classList.contains('inline-save-status') ? el.nextElementSibling : null;
     if (prev) prev.remove();
     const span = document.createElement('span');
     span.className = 'inline-save-status';
     span.style.cssText = 'font-size:9px;margin-left:4px;';
     span.style.color = ok ? '#2d6a4f' : '#8a2f3a';
-    span.textContent = ok ? 'saved' : ('error: ' + errMsg);
+    span.textContent = ok ? (okMsg || 'saved') : ('error: ' + errMsg);
     el.insertAdjacentElement('afterend', span);
     if (ok) setTimeout(() => span.remove(), 1500);
   }
@@ -10052,7 +10052,38 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         // date immediately, not a stale one until the next Refresh.
         const row = inp.closest('tr');
         if (row) row.setAttribute('data-cascade-event-date', inp.value);
-        flashSaveStatus(inp, true);
+        // CONFIRMED FIX, direct request 2026-08-30: "the parent leg should
+        // hold the odds so it should also hold the date as well." Reverse
+        // direction of the warning above (which protects a LEG's own edit
+        // from silently desyncing from its parlay) -- when the pick being
+        // edited is itself a parlay PARENT (has linked legs), its new date
+        // cascades down to every one of those legs automatically, the
+        // same way odds already flow the opposite direction (legs -> parent)
+        // in refreshParlaySummary/processParlayGroups. A parlay spanning
+        // genuinely different real dates is rare enough (direct estimate:
+        // under 5%, one real Tennis case seen so far) that defaulting to
+        // "parent is authoritative" is the right tradeoff -- the
+        // alternative is every parent edit needing a manual per-leg fix
+        // for the other 95%+. No confirm dialog (unlike the leg-side
+        // warning) since this is the intended default behavior, not an
+        // edge case to catch -- the "+N legs" success message is the
+        // receipt, so it's still visible if something looks off.
+        let cascadedCount = 0;
+        try {
+          const childLegs = await op.rest('parlay_legs?select=leg_pick_id&parlay_pick_id=eq.' + id);
+          if (childLegs.length) {
+            await Promise.all(childLegs.map(function (l) {
+              return op.rest('picks?id=eq.' + l.leg_pick_id, {
+                method: 'PATCH',
+                body: JSON.stringify({ event_date: inp.value })
+              });
+            }));
+            cascadedCount = childLegs.length;
+          }
+        } catch (e) {
+          console.warn('Could not cascade event date to parlay legs:', e.message);
+        }
+        flashSaveStatus(inp, true, null, cascadedCount ? ('saved (+' + cascadedCount + ' leg' + (cascadedCount === 1 ? '' : 's') + ')') : null);
       } catch (e) {
         flashSaveStatus(inp, false, e.message);
       } finally {
@@ -21269,7 +21300,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 402; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 403; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
