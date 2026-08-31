@@ -2266,6 +2266,48 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- CAPPER BETTING PATTERNS -->
+    <div class="stub" data-tab="reports">
+      <p class="stub-title">
+        Capper betting patterns <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public yet</span>
+        <button class="ghost small" id="toggleCapperPatternsBtn">Show patterns</button>
+      </p>
+      <div id="capperPatternsPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Capper</label>
+            <select id="capperPatternsCapper"><option value="">Choose a capper…</option></select>
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="capperPatternsSport"><option value="">All sports</option></select>
+          </div>
+          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
+            <label>From date</label>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input id="capperPatternsFrom" type="date" style="width:auto;" />
+              <button class="ghost small" id="capperPatternsFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>To date</label>
+            <input id="capperPatternsTo" type="date" />
+          </div>
+        </div>
+        <div class="row">
+          <div style="align-self:flex-end;">
+            <button id="runCapperPatternsBtn">Run (new tab)</button>
+          </div>
+          <div style="align-self:flex-end;">
+            <button class="ghost" id="allTimeCapperPatternsBtn">All time</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Direct request 2026-08-31: a summary of what one capper actually bets on, not the full sport/bet-type breakdown Capper Analysis already covers — top teams/players by volume (each with its own win %), a Sport + Bet Type mix, and, for Player Props, how often they call Over vs Under. One capper at a time; there's no single "subject" to summarize across a blend of everyone.
+        </div>
+      </div>
+    </div>
+
     <!-- DUPLICATE PICK CHECKER (internal only) -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -3183,6 +3225,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       cappers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
     dupCapperSel.value = keepDupCapper;
 
+    const cpCapperSel = $('capperPatternsCapper');
+    const keepCpCapper = cpCapperSel.value;
+    cpCapperSel.innerHTML = '<option value="">Choose a capper…</option>' +
+      cappers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+    cpCapperSel.value = keepCpCapper;
+
     const ugCapperSel = $('ugCapper');
     const keepUgCapper = ugCapperSel.value;
     ugCapperSel.innerHTML = '<option value="">All cappers</option>' +
@@ -3650,6 +3698,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     dupSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     dupSportSel.value = keepDupSport;
+
+    const cpSportSel = $('capperPatternsSport');
+    const keepCpSport = cpSportSel.value;
+    cpSportSel.innerHTML = '<option value="">All sports</option>' +
+      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    cpSportSel.value = keepCpSport;
 
     const ugSportSel = $('ugSport');
     const keepUgSport = ugSportSel.value;
@@ -14564,6 +14618,13 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('toggleCapperAnalysisBtn').textContent = showing ? 'Show analysis' : 'Hide analysis';
   });
 
+  $('toggleCapperPatternsBtn').addEventListener('click', () => {
+    const panel = $('capperPatternsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleCapperPatternsBtn').textContent = showing ? 'Show patterns' : 'Hide patterns';
+  });
+
   function tallyRows(rowList) {
     const t = { picks: rowList.length, wins: 0, losses: 0, pushes: 0, pending: 0 };
     rowList.forEach(r => {
@@ -14961,6 +15022,146 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     }
   }
   window.runCapperAnalysisFor = runCapperAnalysisFor;
+
+  // Direct request 2026-08-31: "I'd like to see specifically what he or
+  // any capper is betting on to see if there's a pattern" -- a summary
+  // view, not a full breakout (Capper Analysis already covers the
+  // exhaustive sport/bet-type split). Always scoped to exactly one
+  // capper, since "what does this capper favor" has no meaning blended
+  // across everyone.
+  function openCapperPatternsTab(picks, filterSummary) {
+    // ---- Top selections (what teams/players they actually bet on) ----
+    // A Player Prop's own `selection` holds the Over/Under call, not the
+    // player's name (see the 2026-08-31 Bulk Import fix) -- prop_player
+    // is what actually identifies WHO a prop pick is about. Everything
+    // else (Moneyline/Spread/Total/Team Total/etc) has no prop_player at
+    // all, so `selection` (the team, or "TeamA/TeamB" for a Total) is
+    // already the real subject there. A Parlay summary row's own
+    // `selection` is a generic placeholder ("9-Leg Parlay") shared by
+    // every parlay of that size -- not a real subject, so excluded here
+    // (it's still counted normally in the Sport + Bet Type mix below).
+    const subjectRows = picks.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
+    const bySubject = groupRowsBy(
+      subjectRows,
+      p => (p.prop_player || p.selection || '').trim().toLowerCase(),
+      p => p.prop_player || p.selection || '(blank)'
+    );
+    const subjectGroups = Object.values(bySubject)
+      .map(g => ({ label: g.label, stats: tallyRows(g.rows) }))
+      .sort((a, b) => b.stats.picks - a.stats.picks || a.label.localeCompare(b.label));
+    const TOP_N = 15;
+    const topSubjects = subjectGroups.slice(0, TOP_N);
+    const subjectsTableHtml = `
+      <p class="stub-title" style="margin-bottom:8px;">Top selections (what they bet on most)</p>
+      <table class="picks-table" style="margin-bottom:6px;">
+        <thead><tr><th>Team / player</th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
+        <tbody>${topSubjects.map(g => statsRowHtml(escapeHtml(g.label), g.stats)).join('') || '<tr><td colspan="7">No data.</td></tr>'}</tbody>
+      </table>
+      <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
+        Showing the top ${topSubjects.length} of ${subjectGroups.length} distinct team/player subjects, ranked by volume. Player Props are grouped by Prop Player (not the Over/Under call); everything else is grouped by Selection. Parlay summary rows are excluded here — there's no single real subject for a whole parlay — but are still counted in Sport + Bet Type below.
+      </div>`;
+
+    // ---- Sport + Bet Type mix ----
+    const byCombo = groupRowsBy(
+      picks,
+      p => `${p.sport_id}|${p.bet_type_id}`,
+      p => `${p.sports ? p.sports.name : 'Unknown'} — ${p.bet_types ? p.bet_types.name : 'Unknown'}`
+    );
+    const comboGroups = Object.values(byCombo)
+      .map(g => ({ label: g.label, stats: tallyRows(g.rows) }))
+      .sort((a, b) => b.stats.picks - a.stats.picks);
+    const comboTableHtml = `
+      <p class="stub-title" style="margin-bottom:8px;">Sport + Bet Type mix</p>
+      <table class="picks-table" style="margin-bottom:20px;">
+        <thead><tr><th>Sport — Bet type</th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
+        <tbody>${comboGroups.map(g => statsRowHtml(escapeHtml(g.label), g.stats)).join('') || '<tr><td colspan="7">No data.</td></tr>'}</tbody>
+      </table>`;
+
+    // ---- Player Prop lean: Over vs Under ----
+    const propPicks = picks.filter(p => p.bet_types && p.bet_types.uses_prop_fields);
+    const overPicks = propPicks.filter(p => (p.selection || '').trim().toLowerCase() === 'over');
+    const underPicks = propPicks.filter(p => (p.selection || '').trim().toLowerCase() === 'under');
+    const otherPropPicks = propPicks.filter(p => {
+      const s = (p.selection || '').trim().toLowerCase();
+      return s !== 'over' && s !== 'under';
+    });
+    const leanTableHtml = propPicks.length ? `
+      <p class="stub-title" style="margin-bottom:8px;">Player Prop lean: Over vs Under</p>
+      <table class="picks-table" style="margin-bottom:6px;">
+        <thead><tr><th></th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
+        <tbody>
+          ${statsRowHtml('Over', tallyRows(overPicks))}
+          ${statsRowHtml('Under', tallyRows(underPicks))}
+          ${otherPropPicks.length ? statsRowHtml('Other / not a recognized Over-Under call', tallyRows(otherPropPicks)) : ''}
+        </tbody>
+      </table>
+      <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
+        ${propPicks.length} total Player Prop picks — ${Math.round(1000 * overPicks.length / propPicks.length) / 10}% Over, ${Math.round(1000 * underPicks.length / propPicks.length) / 10}% Under. A heavy lean either way, especially paired with a weak win % on that side, is worth a second look.
+      </div>` : `
+      <p class="stub-title" style="margin-bottom:8px;">Player Prop lean: Over vs Under</p>
+      <div style="font-size:11px;color:#55584d;margin-bottom:20px;">No Player Prop picks in this range.</div>`;
+
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Capper Betting Patterns</title>
+<style>
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
+  .stub-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: #234d35; font-weight: bold; }
+  .picks-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; }
+  .picks-table td { padding: 9px 6px; border-bottom: 1px dashed #b9b09a; }
+</style>
+</head><body>
+  <h1>Capper Betting Patterns <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
+  <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
+  ${subjectsTableHtml}
+  ${comboTableHtml}
+  ${leanTableHtml}
+  ${csvExportPopoutScript('capper-betting-patterns')}
+</body></html>`);
+    win.document.close();
+  }
+
+  async function runCapperPatterns() {
+    const capperFilter = $('capperPatternsCapper').value;
+    if (!capperFilter) { alert('Choose a capper first — this report summarizes one capper at a time.'); return; }
+    const sportFilter = $('capperPatternsSport').value;
+    const from = $('capperPatternsFrom').value;
+    const to = $('capperPatternsTo').value;
+
+    const capperName = $('capperPatternsCapper').selectedOptions[0]?.textContent || '';
+    const sportName = sportFilter ? ($('capperPatternsSport').selectedOptions[0]?.textContent || '') : 'All sports';
+    const summaryParts = [capperName, sportName];
+    summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
+    const filterSummary = summaryParts.join(' · ');
+
+    let query = 'picks?select=id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,result,sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false';
+    query += `&capper_id=eq.${capperFilter}`;
+    if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+    if (from) query += `&event_date=gte.${from}`;
+    if (to) query += `&event_date=lte.${to}`;
+    query += '&order=id.asc';
+
+    try {
+      const picks = await restAllPages(query);
+      if (!picks.length) { alert(`No picks match these filters for ${capperName}.`); return; }
+      openCapperPatternsTab(picks, filterSummary);
+    } catch (e) {
+      alert('Could not calculate patterns: ' + e.message);
+    }
+  }
+  $('runCapperPatternsBtn').addEventListener('click', runCapperPatterns);
+  $('allTimeCapperPatternsBtn').addEventListener('click', () => {
+    $('capperPatternsSport').value = '';
+    $('capperPatternsFrom').value = '';
+    $('capperPatternsTo').value = '';
+    runCapperPatterns();
+  });
 
   // ---------- Duplicate pick checker (internal) ----------
   $('toggleDupCheckBtn').addEventListener('click', () => {
@@ -16857,6 +17058,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     ['topBottomFrom', 'runTopBottomBtn'],
     ['streaksFrom', 'runStreaksBtn'],
     ['capperAnalysisFrom', 'runCapperAnalysisBtn'],
+    ['capperPatternsFrom', 'runCapperPatternsBtn'],
     ['dupFrom', 'runDupScanBtn'],
     ['ugFrom', 'previewUndoGradingBtn'],
     ['usFrom', 'previewUndoSyncBtn'],
@@ -21353,7 +21555,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 405; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 406; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
