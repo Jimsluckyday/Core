@@ -842,14 +842,28 @@ Deno.serve(async (req) => {
           const value = statNorm === 'totalbases'
             ? result.batting.totalBases
             : result.batting.hits - result.batting.doubles - result.batting.triples - result.batting.homeRuns;
+          // CONFIRMED REAL BUG, direct report 2026-08-30: Teoscar Hernandez
+          // went 0-4 (0 total bases) on a -1.5 Total Bases Over pick and
+          // this graded it a WIN. Root cause: this project's own convention
+          // stores an Over prop's line as a NEGATIVE number (e.g. -1.5 for
+          // "Over 1.5") -- Number(pick.line) was compared against RAW,
+          // never taking the absolute value the way every other bet type's
+          // Over/Under grading in this project already does (see e.g. the
+          // Tennis Total branch's own threshold/isOver pattern above). So
+          // "value > line" became "0 > -1.5", true, a win -- for ANY Over
+          // prop where the real value landed anywhere between 0 and the
+          // line's own magnitude, not just this one case. Same bug existed
+          // in the generic STAT_SPECS path below (points/rebounds/assists/
+          // etc, MLB+NBA+WNBA) -- fixed there too, same commit.
           const line = Number(pick.line);
+          const threshold = Math.abs(line);
           const isOver = normalize(pick.selection) === 'over';
           const isUnder = normalize(pick.selection) === 'under';
           if (!isOver && !isUnder) {
             return { grade: null, note: `Selection "${pick.selection}" isn't a recognized Over/Under call -- needs manual review.` };
           }
-          if (value === line) return { grade: 'push', note: null };
-          const won = isOver ? value > line : value < line;
+          if (value === threshold) return { grade: 'push', note: null };
+          const won = isOver ? value > threshold : value < threshold;
           return { grade: won ? 'win' : 'loss', note: null };
         }
         // result.status === 'not_found' -- returned directly here rather
@@ -1006,7 +1020,18 @@ Deno.serve(async (req) => {
         return { grade: null, note: `Found "${pick.prop_player}" but couldn't read a real value for "${pick.prop_stat}" from the box score -- needs manual review.` };
       }
 
+      // CONFIRMED REAL BUG, direct report 2026-08-30 (same fix as the Total
+      // Bases/Singles branch above, same commit): this project's own
+      // convention stores an Over prop's line as a NEGATIVE number (e.g.
+      // -1.5 for "Over 1.5") -- comparing against that raw signed value
+      // instead of its absolute value meant "value > line" was really
+      // "value > -1.5", true for basically any real value (0, 1, 2...),
+      // silently grading a real Over loss as a win whenever the true stat
+      // landed between 0 and the line's own magnitude. Affects every
+      // prop stat routed through this generic path -- points/rebounds/
+      // assists/etc across MLB, NBA, and WNBA, not just Total Bases.
       const line = Number(pick.line);
+      const threshold = Math.abs(line);
       const isOver = normalize(pick.selection) === 'over';
       const isUnder = normalize(pick.selection) === 'under';
       if (!isOver && !isUnder) {
@@ -1020,8 +1045,8 @@ Deno.serve(async (req) => {
       // registration, regardless of which spec/group actually supplied
       // the graded value.
       const matchedName = allMatches[0] ? allMatches[0].displayName : pick.prop_player;
-      if (value === line) return { grade: 'push', note: null, matchedName };
-      const won = isOver ? value > line : value < line;
+      if (value === threshold) return { grade: 'push', note: null, matchedName };
+      const won = isOver ? value > threshold : value < threshold;
       return { grade: won ? 'win' : 'loss', note: null, matchedName };
     }
 
