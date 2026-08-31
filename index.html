@@ -2259,9 +2259,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <div style="align-self:flex-end;">
             <button class="ghost" id="allTimeCapperAnalysisBtn">All time</button>
           </div>
+          <div style="align-self:flex-end;">
+            <button class="ghost" id="viewPicksCapperAnalysisBtn" type="button">View individual picks (new tab)</button>
+          </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           "Total" counts every pick as its own data point. "Unique" collapses picks that are the exact same bet on the exact same game (same date, sport, bet type, selection, and line) down to one — so if five cappers all picked "Chiefs -6," that's 5 total picks but 1 unique bet. Also broken down by sport and by bet type, so you can see where accuracy is actually strongest, not just overall.
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Direct request 2026-08-31: "not where I would look for it if I wanted to build a report on an individual capper... we don't have to jump to another tab." "View individual picks" opens the exact same detailed, sortable/filterable picks table as the Picks tab's own "open in new tab" — same Capper/Sport/date-range filters set above, no need to reselect them somewhere else.
         </div>
       </div>
     </div>
@@ -2301,9 +2307,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <div style="align-self:flex-end;">
             <button class="ghost" id="allTimeCapperPatternsBtn">All time</button>
           </div>
+          <div style="align-self:flex-end;">
+            <button class="ghost" id="viewPicksCapperPatternsBtn" type="button">View individual picks (new tab)</button>
+          </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           Direct request 2026-08-31: a summary of what one capper actually bets on, not the full sport/bet-type breakdown Capper Analysis already covers — top teams/players by volume (each with its own win %), a Sport + Bet Type mix, and, for Player Props, how often they call Over vs Under. One capper at a time; there's no single "subject" to summarize across a blend of everyone.
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          "View individual picks" opens the same detailed, sortable/filterable picks table as the Picks tab's own "open in new tab," using the Capper/Sport/date-range filters set above.
         </div>
       </div>
     </div>
@@ -14986,6 +14998,41 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     runCapperAnalysis();
   });
 
+  // Direct request 2026-08-31: "not where I would look for it if I wanted
+  // to build a report on an individual capper... we don't have to jump to
+  // another tab." Opens the exact same detailed picks table as the Picks
+  // tab's own "open in new tab" (same columns, same sort/filter/inline-
+  // edit behavior), driven by whatever Capper/Sport/date-range filters are
+  // already set in the calling report's own panel -- no separate dropdown
+  // to line back up elsewhere. Shared by both Capper Analysis and Capper
+  // Betting Patterns' own "View individual picks" buttons below.
+  async function viewPicksForCapperFilters(capperSelId, sportSelId, fromId, toId) {
+    const capperId = $(capperSelId).value;
+    const sportId = $(sportSelId).value;
+    const from = $(fromId).value;
+    const to = $(toId).value;
+    const capperName = capperId ? ($(capperSelId).selectedOptions[0]?.textContent || '') : 'All cappers';
+    const sportName = sportId ? ($(sportSelId).selectedOptions[0]?.textContent || '') : 'All sports';
+    const summaryParts = [capperName, sportName];
+    summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
+
+    let query = 'picks?select=id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,grading_status,grading_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc';
+    if (capperId) query += `&capper_id=eq.${capperId}`;
+    if (sportId) query += `&sport_id=eq.${sportId}`;
+    if (from) query += `&event_date=gte.${from}`;
+    if (to) query += `&event_date=lte.${to}`;
+
+    try {
+      const picks = await restAllPages(query);
+      if (!picks.length) { alert('No picks match these filters.'); return; }
+      openAllPicksTab(picks, summaryParts.join(' · '), query);
+    } catch (e) {
+      alert('Could not load picks: ' + e.message);
+    }
+  }
+  $('viewPicksCapperAnalysisBtn').addEventListener('click', () =>
+    viewPicksForCapperFilters('capperAnalysisCapper', 'capperAnalysisSport', 'capperAnalysisFrom', 'capperAnalysisTo'));
+
   // Callback entry point for the Top/Bottom Cappers pop-out tab's "Analysis"
   // button — same underlying report as runCapperAnalysis, but driven by
   // explicit arguments (a specific capper, plus whatever sport/date filter
@@ -15162,6 +15209,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     $('capperPatternsTo').value = '';
     runCapperPatterns();
   });
+  $('viewPicksCapperPatternsBtn').addEventListener('click', () =>
+    viewPicksForCapperFilters('capperPatternsCapper', 'capperPatternsSport', 'capperPatternsFrom', 'capperPatternsTo'));
 
   // ---------- Duplicate pick checker (internal) ----------
   $('toggleDupCheckBtn').addEventListener('click', () => {
@@ -21555,7 +21604,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 406; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 407; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
