@@ -20154,6 +20154,31 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const propPlayerRaw = row.prop_player || (isPropBet ? row.selection : '') || '';
     if (isPropBet && !propStatRaw) errors.push('Player Prop rows need a stat (e.g. Strikeouts, Points) in a prop_stat or stat column');
 
+    // CONFIRMED REAL BUG, direct report 2026-08-31: propPlayerRaw above
+    // falls back to row.selection for player props (correct -- lots of
+    // pasted data only has one column with the player's name in it), but
+    // the row's stored `selection` was then ALSO left as that same raw
+    // value -- the player's own name -- instead of being computed as
+    // "Over"/"Under". Every real stat-line prop (Strikeouts, Points, etc.)
+    // needs Selection to be the Over/Under call, exactly like the single
+    // Add Pick form's own isProp branch (negative Line = Over, positive =
+    // Under) and exactly like this same page's own Bulk Import instructions
+    // already document. Passing the player's name through instead meant
+    // every one of these rows failed grading with "isn't a recognized
+    // Over/Under call", 100% of the time, no matter how correct the rest
+    // of the row was. Golf's no-Line/outright prop stats keep their
+    // existing Selection handling untouched -- this only computes
+    // Over/Under when there's an actual numeric Line to read the sign of.
+    let propSelection = row.selection;
+    let propLineOverride = null;
+    if (isPropBet && propStatRaw && !isGolfMatchupStat(propStatRaw) && !isGolfOutrightStat(propStatRaw)) {
+      const lineNum = row.line !== undefined && row.line !== '' ? Number(row.line) : NaN;
+      if (!isNaN(lineNum)) {
+        propSelection = lineNum < 0 ? 'Over' : 'Under';
+        propLineOverride = Math.abs(lineNum);
+      }
+    }
+
     // Team-name typo check -- only applies to non-prop, team-based
     // selections, and only once we actually have registered teams for
     // this sport to check against. Catches exactly the kind of thing that
@@ -20216,8 +20241,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         capper_id: capper.id,
         sport_id: sport.id,
         bet_type_id: betType.id,
-        selection: row.selection,
-        line: row.line ? Number(row.line) : null,
+        selection: propSelection,
+        line: propLineOverride !== null ? propLineOverride : (row.line ? Number(row.line) : null),
         home_away: homeAway || null,
         doubleheader_game: doubleheaderGame,
         opening_odds: row.odds ? Number(row.odds) : null,
@@ -21328,7 +21353,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 404; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 405; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
