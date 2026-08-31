@@ -12,8 +12,21 @@
 
 const FANDUEL_BOOK_ID = '23';
 
+// CONFIRMED REAL BUG, direct report 2026-08-30 (same root cause proven in
+// grade_picks_espn_backfill against a real case: "Teoscar Hernandez"
+// Total Bases came back "no player found" despite genuinely playing, MLB
+// Stats API spells it "Teoscar Hernández"): stripping any non-[a-z0-9]
+// character outright deletes an accented letter instead of folding it to
+// its plain equivalent, so an accented team/sport name never matches a
+// plain-ASCII-typed one. NFD-decompose-then-strip-diacritics first, same
+// as every other normalize() in this project.
 function normalize(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+  return s
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 Deno.serve(async (req) => {

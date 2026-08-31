@@ -44,8 +44,24 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// CONFIRMED REAL BUG, direct report 2026-08-30 (same root cause proven in
+// grade_picks_espn_backfill against a real case: "Teoscar Hernandez"
+// Total Bases came back "no player found" despite genuinely playing, MLB
+// Stats API spells it "Teoscar Hernández"): stripping any non-[a-z0-9]
+// character outright deletes an accented letter instead of folding it to
+// its plain equivalent -- a real risk here specifically, since NHL rosters
+// carry plenty of accented European names (Pastrnak/Pastrňák, Bäckström,
+// Rantanen, etc.) that this file compares directly against a plain-typed
+// pick. Same fix already ported to validate-mlb/nba/wnba-player-txt;
+// this sibling file was simply missed. NFD-decompose-then-strip-
+// diacritics first, same as every other normalize() in this project.
 function normalize(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+  return s
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 // Same "first initial + last name" fix as validate-mlb-player-txt -- a
