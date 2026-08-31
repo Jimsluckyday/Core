@@ -122,8 +122,27 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// CONFIRMED REAL BUG, direct report 2026-08-30: "Teoscar Hernandez" (Total
+// Bases prop, real Dodgers game 2025-06-05) came back "no player found"
+// even though he genuinely played -- confirmed directly against the real
+// MLB Stats API box score, which spells his name "Teoscar Hernández" (with
+// the accent). This function stripped ANY non-[a-z0-9] character outright
+// instead of converting an accented letter to its plain equivalent first,
+// so "Hernández" normalized to "hernndez" (the á just vanishes) while the
+// pick's own plain-ASCII-typed "Hernandez" normalized to "hernandez" --
+// one letter short of matching, silently, on every accented MLB name.
+// Every other normalize() in this project's other files already does the
+// NFD-decompose-then-strip-diacritics step first; this file's own copy
+// was simply missing it. Affects every player-name comparison in this
+// file, not just the MLB Stats API path -- a pure fix, nothing here ever
+// benefited from treating an accented letter as a different character.
 function normalize(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+  return s
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 // Direct request 2026-08-22, following a real case (New York Yankees @
