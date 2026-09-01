@@ -8743,7 +8743,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </table>`;
   }
 
-  async function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin, hideComplete, missingChecked, missingCheckedIds) {
+  async function openAllPicksTab(picks, filterSummary, sourceQuery, existingWin, hideComplete, missingChecked, missingCheckedIds, highlightLegId) {
     const win = existingWin || window.open('', '_blank');
     if (!win) {
       alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
@@ -8918,6 +8918,14 @@ var __filterSummary = ${JSON.stringify(filterSummary)};
 var __hideComplete = ${hideComplete ? 'true' : 'false'};
 var __missingChecked = ${JSON.stringify(missingChecked || null)};
 var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
+// Direct request 2026-08-31: "I still don't like how Parlays throw back
+// when I try to edit them as it has me editing the parent leg so I'm
+// unsure what to edit." Opening a flagged LEG's parent (see
+// openAutomationPickEditor's own comment for why the parent, not the
+// leg, opens) gave context but no pointer to which of the parent's own
+// legs actually had the problem -- set only by that one caller, so this
+// is a no-op everywhere else "All Picks" gets opened.
+var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 (function() {
   const table = document.getElementById('dataTable');
   if (!table) return;
@@ -9790,6 +9798,41 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       }
     });
   });
+
+  // Direct request 2026-08-31: auto-expand and point at the SPECIFIC leg
+  // that was actually flagged, instead of leaving it to be found by hand
+  // among however many legs this parlay has. Simulates the same click a
+  // person would make on the (one, since this only ever runs from
+  // openAutomationPickEditor opening a single parent row) toggle button
+  // above, then polls for that leg's own Edit button to appear (its
+  // handler above is async) before scrolling to and highlighting it.
+  // Never auto-clicks Edit itself -- that opens an alert() on the main
+  // tab, which firing unprompted on page load would be jarring; this only
+  // gets the right leg into view with nothing left to hunt for.
+  if (__highlightLegId) {
+    const firstToggle = document.querySelector('button.parlay-legs-toggle');
+    if (firstToggle) {
+      firstToggle.click();
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
+        const editBtn = document.querySelector('[data-leg-edit="' + __highlightLegId + '"]');
+        if (editBtn) {
+          clearInterval(poll);
+          const li = editBtn.closest('li');
+          if (li) {
+            li.style.outline = '2px solid #a3730a';
+            li.style.background = 'rgba(163,115,10,0.12)';
+            li.style.borderRadius = '3px';
+            li.style.padding = '3px 4px';
+            li.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+        } else if (attempts > 30) {
+          clearInterval(poll); // gave up after ~4.5s -- leg list may have failed to load, already alerted separately above
+        }
+      }, 150);
+    }
+  }
 
   document.querySelectorAll('button.edit-odds-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -11350,15 +11393,28 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       const rows = await rest(`picks?id=eq.${pickId}&select=${AUTOMATION_PICK_EDIT_SELECT}`);
       let pick = rows && rows[0];
       if (!pick) throw new Error('Pick not found -- it may have been deleted.');
+      // Direct report 2026-08-31: "I still don't like how Parlays throw
+      // back when I try to edit them as it has me editing the parent leg
+      // so I'm unsure what to edit." Redirecting to the parent (below)
+      // still gives the useful "see every leg" context the 2026-08-22
+      // request asked for, but nothing pointed at WHICH leg was actually
+      // the one flagged -- highlightLegId (read by openAllPicksTab's own
+      // popup script) auto-expands the "legs" toggle and scrolls to/
+      // highlights this exact one instead of leaving it to be found by
+      // hand.
+      let highlightLegId = null;
       if (pick.is_parlay_leg) {
         const parentLinks = await rest(`parlay_legs?select=parlay_pick_id&leg_pick_id=eq.${pickId}`);
         const parentId = parentLinks && parentLinks[0] && parentLinks[0].parlay_pick_id;
         if (parentId) {
           const parentRows = await rest(`picks?id=eq.${parentId}&select=${AUTOMATION_PICK_EDIT_SELECT}`);
-          if (parentRows && parentRows[0]) pick = parentRows[0];
+          if (parentRows && parentRows[0]) {
+            pick = parentRows[0];
+            highlightLegId = pickId;
+          }
         }
       }
-      await openAllPicksTab([pick], `Editing: ${pick.cappers ? pick.cappers.name : 'unknown capper'} — ${pick.selection}`, undefined, undefined, false);
+      await openAllPicksTab([pick], `Editing: ${pick.cappers ? pick.cappers.name : 'unknown capper'} — ${pick.selection}`, undefined, undefined, false, undefined, undefined, highlightLegId);
     } catch (e) {
       alert('Could not open this pick: ' + e.message);
     } finally {
@@ -22012,7 +22068,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 415; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 416; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
