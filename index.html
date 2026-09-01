@@ -2262,12 +2262,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <div style="align-self:flex-end;">
             <button class="ghost" id="viewPicksCapperAnalysisBtn" type="button">View individual picks (new tab)</button>
           </div>
+          <div style="align-self:flex-end;">
+            <button class="ghost" id="viewScorecardCapperAnalysisBtn" type="button">View scorecard summary (new tab)</button>
+          </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           "Total" counts every pick as its own data point. "Unique" collapses picks that are the exact same bet on the exact same game (same date, sport, bet type, selection, and line) down to one — so if five cappers all picked "Chiefs -6," that's 5 total picks but 1 unique bet. Also broken down by sport and by bet type, so you can see where accuracy is actually strongest, not just overall.
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Direct request 2026-08-31: "not where I would look for it if I wanted to build a report on an individual capper... we don't have to jump to another tab." "View individual picks" opens the exact same detailed, sortable/filterable picks table as the Picks tab's own "open in new tab" — same Capper/Sport/date-range filters set above, no need to reselect them somewhere else.
         </div>
       </div>
     </div>
@@ -2310,12 +2310,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <div style="align-self:flex-end;">
             <button class="ghost" id="viewPicksCapperPatternsBtn" type="button">View individual picks (new tab)</button>
           </div>
+          <div style="align-self:flex-end;">
+            <button class="ghost" id="viewScorecardCapperPatternsBtn" type="button">View scorecard summary (new tab)</button>
+          </div>
         </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Direct request 2026-08-31: a summary of what one capper actually bets on, not the full sport/bet-type breakdown Capper Analysis already covers — top teams/players by volume (each with its own win %), a Sport + Bet Type mix, and, for Player Props, how often they call Over vs Under. One capper at a time; there's no single "subject" to summarize across a blend of everyone.
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          "View individual picks" opens the same detailed, sortable/filterable picks table as the Picks tab's own "open in new tab," using the Capper/Sport/date-range filters set above.
+          Top teams/players by volume, a Sport + Bet Type mix, and Player Prop Over/Under lean. One capper at a time.
         </div>
       </div>
     </div>
@@ -15033,6 +15033,164 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   $('viewPicksCapperAnalysisBtn').addEventListener('click', () =>
     viewPicksForCapperFilters('capperAnalysisCapper', 'capperAnalysisSport', 'capperAnalysisFrom', 'capperAnalysisTo'));
 
+  // Direct request 2026-08-31: "I would prefer a summary not an editable
+  // source... the day, the picks, the result and maybe his score from his
+  // scorecard as well as the overall scorecard for that pick." "His score"
+  // is this capper's own Publish Ranking components (overall/bet-type/
+  // streak/tier -- everything that's purely about HIM), "overall score" is
+  // that same total PLUS confluence (points from other cappers who
+  // independently agreed) -- the actual number Publish Ranking scores him
+  // with. Reuses the exact same point-in-time scoring engine as Formula
+  // Backtest (same formula, same "only what was knowable before this pick"
+  // discipline) rather than inventing a second, potentially-drifting copy
+  // of this math -- confluence still needs EVERY capper's picks on the
+  // same game to compute correctly, so this fetches the whole filtered
+  // pool and only DISPLAYS the one capper's own rows.
+  function pickDisplayLabel(p) {
+    const betTypeName = (p.bet_types && p.bet_types.name) || '';
+    const btNorm = betTypeName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const line = (p.line === null || p.line === undefined || p.line === '') ? null : Number(p.line);
+    if (p.prop_player) {
+      const sel = (p.selection || '').trim();
+      const selNorm = sel.toLowerCase();
+      const isOverUnder = selNorm === 'over' || selNorm === 'under';
+      const tail = (isOverUnder && line !== null) ? `${sel} ${Math.abs(line)}` : sel;
+      return `${p.prop_player} — ${p.prop_stat || ''}${tail ? ' ' + tail : ''}`.replace(/\s+/g, ' ').trim();
+    }
+    if (line === null || btNorm === 'moneyline') return p.selection || '';
+    if (btNorm.startsWith('spread')) return `${p.selection} ${line >= 0 ? '+' : ''}${line}`;
+    // Total-family (Total, Team Total, First5/First7, Total (Sets), Over/
+    // Under variants, etc.) -- same negative=Over/positive=Under convention
+    // used everywhere else in this project.
+    return `${p.selection} ${line < 0 ? 'Over' : 'Under'} ${Math.abs(line)}`;
+  }
+
+  async function computeCapperScorecardRows(sportFilter, from, to) {
+    await loadScoringConfig(); // always score with whatever formula is currently saved
+    let query = "picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,created_at,result,pick_tier,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=in.(win,loss,push)&order=event_date.asc,created_at.asc";
+    if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+    if (from) query += `&event_date=gte.${from}`;
+    if (to) query += `&event_date=lte.${to}`;
+    const picksRaw = await restAllPages(query);
+    const picks = picksRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
+
+    const overallByCapper = {}, broadBetTypeByCapper = {}, sportBetTypeByCapper = {}, tierByCapper = {}, historyByCapper = {};
+    const scored = picks.map(p => {
+      const cap = p.capper_id;
+      const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
+      const tier = Number(p.pick_tier) || 0;
+      const o = overallByCapper[cap] || { wins: 0, losses: 0 };
+      const bbt = broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+      const sbt = sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+      const t = tierByCapper[`${cap}::${tier}`] || { wins: 0, losses: 0 };
+      const hist = historyByCapper[cap] || [];
+
+      const overallAdj = adjustedWinPct(o.wins, o.losses);
+      const broadBetTypeAdj = adjustedWinPct(bbt.wins, bbt.losses);
+      const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
+      const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
+      const streak = computeStreak(hist);
+      const base = scorePickBase(overallAdj, betTypeAdj, streak, tier, tierAdjWinPct, t.wins, t.losses);
+      const entry = { pick: p, overallAdj, base, gameKey: backtestGameKey(p) };
+
+      overallByCapper[cap] = { wins: o.wins + (p.result === 'win' ? w : 0), losses: o.losses + (p.result === 'loss' ? w : 0) };
+      broadBetTypeByCapper[`${cap}::${p.bet_type_id}`] = { wins: bbt.wins + (p.result === 'win' ? w : 0), losses: bbt.losses + (p.result === 'loss' ? w : 0) };
+      sportBetTypeByCapper[`${cap}::${p.sport_id}::${p.bet_type_id}`] = { wins: sbt.wins + (p.result === 'win' ? w : 0), losses: sbt.losses + (p.result === 'loss' ? w : 0) };
+      if (tier !== 0) tierByCapper[`${cap}::${tier}`] = { wins: t.wins + (p.result === 'win' ? w : 0), losses: t.losses + (p.result === 'loss' ? w : 0) };
+      historyByCapper[cap] = [...hist, { result: p.result, event_date: p.event_date, created_at: p.created_at }];
+      return entry;
+    });
+
+    const byGameKey = {};
+    scored.forEach(e => { (byGameKey[e.gameKey] = byGameKey[e.gameKey] || []).push(e); });
+
+    // Legs excluded from the OUTPUT here, same as Formula Backtest -- a
+    // parlay leg is never independently scored/published on its own, so it
+    // has no real standalone "His score"/"Overall score" of its own. It
+    // still fed the running stats and confluence above at reduced weight.
+    return scored.filter(e => !e.pick.is_parlay_leg).map(e => {
+      const group = byGameKey[e.gameKey];
+      const others = group.filter(o => o.pick.capper_id !== e.pick.capper_id);
+      const confPts = confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) })));
+      const overallScore = Math.round((e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + e.base.tierCalibrationPts + confPts) * 10) / 10;
+      const hisScore = Math.round((overallScore - confPts) * 10) / 10;
+      return { pick: e.pick, hisScore, overallScore };
+    });
+  }
+
+  function openCapperScorecardSummaryTab(rows, filterSummary) {
+    const sorted = [...rows].sort((a, b) => a.pick.event_date === b.pick.event_date
+      ? (a.pick.created_at || '').localeCompare(b.pick.created_at || '')
+      : (a.pick.event_date < b.pick.event_date ? -1 : 1));
+    let running = 0;
+    let hisSum = 0, overallSum = 0;
+    const bodyRows = sorted.map(r => {
+      running += r.overallScore;
+      hisSum += r.hisScore;
+      overallSum += r.overallScore;
+      const betTypeName = (r.pick.bet_types && r.pick.bet_types.name) || 'Unknown';
+      return `<tr>
+        <td>${escapeHtml(r.pick.event_date || '')}</td>
+        <td>${escapeHtml(pickDisplayLabel(r.pick))}</td>
+        <td>${escapeHtml(betTypeName)}</td>
+        <td><span class="stamp ${r.pick.result}">${escapeHtml(r.pick.result || '')}</span></td>
+        <td>${r.hisScore}</td>
+        <td>${r.overallScore}</td>
+        <td>${Math.round(running * 10) / 10}</td>
+      </tr>`;
+    }).join('');
+    const record = tallyRows(sorted.map(r => r.pick));
+
+    const win = window.open('', '_blank');
+    if (!win) { alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.'); return; }
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Capper Scorecard Summary</title>
+<style>
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 28px; max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 20px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 10px; }
+  .picks-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .picks-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #55584d; border-bottom: 1.5px solid #22281f; padding: 8px 6px; }
+  .picks-table td { padding: 7px 6px; border-bottom: 1px dashed #b9b09a; }
+  .picks-table tfoot td { font-weight: bold; border-top: 1.5px solid #22281f; border-bottom: none; }
+  .stamp { display: inline-block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 20px; color: #fff; }
+  .stamp.win { background: #2d6a4f; } .stamp.loss { background: #8a2f3a; } .stamp.push { background: #6b6456; }
+</style>
+</head><body>
+  <h1>Capper Scorecard Summary <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
+  <div style="font-size:11px;color:#55584d;margin-bottom:6px;">${escapeHtml(filterSummary)}</div>
+  <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${record.picks} picks · ${record.wins}-${record.losses}-${record.pushes} · ${record.win_pct !== null ? record.win_pct + '% win rate' : '—'}</div>
+  <table class="picks-table">
+    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Result</th><th>His score</th><th>Overall score</th><th>Running total</th></tr></thead>
+    <tbody>${bodyRows || '<tr><td colspan="7">No graded picks match these filters.</td></tr>'}</tbody>
+    <tfoot><tr><td colspan="4">Totals</td><td>${Math.round(hisSum * 10) / 10}</td><td>${Math.round(overallSum * 10) / 10}</td><td>${Math.round(running * 10) / 10}</td></tr></tfoot>
+  </table>
+  ${csvExportPopoutScript('capper-scorecard-summary')}
+</body></html>`);
+    win.document.close();
+  }
+
+  async function viewScorecardSummaryForFilters(capperSelId, sportSelId, fromId, toId) {
+    const capperId = $(capperSelId).value;
+    if (!capperId) { alert('Choose a capper first — this scorecard summary is built for one capper at a time.'); return; }
+    const sportId = $(sportSelId).value;
+    const from = $(fromId).value;
+    const to = $(toId).value;
+    const capperName = $(capperSelId).selectedOptions[0]?.textContent || '';
+    const sportName = sportId ? ($(sportSelId).selectedOptions[0]?.textContent || '') : 'All sports';
+    const summaryParts = [capperName, sportName];
+    summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
+
+    try {
+      const allRows = await computeCapperScorecardRows(sportId, from, to);
+      const rows = allRows.filter(r => r.pick.capper_id === capperId);
+      openCapperScorecardSummaryTab(rows, summaryParts.join(' · '));
+    } catch (e) {
+      alert('Could not build scorecard summary: ' + e.message);
+    }
+  }
+  $('viewScorecardCapperAnalysisBtn').addEventListener('click', () =>
+    viewScorecardSummaryForFilters('capperAnalysisCapper', 'capperAnalysisSport', 'capperAnalysisFrom', 'capperAnalysisTo'));
+
   // Callback entry point for the Top/Bottom Cappers pop-out tab's "Analysis"
   // button — same underlying report as runCapperAnalysis, but driven by
   // explicit arguments (a specific capper, plus whatever sport/date filter
@@ -15104,9 +15262,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <thead><tr><th>Team / player</th><th>Picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
         <tbody>${topSubjects.map(g => statsRowHtml(escapeHtml(g.label), g.stats)).join('') || '<tr><td colspan="7">No data.</td></tr>'}</tbody>
       </table>
-      <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
-        Showing the top ${topSubjects.length} of ${subjectGroups.length} distinct team/player subjects, ranked by volume. Player Props are grouped by Prop Player (not the Over/Under call); everything else is grouped by Selection. Parlay summary rows are excluded here — there's no single real subject for a whole parlay — but are still counted in Sport + Bet Type below.
-      </div>`;
+      <div style="font-size:10px;color:#55584d;margin-bottom:20px;">Top ${topSubjects.length} of ${subjectGroups.length}.</div>`;
 
     // ---- Sport + Bet Type mix ----
     const byCombo = groupRowsBy(
@@ -15139,12 +15295,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <tbody>
           ${statsRowHtml('Over', tallyRows(overPicks))}
           ${statsRowHtml('Under', tallyRows(underPicks))}
-          ${otherPropPicks.length ? statsRowHtml('Other / not a recognized Over-Under call', tallyRows(otherPropPicks)) : ''}
+          ${otherPropPicks.length ? statsRowHtml('Other', tallyRows(otherPropPicks)) : ''}
         </tbody>
-      </table>
-      <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
-        ${propPicks.length} total Player Prop picks — ${Math.round(1000 * overPicks.length / propPicks.length) / 10}% Over, ${Math.round(1000 * underPicks.length / propPicks.length) / 10}% Under. A heavy lean either way, especially paired with a weak win % on that side, is worth a second look.
-      </div>` : `
+      </table>` : `
       <p class="stub-title" style="margin-bottom:8px;">Player Prop lean: Over vs Under</p>
       <div style="font-size:11px;color:#55584d;margin-bottom:20px;">No Player Prop picks in this range.</div>`;
 
@@ -15211,6 +15364,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   });
   $('viewPicksCapperPatternsBtn').addEventListener('click', () =>
     viewPicksForCapperFilters('capperPatternsCapper', 'capperPatternsSport', 'capperPatternsFrom', 'capperPatternsTo'));
+  $('viewScorecardCapperPatternsBtn').addEventListener('click', () =>
+    viewScorecardSummaryForFilters('capperPatternsCapper', 'capperPatternsSport', 'capperPatternsFrom', 'capperPatternsTo'));
 
   // ---------- Duplicate pick checker (internal) ----------
   $('toggleDupCheckBtn').addEventListener('click', () => {
@@ -21604,7 +21759,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 407; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 408; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
