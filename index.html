@@ -2360,6 +2360,34 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- PLAYER TEAM DRIFT CHECK (internal only) -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Player team check <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— internal, not public</span>
+        <button class="ghost small" id="togglePlayerTeamDriftBtn">Show check</button>
+      </p>
+      <div id="playerTeamDriftPanel" style="display:none;">
+        <div class="row">
+          <div class="field">
+            <label>Sport</label>
+            <select id="ptdSport">
+              <option value="">MLB + NBA + WNBA</option>
+              <option value="MLB">MLB only</option>
+              <option value="NBA">NBA only</option>
+              <option value="WNBA">WNBA only</option>
+            </select>
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="runPlayerTeamDriftBtn">Run check</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Checks every player already on file with a confirmed team against that team's CURRENT real roster, and flags anyone no longer found there (trade, release, signed elsewhere) for you to review — never updates anything automatically. Only covers players who've actually had a graded Player Prop pick (that's what puts them on file with a team in the first place), not full league rosters. NBA/WNBA can take a bit longer since it scans recent scoreboards to resolve each team.
+        </div>
+        <div id="ptdWrap"></div>
+      </div>
+    </div>
+
     <!-- MISSING DATA / DATA VALIDATION TOOL (internal only -- unified finder for any incomplete field on any pick, regardless of grading status. Replaces the old separate Odds Exceptions and Start Time Exceptions tools -- both were the same idea (find picks with a hole in a specific field) split across separate panels, which made it easy to forget one existed while chasing the other. RENAMED 2026-08-30, direct request: "it's not really looking for missing info so much as it is validating what's there to be ready to move on" -- now also the documented pre-publish gate, linked from the Automation tools panel's new step 4 (id="goDataValidationBtn"), so a day's picks get confirmed complete before they ever go live, not just checked for missing odds. IDs left unchanged (mdCheckXxx, findMissingDataBtn, etc.) -- this is a label/positioning change, not a rebuild. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -15604,6 +15632,79 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   $('runDupScanBtn').addEventListener('click', runDupScan);
 
+  // ---------- Player team drift check (internal, read-only) ----------
+  // Direct request 2026-08-31: "a button that we can run to check that
+  // those players still play for those teams." Calls
+  // check-player-team-drift, which re-checks every known_players row that
+  // already has a confirmed team (see that function's own header for how
+  // it gets there in the first place -- only players who've actually had
+  // a graded Player Prop pick, never a full-league roster pull) against
+  // that team's real current roster. Purely a report -- this never writes
+  // anything back itself.
+  $('togglePlayerTeamDriftBtn').addEventListener('click', () => {
+    const panel = $('playerTeamDriftPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('togglePlayerTeamDriftBtn').textContent = showing ? 'Show check' : 'Hide check';
+  });
+
+  async function runPlayerTeamDrift() {
+    const sportName = $('ptdSport').value;
+    const wrap = $('ptdWrap');
+    const btn = $('runPlayerTeamDriftBtn');
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    wrap.innerHTML = '<div class="empty-state">Checking current rosters -- NBA/WNBA can take a bit since it scans recent scoreboards to resolve each team...</div>';
+    try {
+      const qs = sportName ? `?sport=${encodeURIComponent(sportName)}` : '';
+      const data = await invokeEdgeFunction('check-player-team-drift', qs);
+      const sportsOut = data.sports || [];
+      if (!sportsOut.length) {
+        wrap.innerHTML = `<div class="empty-state">${escapeHtml(data.error || 'No results.')}</div>`;
+        return;
+      }
+      wrap.innerHTML = sportsOut.map((s) => {
+        if (s.note) {
+          return `<p class="stub-title" style="margin-bottom:8px;">${escapeHtml(s.sport)}</p>
+            <div class="empty-state" style="margin-bottom:14px;">${escapeHtml(s.note)}</div>`;
+        }
+        const movedRows = (s.possibly_moved || []).map((p) => `<tr>
+            <td>${escapeHtml(p.name)}</td>
+            <td>${escapeHtml(p.last_known_team)}</td>
+            <td style="font-size:11px;color:#55584d;">${escapeHtml(p.reason)}</td>
+          </tr>`).join('');
+        const couldNotRows = (s.teams_could_not_check || []).map((t) => `<tr>
+            <td>${escapeHtml(t.team)}</td>
+            <td style="font-size:11px;color:#55584d;">${escapeHtml(t.reason)}</td>
+          </tr>`).join('');
+        return `
+          <p class="stub-title" style="margin-bottom:8px;">${escapeHtml(s.sport)}</p>
+          <div style="font-size:11px;margin-bottom:10px;">
+            ${(s.still_on_team || []).length} confirmed still on their known team &middot;
+            <strong style="color:${(s.possibly_moved || []).length ? 'var(--stamp-amber)' : 'inherit'};">${(s.possibly_moved || []).length} possibly moved</strong> &middot;
+            ${(s.teams_could_not_check || []).length} team(s) could not be checked
+          </div>
+          ${(s.possibly_moved || []).length ? `
+            <table class="picks-table" style="margin-bottom:14px;">
+              <thead><tr><th>Player</th><th>Last known team</th><th>Why flagged</th></tr></thead>
+              <tbody>${movedRows}</tbody>
+            </table>` : ''}
+          ${(s.teams_could_not_check || []).length ? `
+            <table class="picks-table" style="margin-bottom:14px;">
+              <thead><tr><th>Team</th><th>Why it couldn't be checked</th></tr></thead>
+              <tbody>${couldNotRows}</tbody>
+            </table>` : ''}
+        `;
+      }).join('');
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">${escapeHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Run check';
+    }
+  }
+  $('runPlayerTeamDriftBtn').addEventListener('click', runPlayerTeamDrift);
+
   // ---------- Verify upload against database (internal, read-only) ----------
   // Direct request 2026-08-28, prompted by the Iowa Kid Pix gap: a way to
   // sweep a file that was already uploaded and confirm every checkable
@@ -21894,7 +21995,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 412; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 413; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');

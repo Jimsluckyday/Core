@@ -271,14 +271,56 @@ Deno.serve(async (req) => {
       if (parts.length < 2) return { first: null, last: parts[0] };
       return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] };
     }
-    async function registerKnownPlayer(sportId: string, name: string | null | undefined) {
+    // Direct request 2026-08-31: "as we enter a player name and it fails
+    // we update it... once it passes both the player name check and team
+    // check we store it, so the next time... the player is in the system
+    // for something to check against... then we have a button... to check
+    // that those players still play for those teams." Deliberately does
+    // NOT trust the capper-typed prop_team field -- the real box score
+    // that already confirmed this player's IDENTITY (the whole reason
+    // registerKnownPlayer only ever fires post-grading, never at entry
+    // time) also names their real team for that game, which is a
+    // strictly stronger signal than typed text that could be stale or
+    // simply wrong even when spelled correctly. Fetched once per sport
+    // per run, not once per pick.
+    const ourTeamsCache: Record<string, { id: string; name: string }[]> = {};
+    async function getOurTeams(sportId: string) {
+      if (!(sportId in ourTeamsCache)) {
+        ourTeamsCache[sportId] = (await db(`teams?select=id,name&sport_id=eq.${sportId}`)) || [];
+      }
+      return ourTeamsCache[sportId];
+    }
+    // Same exact-then-unique-substring discipline as this file's own game-
+    // level team matching -- a genuine ambiguity (bare "New York" style
+    // collision) is skipped rather than guessed, since a wrong team_id is
+    // worse than no team_id at all for something meant to catch drift.
+    function findOurTeamId(rawTeamName: string, ourTeams: { id: string; name: string }[]): string | null {
+      const norm = normalize(rawTeamName);
+      const exact = ourTeams.find(t => normalize(t.name) === norm);
+      if (exact) return exact.id;
+      const substringMatches = ourTeams.filter(t => normalize(t.name).includes(norm) || norm.includes(normalize(t.name)));
+      return substringMatches.length === 1 ? substringMatches[0].id : null;
+    }
+    async function registerKnownPlayer(sportId: string, name: string | null | undefined, teamName?: string | null) {
       if (!name) return;
       try {
         const { first, last } = splitName(name);
+        const body: Record<string, unknown> = { sport_id: sportId, name, first_name: first, last_name: last };
+        if (teamName) {
+          const teamId = findOurTeamId(teamName, await getOurTeams(sportId));
+          if (teamId) {
+            body.team_id = teamId;
+            body.team_confirmed_at = new Date().toISOString();
+          }
+        }
+        // Switched from ignore-duplicates to merge-duplicates: a name
+        // already on file should still pick up a NEWER confirmed team
+        // (this is exactly how a trade/signing gets caught) instead of
+        // being frozen at whatever team it first registered under.
         await db('known_players', {
           method: 'POST',
-          headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-          body: JSON.stringify({ sport_id: sportId, name, first_name: first, last_name: last })
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(body)
         });
       } catch (_e) {
         // Silently skip -- see comment above.
@@ -837,9 +879,9 @@ Deno.serve(async (req) => {
     // handling) isn't ported here -- left as a known gap, since it's a
     // much rarer combination (two Total Bases/Singles props on the same
     // doubleheader player) than worth blocking this fix on.
-    async function findMlbStatsApiBatting(playerNorm: string, targetDateStr: string): Promise<{ batting: any; status: 'ok' | 'not_found' | 'not_final' | 'ambiguous' }> {
+    async function findMlbStatsApiBatting(playerNorm: string, targetDateStr: string): Promise<{ batting: any; teamName: string | null; status: 'ok' | 'not_found' | 'not_final' | 'ambiguous' }> {
       const games = await fetchMlbStatsApiGames(targetDateStr);
-      const matches: any[] = [];
+      const matches: { batting: any; teamName: string | null }[] = [];
       let foundNotFinal = false;
       for (const g of games) {
         const box = await fetchMlbStatsApiBoxscore(g.gamePk);
@@ -857,18 +899,27 @@ Deno.serve(async (req) => {
             const batting = p.stats && p.stats.batting;
             if (!batting || batting.plateAppearances === undefined) continue; // registered on roster, didn't actually play
             if (!g.isFinal) { foundNotFinal = true; continue; }
-            matches.push(batting);
+            // Direct request 2026-08-31: "as we enter a player name and it
+            // fails we update it... store it so the next time we go
+            // through this the player is in the system." team.team.name
+            // (e.g. "Miami Marlins", confirmed directly against a real
+            // boxscore) is the SAME real, verified game data already
+            // being used to confirm this player's identity -- reusing it
+            // for their team is free, and more trustworthy than the
+            // capper-typed prop_team field, which can be stale or simply
+            // wrong even when correctly spelled.
+            matches.push({ batting, teamName: (team.team && team.team.name) || null });
           }
         }
       }
-      if (!matches.length) return { batting: null, status: foundNotFinal ? 'not_final' : 'not_found' };
-      if (matches.length > 1) return { batting: null, status: 'ambiguous' };
-      return { batting: matches[0], status: 'ok' };
+      if (!matches.length) return { batting: null, teamName: null, status: foundNotFinal ? 'not_final' : 'not_found' };
+      if (matches.length > 1) return { batting: null, teamName: null, status: 'ambiguous' };
+      return { batting: matches[0].batting, teamName: matches[0].teamName, status: 'ok' };
     }
 
     async function gradePlayerProp(
       pick: any, sportNorm: 'mlb' | 'wnba' | 'nba', espnPath: string, games: any[], boxCache: Record<string, any>
-    ): Promise<{ grade: 'win' | 'loss' | 'push' | null; note: string | null; notFinal?: boolean; unsupported?: boolean; matchedName?: string }> {
+    ): Promise<{ grade: 'win' | 'loss' | 'push' | null; note: string | null; notFinal?: boolean; unsupported?: boolean; matchedName?: string; matchedTeamName?: string | null }> {
       const statNorm = normalize(pick.prop_stat || '');
       const playerNorm = normalize(pick.prop_player || '');
       if (!playerNorm) return { grade: null, note: 'No player name recorded on this pick -- needs manual grading.' };
@@ -905,9 +956,9 @@ Deno.serve(async (req) => {
           if (!isOver && !isUnder) {
             return { grade: null, note: `Selection "${pick.selection}" isn't a recognized Over/Under call -- needs manual review.` };
           }
-          if (value === threshold) return { grade: 'push', note: null };
+          if (value === threshold) return { grade: 'push', note: null, matchedTeamName: result.teamName };
           const won = isOver ? value > threshold : value < threshold;
-          return { grade: won ? 'win' : 'loss', note: null };
+          return { grade: won ? 'win' : 'loss', note: null, matchedTeamName: result.teamName };
         }
         // result.status === 'not_found' -- returned directly here rather
         // than falling through to the STAT_SPECS lookup below, which would
@@ -931,7 +982,7 @@ Deno.serve(async (req) => {
         let foundInAnyGame = false;
         let foundInNotFinalGame = false;
         let foundInVoidedGame = false;
-        const matches: { athleteId: string; displayName: string; gameId: string }[] = [];
+        const matches: { athleteId: string; displayName: string; gameId: string; teamName: string | null }[] = [];
         for (const g of games) {
           const completed = !!(g.status && g.status.type && g.status.type.completed);
           const gStatusName: string | null = (g.status && g.status.type && g.status.type.name) || null;
@@ -953,7 +1004,11 @@ Deno.serve(async (req) => {
                     else foundInNotFinalGame = true;
                     return;
                   }
-                  matches.push({ athleteId: String(a.athlete && a.athlete.id), displayName: rawDisplayName, gameId: g.id });
+                  // Direct request 2026-08-31: same real, verified box-
+                  // score team identity reused for roster tracking as the
+                  // MLB Stats API path above -- teamBlock.team.displayName
+                  // confirmed directly against a real NBA boxscore.
+                  matches.push({ athleteId: String(a.athlete && a.athlete.id), displayName: rawDisplayName, gameId: g.id, teamName: (teamBlock.team && teamBlock.team.displayName) || null });
                 }
               });
             });
@@ -983,9 +1038,9 @@ Deno.serve(async (req) => {
         if (!isOver && !isUnder) {
           return { grade: null, note: `Selection "${pick.selection}" isn't a recognized Over/Under call -- needs manual review.` };
         }
-        if (value === threshold) return { grade: 'push', note: null };
+        if (value === threshold) return { grade: 'push', note: null, matchedName: match.displayName, matchedTeamName: match.teamName };
         const won = isOver ? value > threshold : value < threshold;
-        return { grade: won ? 'win' : 'loss', note: null };
+        return { grade: won ? 'win' : 'loss', note: null, matchedName: match.displayName, matchedTeamName: match.teamName };
       }
 
       const STAT_SPECS_BY_SPORT: Record<'mlb' | 'wnba' | 'nba', Record<string, StatSpec[]>> = {
@@ -1001,7 +1056,7 @@ Deno.serve(async (req) => {
       let foundInAnyGame = false;
       let foundInNotFinalGame = false;
       let foundInVoidedGame = false;
-      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching'; displayName: string; gameId: string; startTime: string }[] = [];
+      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching'; displayName: string; gameId: string; startTime: string; teamName: string | null }[] = [];
       for (const g of games) {
         const completed = !!(g.status && g.status.type && g.status.type.completed);
         // Same postponed/canceled distinction as the team-game grading
@@ -1040,7 +1095,11 @@ Deno.serve(async (req) => {
                 allMatches.push({
                   stats: a.stats, keys: sg.keys, displayName: rawDisplayName,
                   group: (sportNorm === 'mlb' && sgIdx === 1) ? 'pitching' : 'batting',
-                  gameId: g.id, startTime: g.date
+                  gameId: g.id, startTime: g.date,
+                  // Direct request 2026-08-31: same real, verified box-
+                  // score team identity reused for roster tracking as the
+                  // MLB Stats API / 1st-quarter-points paths above.
+                  teamName: (teamBlock.team && teamBlock.team.displayName) || null
                 });
               }
             });
@@ -1157,9 +1216,10 @@ Deno.serve(async (req) => {
       // registration, regardless of which spec/group actually supplied
       // the graded value.
       const matchedName = allMatches[0] ? allMatches[0].displayName : pick.prop_player;
-      if (value === threshold) return { grade: 'push', note: null, matchedName };
+      const matchedTeamName = allMatches[0] ? allMatches[0].teamName : null;
+      if (value === threshold) return { grade: 'push', note: null, matchedName, matchedTeamName };
       const won = isOver ? value > threshold : value < threshold;
-      return { grade: won ? 'win' : 'loss', note: null, matchedName };
+      return { grade: won ? 'win' : 'loss', note: null, matchedName, matchedTeamName };
     }
 
     const overall = {
@@ -2043,7 +2103,7 @@ Deno.serve(async (req) => {
             }
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: result.grade, grading_status: 'graded', grading_note: null }) });
             sportResult.graded.push({ id: pick.id, selection: propLabel, result: result.grade });
-            await registerKnownPlayer(ourSport.id, result.matchedName || pick.prop_player);
+            await registerKnownPlayer(ourSport.id, result.matchedName || pick.prop_player, result.matchedTeamName);
             continue;
           }
 
