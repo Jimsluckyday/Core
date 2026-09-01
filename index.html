@@ -15177,7 +15177,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
   async function computeCapperScorecardRows(sportFilter, from, to) {
     await loadScoringConfig(); // always score with whatever formula is currently saved
-    let query = "picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,created_at,result,pick_tier,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=in.(win,loss,push)&order=event_date.asc,created_at.asc";
+    let query = "picks?select=id,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,event_date,created_at,result,pick_tier,raw_unit_size,is_parlay_leg,cappers(name),sports(name),bet_types(name)&result=in.(win,loss,push)&order=event_date.asc,created_at.asc";
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
@@ -15261,6 +15261,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${escapeHtml(pickDisplayLabel(r.pick))}</td>
         <td>${escapeHtml(betTypeName)}</td>
         <td>${tier || '—'}</td>
+        <td>${escapeHtml(r.pick.raw_unit_size || '—')}</td>
         <td><span class="stamp ${r.pick.result}">${escapeHtml(r.pick.result || '')}</span></td>
         <td>${r.score}</td>
         <td>${r.groupScore !== null ? r.groupScore : 'N/A'}</td>
@@ -15287,9 +15288,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   <h1>Capper Scorecard Summary <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
   <table class="picks-table">
-    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Tier</th><th>Result</th><th>His score</th><th>Group score</th></tr></thead>
-    <tbody>${bodyRows || '<tr><td colspan="7">No graded picks match these filters.</td></tr>'}</tbody>
-    <tfoot><tr><td colspan="4">Totals</td><td>${recordText}</td><td></td><td></td></tr></tfoot>
+    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Tier</th><th>Unit size</th><th>Result</th><th>His score</th><th>Group score</th></tr></thead>
+    <tbody>${bodyRows || '<tr><td colspan="8">No graded picks match these filters.</td></tr>'}</tbody>
+    <tfoot><tr><td colspan="5">Totals</td><td>${recordText}</td><td></td><td></td></tr></tfoot>
   </table>
   ${csvExportPopoutScript('capper-scorecard-summary')}
 </body></html>`);
@@ -22011,7 +22012,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 414; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 415; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
