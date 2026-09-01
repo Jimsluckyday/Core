@@ -6096,7 +6096,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // number ("2" -> "2U", a real unit count) -- appending it to a
         // capper's own named tier label just glues an unrelated letter
         // onto their wording.
-        const unitsText = topUnit ? `at ${escapeHtml(topUnit[0])}${/^-?\d+(\.\d+)?$/.test(topUnit[0]) ? 'U' : ''}` : 'no unit recorded';
+        // CONFIRMED REAL BUG, direct report 2026-08-31: a no-tier-signal
+        // capper (Sean Perry Wins) who rarely also flags a "Super Max
+        // Play" showed "(18) at Super Max Play" here even though only 5
+        // of his 18 Tier 0 picks actually carried that text -- the other
+        // 13 have no unit size recorded at all. group.length is every
+        // pick sharing this pick_tier, not every pick sharing this SPECIFIC
+        // unit size -- showing them together read as if all 18 were
+        // "Super Max Play." Now shows topUnit's own count instead, so a
+        // sparse special-play label never gets misread as the group's norm.
+        const unitsText = topUnit ? `${topUnit[1]} at ${escapeHtml(topUnit[0])}${/^-?\d+(\.\d+)?$/.test(topUnit[0]) ? 'U' : ''}` : 'no unit recorded';
         const reviewNotes = [...new Set(group.map(r => (r.tier_review_note || '').trim()).filter(Boolean))];
         const images = [...new Set(group.map(r => r.source_image).filter(Boolean))];
         return `<div style="margin-bottom:10px;">
@@ -8793,7 +8802,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
             const topUnit = [...unitCounts.entries()].sort((a, b) => b[1] - a[1])[0];
             // Same "no U on a named unit size" fix as the Tier Consistency
             // panel's own copy of this logic -- see that comment for why.
-            const unitsText = topUnit ? `at ${topUnit[0]}${/^-?\d+(\.\d+)?$/.test(topUnit[0]) ? 'U' : ''}` : 'no unit recorded';
+            // CONFIRMED REAL BUG, direct report 2026-08-31: same root
+            // cause as the Add Pick tier-history tool's own copy of this
+            // logic -- showing the whole tier's `total` next to a unit
+            // size that only SOME of those picks actually have reads as
+            // if all of them do (a no-tier-signal capper's rare "Super
+            // Max Play" picks showed as "(18) at Super Max Play" when
+            // only 5 of 18 carried that text). Shows topUnit's own count.
+            const unitsText = topUnit ? `${topUnit[1]} at ${topUnit[0]}${/^-?\d+(\.\d+)?$/.test(topUnit[0]) ? 'U' : ''}` : 'no unit recorded';
             return escapeHtml(`${label} : (${total}) ${unitsText}`);
           });
           // Joined with a real <br>, not escaped -- each line's own text was
@@ -21995,7 +22011,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 413; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 414; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
