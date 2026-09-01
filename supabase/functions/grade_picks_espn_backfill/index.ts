@@ -1558,6 +1558,22 @@ Deno.serve(async (req) => {
               continue;
             }
 
+            // Direct request 2026-08-31: "as we validate Tennis names
+            // they will appear in the database... I am doing manual
+            // checks and can make sure when on Flashscore resolving these
+            // picks to update the names in the system." Tennis never got
+            // the same known_players registration MMA already has, even
+            // though the exact same signal is available here -- a real,
+            // ESPN-confirmed COMPLETED match, both players' real names
+            // right on match.playerNames. Registered once per match here
+            // (before branching into the specific bet type below) covers
+            // every bet type on this match in one place, not just
+            // Moneyline. Both sides registered, not just whichever one
+            // this particular pick backed, same reasoning as MMA
+            // registering both fighters -- a completed match confirms
+            // BOTH names equally, regardless of which side was bet.
+            for (const n of match.playerNames) await registerKnownPlayer(ourSport.id, n);
+
             if (isTotalType) {
               const [nameA, nameB] = match.playerNames;
               const gamesA = match.gamesByName.get(nameA);
