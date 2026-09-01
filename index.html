@@ -15106,15 +15106,36 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     // Legs excluded from the OUTPUT here, same as Formula Backtest -- a
     // parlay leg is never independently scored/published on its own, so it
-    // has no real standalone "His score"/"Overall score" of its own. It
-    // still fed the running stats and confluence above at reduced weight.
+    // has no real standalone score of its own. It still fed the running
+    // stats and confluence above at reduced weight.
     return scored.filter(e => !e.pick.is_parlay_leg).map(e => {
       const group = byGameKey[e.gameKey];
       const others = group.filter(o => o.pick.capper_id !== e.pick.capper_id);
       const confPts = confluencePoints(others.map(o => ({ adj: o.overallAdj, weight: confluenceWeightFor(o.pick) })));
-      const overallScore = Math.round((e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + e.base.tierCalibrationPts + confPts) * 10) / 10;
-      const hisScore = Math.round((overallScore - confPts) * 10) / 10;
-      return { pick: e.pick, hisScore, overallScore };
+      const score = Math.round((e.base.overallPts + e.base.betTypePts + e.base.streakPts + e.base.tierPts + e.base.tierCalibrationPts + confPts) * 10) / 10;
+      return { pick: e.pick, score, gameKey: e.gameKey };
+    });
+  }
+
+  // Direct request 2026-08-31: "I want his scorecard value for each pick
+  // and the groups beside him so I can see if he's out performing the
+  // group or how close he is... [if] he called that pick independently we
+  // can always write N/A." "The group" = the same real number
+  // (score.total) that OTHER cappers who independently made this EXACT
+  // same pick (same game/selection/line) got -- i.e. exactly the
+  // "duplicates" concept Publish Ranking already uses, not a separate
+  // invented metric. computeCapperScorecardRows already returns every
+  // capper's own score, so this just looks up whoever else shares this
+  // row's gameKey.
+  function attachGroupScores(allRows, capperId) {
+    const byGameKey = {};
+    allRows.forEach(r => { (byGameKey[r.gameKey] = byGameKey[r.gameKey] || []).push(r); });
+    return allRows.filter(r => r.pick.capper_id === capperId).map(r => {
+      const others = byGameKey[r.gameKey].filter(o => o.pick.capper_id !== capperId);
+      const groupScore = others.length
+        ? Math.round((others.reduce((sum, o) => sum + o.score, 0) / others.length) * 10) / 10
+        : null;
+      return { pick: r.pick, score: r.score, groupScore };
     });
   }
 
@@ -15122,10 +15143,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const sorted = [...rows].sort((a, b) => a.pick.event_date === b.pick.event_date
       ? (a.pick.created_at || '').localeCompare(b.pick.created_at || '')
       : (a.pick.event_date < b.pick.event_date ? -1 : 1));
-    let hisSum = 0, overallSum = 0;
     const bodyRows = sorted.map(r => {
-      hisSum += r.hisScore;
-      overallSum += r.overallScore;
       const betTypeName = (r.pick.bet_types && r.pick.bet_types.name) || 'Unknown';
       const tier = Number(r.pick.pick_tier) || 0;
       return `<tr>
@@ -15134,8 +15152,8 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
         <td>${escapeHtml(betTypeName)}</td>
         <td>${tier || '—'}</td>
         <td><span class="stamp ${r.pick.result}">${escapeHtml(r.pick.result || '')}</span></td>
-        <td>${r.hisScore}</td>
-        <td>${r.overallScore}</td>
+        <td>${r.score}</td>
+        <td>${r.groupScore !== null ? r.groupScore : 'N/A'}</td>
       </tr>`;
     }).join('');
     const record = tallyRows(sorted.map(r => r.pick));
@@ -15159,9 +15177,9 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   <h1>Capper Scorecard Summary <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
   <table class="picks-table">
-    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Tier</th><th>Result</th><th>His score</th><th>Overall score</th></tr></thead>
+    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Tier</th><th>Result</th><th>His score</th><th>Group score</th></tr></thead>
     <tbody>${bodyRows || '<tr><td colspan="7">No graded picks match these filters.</td></tr>'}</tbody>
-    <tfoot><tr><td colspan="4">Totals</td><td>${recordText}</td><td>${Math.round(hisSum * 10) / 10}</td><td>${Math.round(overallSum * 10) / 10}</td></tr></tfoot>
+    <tfoot><tr><td colspan="4">Totals</td><td>${recordText}</td><td></td><td></td></tr></tfoot>
   </table>
   ${csvExportPopoutScript('capper-scorecard-summary')}
 </body></html>`);
@@ -15181,7 +15199,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 
     try {
       const allRows = await computeCapperScorecardRows(sportId, from, to);
-      const rows = allRows.filter(r => r.pick.capper_id === capperId);
+      const rows = attachGroupScores(allRows, capperId);
       openCapperScorecardSummaryTab(rows, summaryParts.join(' · '));
     } catch (e) {
       alert('Could not build scorecard summary: ' + e.message);
@@ -21758,7 +21776,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 409; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 410; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
