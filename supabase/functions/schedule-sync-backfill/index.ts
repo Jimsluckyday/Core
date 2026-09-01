@@ -2151,7 +2151,27 @@ Deno.serve(async (req) => {
               }
               let json: any = null;
               try { json = await response.json(); } catch (e) { rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status} but body wasn't valid JSON -- ${String(e)}`); continue; }
-              const athletes = json.athletes || [];
+              const rawAthletes = json.athletes || [];
+              // CONFIRMED REAL BUG, direct report 2026-08-31: NHL rosters
+              // (Edmonton Oilers, Florida Panthers, 2025-06-06) both came
+              // back "HTTP 200, 5 athletes -- OK" -- logged as fine since
+              // the array was non-empty -- yet propLookup ended up
+              // completely empty regardless, contradicting the "OK"
+              // label. 5 is far too few for a real ~23-man NHL roster, and
+              // identical for two different teams, which points to
+              // ESPN's hockey/football-style roster shape: `athletes` here
+              // is an array of POSITION GROUPS (Forwards/Defensemen/
+              // Goalies/etc, roughly 5 of them), each holding real players
+              // in its own nested `items` array -- not a flat player list
+              // the way basketball's roster endpoint already proven
+              // elsewhere in this file returns. A group object has no
+              // fullName/displayName of its own, so every one silently
+              // produced no name and got skipped -- "5 athletes" was 5
+              // empty groups, not 5 (or 0) real players. Flattens whichever
+              // shape actually comes back: a group's own nested `items`
+              // when present, the entry itself otherwise (unchanged
+              // behavior for basketball, which never has `items`).
+              const athletes = rawAthletes.flatMap((a: any) => Array.isArray(a.items) ? a.items : [a]);
               if (!athletes.length) {
                 rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status}, but 0 athletes. Top-level response keys: ${Object.keys(json).join(', ')}`);
                 continue;
