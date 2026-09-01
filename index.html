@@ -931,6 +931,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <label id="selectionLabel">Choice / selection</label>
           <input id="pickSelection" list="selectionSuggestions" placeholder="e.g. Chiefs" />
           <datalist id="selectionSuggestions"></datalist>
+          <div id="selectionPlayerHint" style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin-top:6px;display:none;"></div>
           <div id="tennisTotalHint" style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin-top:6px;display:none;padding:6px;border:1px dashed var(--stamp-amber);border-radius:3px;">&#9888; Fill in the Line now -- if it's ever missing later, there's no way to tell from the data alone whether this was meant as "Total" (games, usually high teens-20s) or "Total (Sets)" (almost always 2.5), especially on an auto-uploaded pick where nobody who saw the capper's original message is looking at it. Also put BOTH players here (e.g. "Gauff/Boisson"), not just one -- unlike Moneyline/Spread, a Total doesn't care who's favored, only which exact match, and two names let this system find that match far more reliably than a single name can.</div>
         </div>
         <div class="field" id="lineField" style="display:none;">
@@ -5685,6 +5686,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     updateGolfPropSelectionField();
     updateMatchupFields();
     updateTennisTotalHint();
+    updateSelectionPlayerHint();
   }
 
   // Added 2026-08-30, direct request: "if we didn't put in the pick and
@@ -5711,6 +5713,45 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('tennisTotalHint').style.display = (isTennis && isTotalFamily) ? 'block' : 'none';
   }
   $('pickSport').addEventListener('change', updateTennisTotalHint);
+
+  // Direct request 2026-08-31: "this could work towards helping resolve
+  // the Tennis/Golf or any other sport where a player can be used in
+  // place of a team for scoring purposes." checkPlayerName/known_players
+  // were only wired into the Player Prop field before -- this covers the
+  // Selection field for the same individual-competitor sports, gated on
+  // sportHasTeamData (the same "no team list at all" signal Bulk Import's
+  // own extension of this check now uses, see validateBulkRow's Team-
+  // name typo check comment). A "/"-combined Selection (Tennis Total)
+  // checks each side, but only offers the one-click "Use this" fix for a
+  // single-name Selection -- two independently-correctable names in one
+  // small hint box isn't worth the extra UI complexity right now.
+  function updateSelectionPlayerHint() {
+    const hint = $('selectionPlayerHint');
+    const bt = currentBetType();
+    const isProp = bt ? bt.uses_prop_fields : false;
+    const sportId = $('pickSport').value;
+    const raw = $('pickSelection').value.trim();
+    const applies = !isProp && sportId && !sportHasTeamData(sportId) && raw;
+    if (!applies) { hint.style.display = 'none'; delete hint.dataset.suggestion; return; }
+    const names = raw.includes('/') ? raw.split('/').map(s => s.trim()) : [raw];
+    const checks = names.map(n => checkPlayerName(n, sportId)).filter(Boolean);
+    if (!checks.length) { hint.style.display = 'none'; delete hint.dataset.suggestion; return; }
+    if (checks.length === 1 && names.length === 1) {
+      hint.dataset.suggestion = checks[0].suggestion;
+      hint.innerHTML = `&#9888; Did you mean "${escapeHtml(checks[0].suggestion)}"? <a href="#" id="selectionPlayerHintAccept" style="color:inherit;text-decoration:underline;">Use this</a>`;
+    } else {
+      delete hint.dataset.suggestion;
+      hint.innerHTML = `&#9888; ${checks.map(c => `"${escapeHtml(c.rawName)}" -- did you mean "${escapeHtml(c.suggestion)}"?`).join(' ')}`;
+    }
+    hint.style.display = 'block';
+  }
+  $('pickSelection').addEventListener('blur', updateSelectionPlayerHint);
+  $('selectionPlayerHint').addEventListener('click', (e) => {
+    if (!e.target.closest('#selectionPlayerHintAccept')) return;
+    e.preventDefault();
+    $('pickSelection').value = $('selectionPlayerHint').dataset.suggestion || '';
+    $('selectionPlayerHint').style.display = 'none';
+  });
 
   // CONFIRMED direct request 2026-08-15: "Team 1 then Team 2 as different
   // boxes" for combined-game bets (Over/Under, No Run First Inning, Both
@@ -20648,33 +20689,51 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
       }
     }
 
-    // Team-name typo check -- only applies to non-prop, team-based
-    // selections, and only once we actually have registered teams for
-    // this sport to check against. Catches exactly the kind of thing that
-    // otherwise only surfaces days later during schedule sync or grading.
+    // Team-name typo check -- only applies to non-prop selections, and
+    // only once we actually have registered teams for this sport to check
+    // against. Catches exactly the kind of thing that otherwise only
+    // surfaces days later during schedule sync or grading.
+    // Direct request 2026-08-31: "this could work towards helping resolve
+    // the Tennis/Golf or any other sport where a player can be used in
+    // place of a team for scoring purposes." An individual-competitor
+    // sport (Tennis, Golf, MMA, etc.) has NO registered team list at all --
+    // that's exactly the condition checkTeamName already bails out on
+    // (sportTeams.length === 0), which doubles as the signal that this
+    // sport's Selection holds a PLAYER's name instead of a team's. Same
+    // typo-catching idea, against known_players instead of teams.
     if (sport && !isPropBet && row.selection) {
-      const teamNames = row.selection.includes('/') ? row.selection.split('/').map(s => s.trim()) : [row.selection];
-      for (const teamName of teamNames) {
-        const check = checkTeamName(teamName, sport.id);
-        if (check) {
-          teamNameChecks.push({ rawName: check.rawName, sportId: sport.id, sportName: sport.name, ambiguous: !!check.ambiguous, suggestion: check.suggestion || null });
-          if (check.ambiguous) {
-            warnings.push(`team name "${check.rawName}" is ambiguous for ${sport.name} -- matches multiple registered teams (${check.matches.join(', ')}). Use the full team name to specify which one.`);
-          } else {
-            warnings.push(check.suggestion
-              ? `team name "${check.rawName}" not recognized for ${sport.name} -- did you mean "${check.suggestion}"?`
-              : `team name "${check.rawName}" not recognized for ${sport.name} -- if this is a genuinely new/correct team, add it below or in Setup`);
+      const sportTeams = teams.filter(t => String(t.sport_id) === String(sport.id));
+      const names = row.selection.includes('/') ? row.selection.split('/').map(s => s.trim()) : [row.selection];
+      if (sportTeams.length) {
+        for (const teamName of names) {
+          const check = checkTeamName(teamName, sport.id);
+          if (check) {
+            teamNameChecks.push({ rawName: check.rawName, sportId: sport.id, sportName: sport.name, ambiguous: !!check.ambiguous, suggestion: check.suggestion || null });
+            if (check.ambiguous) {
+              warnings.push(`team name "${check.rawName}" is ambiguous for ${sport.name} -- matches multiple registered teams (${check.matches.join(', ')}). Use the full team name to specify which one.`);
+            } else {
+              warnings.push(check.suggestion
+                ? `team name "${check.rawName}" not recognized for ${sport.name} -- did you mean "${check.suggestion}"?`
+                : `team name "${check.rawName}" not recognized for ${sport.name} -- if this is a genuinely new/correct team, add it below or in Setup`);
+            }
+          }
+        }
+      } else {
+        for (const name of names) {
+          const playerCheck = checkPlayerName(name, sport.id);
+          if (playerCheck) {
+            warnings.push(`player name "${playerCheck.rawName}" doesn't exactly match a previously-graded ${sport.name} name -- did you mean "${playerCheck.suggestion}"? If this is a genuinely new player, ignore this.`);
           }
         }
       }
     }
 
-    // Player-name typo check -- direct request 2026-08-31: "if I put in
-    // Miles Straw but we've seen Myles Straw it can ask if we made a
-    // mistake." Only fires for Player Prop rows, and only when this
-    // sport already has at least one previously-graded name to compare
-    // against -- see checkPlayerName's own comment for why a bare "not
-    // recognized" (checkTeamName's default) doesn't make sense here.
+    // Player-name typo check for Player Props -- direct request
+    // 2026-08-31: "if I put in Miles Straw but we've seen Myles Straw it
+    // can ask if we made a mistake." Only when this sport already has at
+    // least one previously-graded name to compare against -- see
+    // checkPlayerName's own comment for why a bare "not recognized"
+    // (checkTeamName's default) doesn't make sense here.
     if (sport && isPropBet && propPlayerRaw) {
       const playerCheck = checkPlayerName(propPlayerRaw, sport.id);
       if (playerCheck) {
@@ -21835,7 +21894,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 411; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 412; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
