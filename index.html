@@ -7880,7 +7880,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (!legIds.length) {
         legsHtml = '<div style="color:var(--ink-soft);font-style:italic;">No legs linked yet.</div>';
       } else {
-        legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(${legIds.join(',')})`);
+        legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,event_name,prop_team,game_start_time,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(${legIds.join(',')})`);
         // Legs are deliberately never their own row anywhere else in the
         // picks list (see buildPicksFilterQuery) -- the same game appearing
         // both as its own line AND inside a parlay's legs was exactly the
@@ -7936,11 +7936,44 @@ These are almost always the same day, so "Date entered" only fills in a starting
           const legSyncBadge = leg.schedule_sync_status === 'unmatched'
             ? ` <span style="display:inline-block;background:var(--stamp-red);color:var(--paper);font-size:10px;font-weight:bold;padding:1px 6px;border-radius:8px;white-space:nowrap;" title="${escapeHtml(leg.schedule_sync_note || 'Needs manual review')}">&#9888; Sync note</span>`
             : '';
-          return `<li style="margin-bottom:3px;">${escapeHtml(leg.selection)}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}${legSyncBadge}
+          // Direct report 2026-08-31: "I have to edit the parlay from the
+          // main failure... then do a full edit from the pop out it gives
+          // me which is inefficient to have to do 2 layers of editing for
+          // one pick." A leg previously had NO inline-editable fields of
+          // its own at all (only Tier/Unit size, which are properties of
+          // this PARLAY's link to the leg, not the leg itself) -- every
+          // real fix (a typo'd team name, a missing event name/prop team/
+          // start time, exactly the fields Missing Data's own export asks
+          // for) required "Full edit," which jumps to the main tab. These
+          // four match the same inline-input pattern the main picks table
+          // already uses for a standalone pick, just PATCHing this leg's
+          // own picks row (id=eq.legId) instead of the parlay_legs join
+          // row Tier/Unit size use.
+          const legStartTimeLocal = (() => {
+            if (!leg.game_start_time) return '';
+            const dt = new Date(leg.game_start_time);
+            const pad = n => String(n).padStart(2, '0');
+            return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+          })();
+          const isLegProp = !!(leg.prop_player || leg.prop_stat);
+          const legSelectionInput = `<input type="text" class="leg-selection-input" data-leg-id="${leg.id}" value="${escapeHtml(leg.selection)}" style="width:130px;font-family:inherit;font-size:10px;padding:2px 3px;" />`;
+          const legEventNameInput = `<input type="text" class="leg-eventname-input" data-leg-id="${leg.id}" value="${escapeHtml(leg.event_name || '')}" placeholder="event name" style="width:100px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />`;
+          const legPropTeamInput = isLegProp
+            ? `<input type="text" class="leg-propteam-input" data-leg-id="${leg.id}" value="${escapeHtml(leg.prop_team || '')}" placeholder="prop team" style="width:90px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />`
+            : '';
+          const legStartTimeInput = `<input type="datetime-local" class="leg-starttime-input" data-leg-id="${leg.id}" value="${legStartTimeLocal}" style="font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />`;
+          return `<li style="margin-bottom:5px;">
+              ${legSelectionInput}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}${legSyncBadge}
               <button type="button" class="ghost small" data-leg-edit="${leg.id}" style="padding:1px 6px;font-size:10px;margin-left:6px;">Edit</button>
               <button type="button" class="ghost small" data-leg-delete="${leg.id}" data-leg-summary="${escapeHtml(leg.selection)}${lineTxt}${propBit}" style="padding:1px 6px;font-size:10px;color:var(--stamp-red);border-color:var(--stamp-red);">Delete</button>
-              <span style="color:var(--ink-soft);font-size:10px;margin-left:6px;">this parlay's tier/unit:</span>${tierSelectHtml}${unitSizeInputHtml}
-              <span class="leg-tier-save-status" data-leg-id="${leg.id}" style="font-size:10px;margin-left:4px;"></span>
+              <span class="leg-field-save-status" data-leg-id="${leg.id}" style="font-size:10px;margin-left:4px;"></span>
+              <div style="margin-top:3px;">
+                <span style="color:var(--ink-soft);font-size:10px;">event/team/start:</span>${legEventNameInput}${legPropTeamInput}${legStartTimeInput}
+              </div>
+              <div style="margin-top:3px;">
+                <span style="color:var(--ink-soft);font-size:10px;">this parlay's tier/unit:</span>${tierSelectHtml}${unitSizeInputHtml}
+                <span class="leg-tier-save-status" data-leg-id="${leg.id}" style="font-size:10px;margin-left:4px;"></span>
+              </div>
             </li>`;
         }).join('') + '</ul>';
       }
@@ -7997,6 +8030,77 @@ These are almost always the same day, so "Date entered" only fills in a starting
           }
         });
         inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+      });
+
+      // Direct report 2026-08-31: the 4 new inline fields added above
+      // (Selection, Event name, Prop team, Start time) PATCH this leg's
+      // own picks row directly (id=eq.legId) -- these are real properties
+      // of the leg itself, not this parlay's own link to it, unlike Tier/
+      // Unit size just above.
+      function legFieldStatusSpan(legId) {
+        return row.querySelector(`.leg-field-save-status[data-leg-id="${legId}"]`);
+      }
+      row.querySelectorAll('input.leg-selection-input').forEach(inp => {
+        let lastSaved = inp.value;
+        inp.addEventListener('blur', async () => {
+          if (inp.value === lastSaved) return;
+          const legId = inp.getAttribute('data-leg-id');
+          const status = legFieldStatusSpan(legId);
+          inp.disabled = true;
+          try {
+            await rest(`picks?id=eq.${legId}`, { method: 'PATCH', body: JSON.stringify({ selection: inp.value.trim() }) });
+            lastSaved = inp.value;
+            if (status) { status.textContent = 'saved'; status.style.color = 'var(--stamp-green)'; }
+          } catch (e) {
+            if (status) { status.textContent = 'error: ' + e.message; status.style.color = 'var(--stamp-red)'; }
+          } finally {
+            inp.disabled = false;
+          }
+        });
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+      });
+      row.querySelectorAll('input.leg-eventname-input, input.leg-propteam-input').forEach(inp => {
+        let lastSaved = inp.value;
+        const field = inp.classList.contains('leg-eventname-input') ? 'event_name' : 'prop_team';
+        inp.addEventListener('blur', async () => {
+          if (inp.value === lastSaved) return;
+          const legId = inp.getAttribute('data-leg-id');
+          const status = legFieldStatusSpan(legId);
+          inp.disabled = true;
+          try {
+            await rest(`picks?id=eq.${legId}`, { method: 'PATCH', body: JSON.stringify({ [field]: inp.value.trim() || null }) });
+            lastSaved = inp.value;
+            if (status) { status.textContent = 'saved'; status.style.color = 'var(--stamp-green)'; }
+          } catch (e) {
+            if (status) { status.textContent = 'error: ' + e.message; status.style.color = 'var(--stamp-red)'; }
+          } finally {
+            inp.disabled = false;
+          }
+        });
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+      });
+      // datetime-local has no separate "typing done" moment a blur gives a
+      // text input -- same reasoning as the main table's own
+      // inline-starttime-input, 'change' only fires once a full valid
+      // value is set.
+      row.querySelectorAll('input.leg-starttime-input').forEach(inp => {
+        let lastSaved = inp.value;
+        inp.addEventListener('change', async () => {
+          if (inp.value === lastSaved) return;
+          const legId = inp.getAttribute('data-leg-id');
+          const status = legFieldStatusSpan(legId);
+          inp.disabled = true;
+          try {
+            const isoValue = inp.value ? new Date(inp.value).toISOString() : null;
+            await rest(`picks?id=eq.${legId}`, { method: 'PATCH', body: JSON.stringify({ game_start_time: isoValue }) });
+            lastSaved = inp.value;
+            if (status) { status.textContent = 'saved'; status.style.color = 'var(--stamp-green)'; }
+          } catch (e) {
+            if (status) { status.textContent = 'error: ' + e.message; status.style.color = 'var(--stamp-red)'; }
+          } finally {
+            inp.disabled = false;
+          }
+        });
       });
 
       row.querySelectorAll('button[data-leg-grade]').forEach(gbtn => {
@@ -9608,7 +9712,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         if (!legIds.length) {
           legsHtml = '<div style="color:#55584d;font-style:italic;">No legs linked yet.</div>';
         } else {
-          legs = await op.rest('picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(' + legIds.join(',') + ')');
+          legs = await op.rest('picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,event_name,prop_team,game_start_time,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(' + legIds.join(',') + ')');
           legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;list-style:none;">' + legs.map(function(leg) {
             const bt = leg.bet_types ? leg.bet_types.name : '';
             const lineTxt = (leg.line !== null && leg.line !== undefined) ? ' (' + (leg.line > 0 ? '+' : '') + leg.line + ')' : '';
@@ -9645,11 +9749,31 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
             const legSyncBadge = leg.schedule_sync_status === 'unmatched'
               ? ' <span style="display:inline-block;background:var(--stamp-red);color:var(--paper);font-size:10px;font-weight:bold;padding:1px 6px;border-radius:8px;white-space:nowrap;" title="' + escLocal(leg.schedule_sync_note || 'Needs manual review') + '">&#9888; Sync note</span>'
               : '';
-            return '<li style="margin-bottom:3px;">' + escLocal(leg.selection) + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml + legSyncBadge +
+            // Direct report 2026-08-31: same fix as the main app's own
+            // copy of this template (see that one's own comment) -- a leg
+            // had no inline-editable fields of its own, only Tier/Unit
+            // size (properties of THIS PARLAY's link to it, not the leg).
+            const legStartTimeLocal = (function() {
+              if (!leg.game_start_time) return '';
+              const dt = new Date(leg.game_start_time);
+              const pad = function(n) { return String(n).padStart(2, '0'); };
+              return dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate()) + 'T' + pad(dt.getHours()) + ':' + pad(dt.getMinutes());
+            })();
+            const isLegProp = !!(leg.prop_player || leg.prop_stat);
+            const legSelectionInput = '<input type="text" class="leg-selection-input" data-leg-id="' + leg.id + '" value="' + escLocal(leg.selection) + '" style="width:130px;font-family:inherit;font-size:10px;padding:2px 3px;" />';
+            const legEventNameInput = '<input type="text" class="leg-eventname-input" data-leg-id="' + leg.id + '" value="' + escLocal(leg.event_name || '') + '" placeholder="event name" style="width:100px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />';
+            const legPropTeamInput = isLegProp
+              ? '<input type="text" class="leg-propteam-input" data-leg-id="' + leg.id + '" value="' + escLocal(leg.prop_team || '') + '" placeholder="prop team" style="width:90px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />'
+              : '';
+            const legStartTimeInput = '<input type="datetime-local" class="leg-starttime-input" data-leg-id="' + leg.id + '" value="' + legStartTimeLocal + '" style="font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />';
+            return '<li style="margin-bottom:5px;">' +
+              legSelectionInput + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml + legSyncBadge +
               ' <button type="button" class="mini leg-edit-btn" data-leg-edit="' + leg.id + '" style="padding:1px 6px;">Edit</button>' +
               ' <button type="button" class="mini leg-delete-btn" data-leg-delete="' + leg.id + '" data-leg-summary="' + escLocal(leg.selection) + lineTxt + propBit + '" style="padding:1px 6px;border-color:#8a2f3a;color:#8a2f3a;">Delete</button>' +
-              ' <span style="color:#55584d;font-size:10px;margin-left:6px;">Tier/unit for this parlay:</span>' + tierSelectHtml + unitSizeInputHtml +
-              ' <span class="leg-tier-save-status" data-leg-id="' + leg.id + '" style="font-size:10px;margin-left:4px;"></span>' +
+              ' <span class="leg-field-save-status" data-leg-id="' + leg.id + '" style="font-size:10px;margin-left:4px;"></span>' +
+              '<div style="margin-top:3px;"><span style="color:#55584d;font-size:10px;">event/team/start:</span>' + legEventNameInput + legPropTeamInput + legStartTimeInput + '</div>' +
+              '<div style="margin-top:3px;"><span style="color:#55584d;font-size:10px;">Tier/unit for this parlay:</span>' + tierSelectHtml + unitSizeInputHtml +
+              ' <span class="leg-tier-save-status" data-leg-id="' + leg.id + '" style="font-size:10px;margin-left:4px;"></span></div>' +
               '</li>';
           }).join('') + '</ul>';
         }
@@ -9742,6 +9866,80 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
             }
           });
           inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
+        });
+
+        // Direct report 2026-08-31: same 4 new inline fields as the main
+        // app's own copy of this template -- these PATCH the leg's own
+        // picks row directly (id=eq.legId), not the parlay_legs join row
+        // Tier/Unit size above use.
+        function legFieldStatusSpanLocal(legId) {
+          return tr.querySelector('.leg-field-save-status[data-leg-id="' + legId + '"]');
+        }
+        tr.querySelectorAll('input.leg-selection-input').forEach(function(inp) {
+          let lastSaved = inp.value;
+          inp.addEventListener('blur', async () => {
+            if (inp.value === lastSaved) return;
+            const op7 = opener();
+            if (!op7) return;
+            const legId = inp.getAttribute('data-leg-id');
+            const status = legFieldStatusSpanLocal(legId);
+            inp.disabled = true;
+            try {
+              await op7.rest('picks?id=eq.' + legId, { method: 'PATCH', body: JSON.stringify({ selection: inp.value.trim() }) });
+              lastSaved = inp.value;
+              if (status) { status.textContent = 'saved'; status.style.color = '#2d6a4f'; }
+            } catch (e) {
+              if (status) { status.textContent = 'error: ' + e.message; status.style.color = '#8a2f3a'; }
+            } finally {
+              inp.disabled = false;
+            }
+          });
+          inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
+        });
+        tr.querySelectorAll('input.leg-eventname-input, input.leg-propteam-input').forEach(function(inp) {
+          let lastSaved = inp.value;
+          const field = inp.classList.contains('leg-eventname-input') ? 'event_name' : 'prop_team';
+          inp.addEventListener('blur', async () => {
+            if (inp.value === lastSaved) return;
+            const op8 = opener();
+            if (!op8) return;
+            const legId = inp.getAttribute('data-leg-id');
+            const status = legFieldStatusSpanLocal(legId);
+            inp.disabled = true;
+            try {
+              const body = {};
+              body[field] = inp.value.trim() || null;
+              await op8.rest('picks?id=eq.' + legId, { method: 'PATCH', body: JSON.stringify(body) });
+              lastSaved = inp.value;
+              if (status) { status.textContent = 'saved'; status.style.color = '#2d6a4f'; }
+            } catch (e) {
+              if (status) { status.textContent = 'error: ' + e.message; status.style.color = '#8a2f3a'; }
+            } finally {
+              inp.disabled = false;
+            }
+          });
+          inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
+        });
+        tr.querySelectorAll('input.leg-starttime-input').forEach(function(inp) {
+          let lastSaved = inp.value;
+          inp.addEventListener('change', async () => {
+            if (inp.value === lastSaved) return;
+            const op9 = opener();
+            if (!op9) return;
+            const legId = inp.getAttribute('data-leg-id');
+            const status = legFieldStatusSpanLocal(legId);
+            inp.disabled = true;
+            try {
+              const isoValue = inp.value ? new Date(inp.value).toISOString() : null;
+              await op9.rest('picks?id=eq.' + legId, { method: 'PATCH', body: JSON.stringify({ game_start_time: isoValue }) });
+              lastSaved = inp.value;
+              if (status) { status.textContent = 'saved'; status.style.color = '#2d6a4f'; }
+            } catch (e) {
+              if (status) { status.textContent = 'error: ' + e.message; status.style.color = '#8a2f3a'; }
+            } finally {
+              inp.disabled = false;
+            }
+          });
         });
 
         tr.querySelectorAll('button[data-leg-edit]').forEach(function(ebtn) {
@@ -22068,7 +22266,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 416; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 417; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
