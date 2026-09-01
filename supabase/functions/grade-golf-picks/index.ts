@@ -166,13 +166,24 @@ async function db(supabaseUrl: string, serviceRoleKey: string, path: string, opt
 // known_players table (migration not run yet) or any other failure here
 // can never surface as a grading failure -- the pick above it already
 // graded and was already written.
+// Direct request 2026-08-31: "give us first and last name to make the
+// automatic tools that check data have an easier time." Same "last
+// whitespace-separated token is the surname" convention already used for
+// surname-only matching elsewhere -- a single-word name has no real
+// surname to split out, so first_name is left null rather than guessed.
+function splitName(name: string): { first: string | null; last: string } {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return { first: null, last: parts[0] };
+  return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] };
+}
 async function registerKnownPlayer(supabaseUrl: string, serviceRoleKey: string, sportId: number, name: string | null | undefined) {
   if (!name) return;
   try {
+    const { first, last } = splitName(name);
     await db(supabaseUrl, serviceRoleKey, 'known_players', {
       method: 'POST',
       headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-      body: JSON.stringify({ sport_id: sportId, name })
+      body: JSON.stringify({ sport_id: sportId, name, first_name: first, last_name: last })
     });
   } catch (_e) {
     // Silently skip -- see comment above.

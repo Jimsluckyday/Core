@@ -889,6 +889,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <label>Player <span style="color:var(--stamp-red);font-weight:bold;">*required for Player Props</span></label>
           <input id="propPlayer" list="propPlayerSuggestions" placeholder="e.g. Chad Dallas" />
           <datalist id="propPlayerSuggestions"></datalist>
+          <div id="propPlayerHint" style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin-top:6px;display:none;"></div>
         </div>
         <div class="field">
           <label>Stat <span style="color:var(--stamp-red);font-weight:bold;">*required for Player Props</span></label>
@@ -6116,7 +6117,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // environment. Missing table just means no suggestions yet, not a
     // broken app.
     try {
-      knownPlayers = await rest('known_players?select=id,name,sport_id&order=name.asc');
+      knownPlayers = await rest('known_players?select=id,name,sport_id,first_name,last_name&order=name.asc');
     } catch (e) {
       console.warn('Could not load known_players (has the migration been run yet?):', e.message);
       knownPlayers = [];
@@ -6129,6 +6130,30 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const names = sportId ? knownPlayers.filter(p => String(p.sport_id) === String(sportId)).map(p => p.name) : [];
     datalist.innerHTML = names.map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
   }
+
+  // Direct request 2026-08-31: "if I put in Miles Straw but we've seen
+  // Myles Straw it can ask if we made a mistake and want to update it."
+  // checkPlayerName is defined later in this file (near checkTeamName) --
+  // safe to call here regardless, since function declarations are hoisted
+  // and this only ever runs from a real user interaction (blur), long
+  // after the whole script has loaded.
+  function updatePropPlayerHint() {
+    const hint = $('propPlayerHint');
+    const sportId = $('pickSport').value;
+    const name = $('propPlayer').value.trim();
+    const check = (name && sportId) ? checkPlayerName(name, sportId) : null;
+    if (!check) { hint.style.display = 'none'; delete hint.dataset.suggestion; return; }
+    hint.dataset.suggestion = check.suggestion;
+    hint.innerHTML = `&#9888; Did you mean "${escapeHtml(check.suggestion)}"? <a href="#" id="propPlayerHintAccept" style="color:inherit;text-decoration:underline;">Use this</a>`;
+    hint.style.display = 'block';
+  }
+  $('propPlayer').addEventListener('blur', updatePropPlayerHint);
+  $('propPlayerHint').addEventListener('click', (e) => {
+    if (!e.target.closest('#propPlayerHintAccept')) return;
+    e.preventDefault();
+    $('propPlayer').value = $('propPlayerHint').dataset.suggestion || '';
+    $('propPlayerHint').style.display = 'none';
+  });
 
   // ---------- Main app: save pick (add or edit) ----------
   // ---------- Parlay leg linking (Add Pick) ----------
@@ -20366,6 +20391,27 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   function normalizeForMatch(s) { return (s || '').toLowerCase().trim().replace(/[^a-z0-9]/g, ''); }
   window.normalizeForMatch = normalizeForMatch;
 
+  // Player-name analog of checkTeamName, direct request 2026-08-31: "if I
+  // put in Miles Straw but we've seen Myles Straw it can ask if we made a
+  // mistake." known_players only ever grows from a pick that actually
+  // finished GRADING successfully (see knownPlayers' own comment) -- an
+  // exact miss here just means "never seen this exact spelling resolve
+  // yet," which is completely normal for a real, brand-new player, so
+  // this only flags a CLOSE miss (a likely typo of a name that's already
+  // proven real), never a bare "not recognized" the way checkTeamName
+  // does for teams (there's no fixed roster to be exhaustively wrong
+  // against here). No ambiguity branch either -- two same-named players
+  // in one sport is rare enough not to be worth the complexity checkTeamName
+  // needs for shared city names.
+  function checkPlayerName(rawName, sportId) {
+    const sportPlayers = knownPlayers.filter(p => String(p.sport_id) === String(sportId));
+    if (!sportPlayers.length) return null;
+    const norm = normalizeForMatch(rawName);
+    if (sportPlayers.some(p => normalizeForMatch(p.name) === norm)) return null;
+    const suggestion = suggestSimilarName(rawName, sportPlayers);
+    return suggestion ? { rawName, suggestion } : null;
+  }
+
 
   // Checks whether an entered date for an individual-competitor sport
   // (tennis, golf, and similar) actually falls within any registered
@@ -20620,6 +20666,19 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
               : `team name "${check.rawName}" not recognized for ${sport.name} -- if this is a genuinely new/correct team, add it below or in Setup`);
           }
         }
+      }
+    }
+
+    // Player-name typo check -- direct request 2026-08-31: "if I put in
+    // Miles Straw but we've seen Myles Straw it can ask if we made a
+    // mistake." Only fires for Player Prop rows, and only when this
+    // sport already has at least one previously-graded name to compare
+    // against -- see checkPlayerName's own comment for why a bare "not
+    // recognized" (checkTeamName's default) doesn't make sense here.
+    if (sport && isPropBet && propPlayerRaw) {
+      const playerCheck = checkPlayerName(propPlayerRaw, sport.id);
+      if (playerCheck) {
+        warnings.push(`player name "${playerCheck.rawName}" doesn't exactly match a previously-graded ${sport.name} name -- did you mean "${playerCheck.suggestion}"? If this is a genuinely new player, ignore this.`);
       }
     }
 
@@ -21776,7 +21835,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 410; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 411; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');

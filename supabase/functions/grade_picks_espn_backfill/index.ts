@@ -259,13 +259,26 @@ Deno.serve(async (req) => {
     // as a grading failure -- the pick above this call already graded
     // successfully and was already written; this is optional bookkeeping
     // on top of that, not part of the real result.
+    // Direct request 2026-08-31: "give us first and last name to make the
+    // automatic tools that check data have an easier time." Same "last
+    // whitespace-separated token is the surname" convention already used
+    // for surname-only matching everywhere else in this file -- a
+    // single-word name (rare, but real for some MMA fighters) has no
+    // real surname to split out, so first_name is left null rather than
+    // guessed.
+    function splitName(name: string): { first: string | null; last: string } {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length < 2) return { first: null, last: parts[0] };
+      return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] };
+    }
     async function registerKnownPlayer(sportId: string, name: string | null | undefined) {
       if (!name) return;
       try {
+        const { first, last } = splitName(name);
         await db('known_players', {
           method: 'POST',
           headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-          body: JSON.stringify({ sport_id: sportId, name })
+          body: JSON.stringify({ sport_id: sportId, name, first_name: first, last_name: last })
         });
       } catch (_e) {
         // Silently skip -- see comment above.
