@@ -15122,24 +15122,24 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
     const sorted = [...rows].sort((a, b) => a.pick.event_date === b.pick.event_date
       ? (a.pick.created_at || '').localeCompare(b.pick.created_at || '')
       : (a.pick.event_date < b.pick.event_date ? -1 : 1));
-    let running = 0;
     let hisSum = 0, overallSum = 0;
     const bodyRows = sorted.map(r => {
-      running += r.overallScore;
       hisSum += r.hisScore;
       overallSum += r.overallScore;
       const betTypeName = (r.pick.bet_types && r.pick.bet_types.name) || 'Unknown';
+      const tier = Number(r.pick.pick_tier) || 0;
       return `<tr>
         <td>${escapeHtml(r.pick.event_date || '')}</td>
         <td>${escapeHtml(pickDisplayLabel(r.pick))}</td>
         <td>${escapeHtml(betTypeName)}</td>
+        <td>${tier || '—'}</td>
         <td><span class="stamp ${r.pick.result}">${escapeHtml(r.pick.result || '')}</span></td>
         <td>${r.hisScore}</td>
         <td>${r.overallScore}</td>
-        <td>${Math.round(running * 10) / 10}</td>
       </tr>`;
     }).join('');
     const record = tallyRows(sorted.map(r => r.pick));
+    const recordText = `${record.wins}-${record.losses}-${record.pushes}${record.win_pct !== null ? ` (${record.win_pct}%)` : ''}`;
 
     const win = window.open('', '_blank');
     if (!win) { alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.'); return; }
@@ -15157,12 +15157,11 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
 </style>
 </head><body>
   <h1>Capper Scorecard Summary <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
-  <div style="font-size:11px;color:#55584d;margin-bottom:6px;">${escapeHtml(filterSummary)}</div>
-  <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${record.picks} picks · ${record.wins}-${record.losses}-${record.pushes} · ${record.win_pct !== null ? record.win_pct + '% win rate' : '—'}</div>
+  <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
   <table class="picks-table">
-    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Result</th><th>His score</th><th>Overall score</th><th>Running total</th></tr></thead>
+    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Tier</th><th>Result</th><th>His score</th><th>Overall score</th></tr></thead>
     <tbody>${bodyRows || '<tr><td colspan="7">No graded picks match these filters.</td></tr>'}</tbody>
-    <tfoot><tr><td colspan="4">Totals</td><td>${Math.round(hisSum * 10) / 10}</td><td>${Math.round(overallSum * 10) / 10}</td><td>${Math.round(running * 10) / 10}</td></tr></tfoot>
+    <tfoot><tr><td colspan="4">Totals</td><td>${recordText}</td><td>${Math.round(hisSum * 10) / 10}</td><td>${Math.round(overallSum * 10) / 10}</td></tr></tfoot>
   </table>
   ${csvExportPopoutScript('capper-scorecard-summary')}
 </body></html>`);
@@ -21759,7 +21758,7 @@ var __missingCheckedIds = ${JSON.stringify(missingCheckedIds || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 408; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 409; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
