@@ -1110,6 +1110,33 @@ function splitTennisNames(selection: string): string[] {
   return selection.split(/\/| over | vs\.? /i).map(s => s.trim()).filter(Boolean);
 }
 
+// CONFIRMED REAL BUG, direct report 2026-09-02: "still nothing updated"
+// after both the code fix AND a one-time SQL reset for the affected rows.
+// Root cause is structural, not specific to those rows or to MMA: once
+// "Find & Update Pick Info" (skipProps=true) finds a real match, it always
+// writes schedule_sync_status='matched' -- correctly, since game_start_time
+// IS resolved -- but every one of these queries then excludes any
+// status='matched' pick from ever being looked at again, INCLUDING by a
+// later "Find & Update Teams / Tournaments" run (skipProps=false) that
+// would otherwise fill in the one field Pick Info deliberately skips:
+// event_name. A pick that's ever touched by Pick Info before Teams/
+// Tournaments gets to it is therefore permanently invisible to Teams/
+// Tournaments from then on, with no error -- confirmed live in the same
+// report: real Tennis picks from weeks ago exhibit the exact same
+// symptom (matched, correct game_start_time, event_name still null),
+// proving this was never MMA-specific. The one-time SQL reset only ever
+// treated the symptom for whichever rows it targeted; this fixes the
+// actual query so no future reset is ever needed again. Scoped to
+// Tennis/MMA/Cricket's own dedicated queries only (not the shared
+// Soccer/KBO/generic-team-sport query) -- those three are the only
+// branches where event_name is a real field this file resolves at all;
+// widening the shared query would make it re-fetch every completed
+// MLB/NBA/etc. pick forever, since event_name is null-by-design (never
+// set, never meant to be) for a normal regular-season team game.
+function reviewedOrMissingEventNameFilter(): string {
+  return 'or(schedule_sync_status.is.null,schedule_sync_status.neq.matched,and(schedule_sync_status.eq.matched,event_name.is.null))';
+}
+
 const MMA_LEAGUE_SLUGS = ['ufc', 'bellator', 'pfl'];
 const MMA_PLACEHOLDER_NAMES = ['tba', 'tbd', 'opponenttba'];
 
@@ -1432,7 +1459,7 @@ Deno.serve(async (req) => {
           // once the pick is even in the candidate set -- no change needed
           // there, only to which picks get considered at all.
           const allTennisPicks = await db(
-            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
+            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),${reviewedOrMissingEventNameFilter()})`
           );
           const tennisPicks = (allTennisPicks || []).filter((p: any) => {
             const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
@@ -1793,7 +1820,7 @@ Deno.serve(async (req) => {
           }
 
           const mmaPicks = ((await db(
-            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
+            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),${reviewedOrMissingEventNameFilter()})`
           )) || []).filter((p: any) => {
             const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
             return !betTypeName.includes('parlay');
@@ -1884,7 +1911,7 @@ Deno.serve(async (req) => {
           // or two out is found by searching today, relying on the
           // existing 30-day series window to actually cover its real date.
           const cricketPicks = ((await db(
-            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
+            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),${reviewedOrMissingEventNameFilter()})`
           )) || []).filter((p: any) => {
             const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
             return !betTypeName.includes('parlay');
@@ -2105,8 +2132,14 @@ Deno.serve(async (req) => {
         // resolved by guessing the closest real game in the wider pool --
         // it stays flagged, same as always, exactly to avoid silently
         // matching "a tennis match from a week ago" onto today's entry.
+        // Only Soccer gets the widened "revisit a matched-but-no-event_name
+        // pick" filter here -- KBO and every generic team sport share this
+        // exact query per-iteration (each loop pass already scopes it to
+        // just ourSport.id), and none of them ever set event_name at all,
+        // so widening it for them would just make every already-complete
+        // MLB/NBA/etc. pick get needlessly re-fetched from ESPN forever.
         const allPicks = await db(
-          `picks?select=id,selection,event_date,date_entered,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,schedule_sync_note,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
+          `picks?select=id,selection,event_date,date_entered,prop_player,prop_team,bet_type_id,event_name,doubleheader_game,schedule_sync_note,bet_types(name,uses_prop_fields,uses_matchup_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),${isSoccer ? reviewedOrMissingEventNameFilter() : 'or(schedule_sync_status.is.null,schedule_sync_status.neq.matched)'})`
         );
         const picks = (allPicks || []).filter((p: any) => {
           const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
