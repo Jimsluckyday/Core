@@ -2799,6 +2799,54 @@ Deno.serve(async (req) => {
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
               sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
             }
+          } else if (isSoccer) {
+            // Direct rule, 2026-09-02: "it should always be assumed that
+            // the game happens on the date we put in or the future...
+            // [exception is] Tennis/KBO" for the documented late-night-
+            // transcription case -- and neither of those reaches this
+            // branch at all (Tennis has its own dedicated matching path
+            // entirely, above; KBO has its own dedicated branch just
+            // above this one). Soccer's own date-window widening
+            // (getCandidateQueryDates, +/-2 days plus any real tournament
+            // window) can pull in a genuinely different game from BEFORE
+            // the pick's own event_date -- confirmed real case: a "Spain"
+            // Moneyline pick dated 2025-06-08 matched both a real
+            // 2025-06-05 France @ Spain friendly AND the real 2025-06-08
+            // Spain @ Portugal game, and got flagged ambiguous even
+            // though only one of the two could possibly be the intended
+            // game under this rule. Excluding any earlier candidate
+            // BEFORE counting ambiguity turns that into a clean single
+            // match instead of a false "needs manual review."
+            const pickOwnDate = pick.event_date || targetDate;
+            const sameOrLaterGames = candidateGames.filter(g => (g.start_time || '').slice(0, 10) >= pickOwnDate);
+            if (sameOrLaterGames.length === 1) {
+              const chosen = sameOrLaterGames[0];
+              const rematch = !hasSlash ? findMatchingGames(pick.selection).find(m => m.game.event_id === chosen.event_id) : null;
+              const updatePayload: Record<string, unknown> = {
+                game_start_time: chosen.start_time, schedule_sync_status: 'matched',
+                schedule_sync_note: `Auto-resolved -- ${candidateGames.length - 1} other same-name match(es) also found, but dated before this pick's own event_date (${pickOwnDate}); an earlier same-name game is never the intended one under the standing "date entered or later" rule, so this pick's own stated date is trusted instead.`
+              };
+              if (rematch) updatePayload.home_away = rematch.isHome ? 'home' : 'away';
+              if (!skipProps && !pick.event_name && chosen.competition_name) updatePayload.event_name = chosen.competition_name;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
+              sportResult.matched.push({
+                id: pick.id, selection: pick.selection, start_time: chosen.start_time,
+                home_away: rematch ? (rematch.isHome ? 'home' : 'away') : null,
+                event_name: updatePayload.event_name || pick.event_name || null, narrowed_from_earlier_candidate: true
+              });
+            } else if (sameOrLaterGames.length === 0) {
+              // Every real same-name match found was dated BEFORE this
+              // pick's own event_date -- under the standing rule, none of
+              // them qualifies as the intended game, so this is really a
+              // "nothing valid found" case, not a genuine ambiguity.
+              const note = `${candidateGames.length} game(s) matched "${pick.selection}", but all dated before this pick's own event_date (${pickOwnDate}): [${candidateGames.map(g => `${g.matchup} (${g.start_time})`).join(' | ')}] -- none qualifies as the intended game under the "date entered or later" rule. May be a wrong event_date, or a real game this data source doesn't cover yet.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
+            } else {
+              const note = `${sameOrLaterGames.length} possible games matched "${pick.selection}" on/after ${pickOwnDate}: [${sameOrLaterGames.map(g => `${g.matchup} (${g.start_time})`).join(' | ')}] -- needs manual review.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
+            }
           } else {
             const note = `${candidateGames.length} possible games matched "${pick.selection}" on ${pick.event_date || targetDate}: [${candidateGames.map(g => `${g.matchup} (${g.start_time})`).join(' | ')}] -- needs manual review.`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
