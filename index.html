@@ -11182,7 +11182,24 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           // node/context sport for every other shape) fixes this without
           // needing a special case for this one array.
           failureCount += val.length;
-          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '' })) });
+          // Direct request 2026-08-31: "a note somewhere or a flag for
+          // ones that the grader won't resolve instead of us guessing and
+          // prompting you... I may task someone else with this who would
+          // have no idea." unsupported_bet_type/unsupported are the two
+          // keys used ONLY for a structural gap (a bet type or sport this
+          // grader has no logic for at all, e.g. NHL Player Props, CFL)
+          // -- these will fail identically every single run, forever,
+          // until real code support gets added, regardless of any data
+          // fix. Every other FAILURE_KEYS member (ambiguous, unmatched,
+          // errors, etc.) is a genuine per-pick data problem that CAN
+          // resolve once corrected and re-run. This distinction already
+          // existed in the raw key name, it just never survived past this
+          // point before -- carried through as `permanent` so both the
+          // on-screen list and the CSV export can show it plainly instead
+          // of someone having to infer it from the wording of the reason
+          // text (or ask what it means).
+          const permanent = key === 'unsupported_bet_type' || key === 'unsupported';
+          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '', permanent })) });
         } else if (isItemArray && PENDING_KEYS.has(key)) {
           pendingCount += val.length;
           pendingGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '' })) });
@@ -11359,10 +11376,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const refreshBtnHtml = (category && it.id)
         ? `<button type="button" class="refresh-automation-btn" data-pick-id="${it.id}" data-category="${escapeHtml(category)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #55584d;background:transparent;color:#55584d;white-space:nowrap;margin-right:4px;">Refresh</button>`
         : '';
+      // Direct request 2026-08-31: a plain, always-visible badge -- not
+      // just something implied by the reason text -- so this reads
+      // correctly at a glance days later, or to someone else entirely who
+      // never saw this conversation and has no reason to know NHL props
+      // or CFL are permanent gaps rather than this pick's own problem.
+      const permanentBadgeHtml = it.permanent
+        ? `<span style="display:inline-block;background:#55584d;color:#eae5d6;font-size:9px;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;padding:1px 6px;border-radius:8px;white-space:nowrap;margin-left:6px;" title="This grader has no logic for this bet type/sport at all -- will fail the same way every run, forever, regardless of any data fix. Needs manual grading, not a re-run.">Always manual</span>`
+        : '';
       html += `<tr data-capper-name="${escapeHtml(it.capperName || '')}">
         <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;" class="automation-capper-cell">${capperCellHtml}</td>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
-        <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}</td>
+        <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}${permanentBadgeHtml}</td>
         <td style="${reasonCellStyle}" ${reasonCellAttrs}>${escapeHtml(shortReason)}</td>
         <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${refreshBtnHtml}${editBtnHtml}${dismissBtnHtml}</td>
       </tr>`;
@@ -11451,8 +11476,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // reformatting. The pointer to that tool is both embedded in the
     // file itself (prefixText, read by whoever/whatever opens it first)
     // and shown right on this button so it's not buried in the file alone.
+    // "Can auto-resolve?" column, direct request 2026-08-31 -- see the
+    // `permanent` flag's own comment above (only failureGroups items ever
+    // carry it; a date-mismatch or still-pending item is neither
+    // permanent nor really "fixable data," so it gets a blank rather than
+    // a misleading "Yes").
     const exportRows = [...s.dateMismatchGroups, ...s.failureGroups, ...s.pendingGroups]
-      .flatMap(g => g.items.map(it => [it.id || '', it.capperName || '', it.sport || '', it.label || '', it.reason || '', '', '']));
+      .flatMap(g => g.items.map(it => [
+        it.id || '', it.capperName || '', it.sport || '', it.label || '', it.reason || '',
+        it.permanent === true ? 'No -- needs manual grading every run, this bet type/sport isn\'t automated' : (it.permanent === false ? 'Maybe -- check the Issue, fix it, and re-run' : ''),
+        '', ''
+      ]));
     if (exportRows.length) {
       html += `<button type="button" id="automationExportCsvBtn" data-export-json="${escapeHtml(JSON.stringify(exportRows))}" data-export-label="${escapeHtml(label)}" style="font-family:inherit;font-size:11px;padding:4px 10px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:transparent;color:#234d35;margin-bottom:4px;">&#8681; Export these ${exportRows.length} to CSV</button>`;
       html += `<div style="font-size:10.5px;color:#55584d;margin-bottom:10px;">Fill in the blank opening_odds/closing_odds columns, then paste this same file into <strong>Data Tools &rarr; Bulk Upload Manual Changes</strong> to write it back -- matched by id, extra columns are ignored.</div>`;
@@ -11714,8 +11748,8 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         // there" -- filling in event_date/event_name/game_start_time_et/
         // prop_team through this same import now stops that pick from
         // being re-flagged by the next automation run.
-        const prefixText = 'Read the Issue column for each row below to see what actually needs fixing -- not every failure here is a missing-odds problem. Depending on the Issue, add whichever of these columns apply: opening_odds, closing_odds, event_date, event_name, game_start_time_et, prop_team (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Bulk Upload Manual Changes -- it matches strictly by id and writes only the columns you included back onto these exact picks. Filling in event_date, event_name, game_start_time_et, or prop_team also marks the pick reviewed for schedule sync, so it stops being re-flagged by the next automation run.';
-        downloadCsv(`${safeName || 'automation-export'}.csv`, ['id', 'Capper', 'Sport', 'Pick', 'Issue', 'opening_odds', 'closing_odds'], rows, prefixText);
+        const prefixText = 'Read the Issue column for each row below to see what actually needs fixing -- not every failure here is a missing-odds problem. Check "Can auto-resolve?" first: "No" means this bet type/sport has no grading logic at all yet (e.g. NHL Player Props, CFL) -- it will fail the exact same way every single run no matter what you fix, so grade it manually and move on, don\'t spend time investigating it as if it were a data problem. "Maybe" means it IS a real, fixable data issue (a typo\'d name, a missing team/date) -- fix it and it should resolve on the next automated run. Depending on the Issue, add whichever of these columns apply: opening_odds, closing_odds, event_date, event_name, game_start_time_et, prop_team (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Bulk Upload Manual Changes -- it matches strictly by id and writes only the columns you included back onto these exact picks. Filling in event_date, event_name, game_start_time_et, or prop_team also marks the pick reviewed for schedule sync, so it stops being re-flagged by the next automation run.';
+        downloadCsv(`${safeName || 'automation-export'}.csv`, ['id', 'Capper', 'Sport', 'Pick', 'Issue', 'Can auto-resolve?', 'opening_odds', 'closing_odds'], rows, prefixText);
       });
     }
   }
@@ -22266,7 +22300,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 417; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 418; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
