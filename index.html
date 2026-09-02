@@ -18410,8 +18410,75 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // Same matching rule as the Consensus report: exact same date, sport,
   // bet type, selection, and line (and player/stat for props) counts as
   // "the same pick" across different cappers.
+  // Direct request 2026-09-03: prefers the normalized name annotateConsensusNames
+  // wrote onto the pick (see its own comment), falling back to the raw
+  // field untouched -- so a pick that was never run through that
+  // annotation pass (or a name with no known_players history to resolve
+  // against yet) behaves exactly as it always has.
   function confluenceKey(p) {
-    return [p.event_date, p.sport_id, p.bet_type_id, p.selection, p.line, p.prop_player, p.prop_stat].join('|');
+    const sel = p._consensusSelection !== undefined ? p._consensusSelection : p.selection;
+    const prop = p._consensusPropPlayer !== undefined ? p._consensusPropPlayer : p.prop_player;
+    return [p.event_date, p.sport_id, p.bet_type_id, sel, p.line, prop, p.prop_stat].join('|');
+  }
+
+  // CONFIRMED REAL GAP, direct report 2026-09-03: "Pyfer" vs "Joe Pyfer"
+  // split one real fighter's consensus into two groups of 4 instead of
+  // one real group of 8 -- confirmed against real June 2025 UFC 316 data
+  // (7 different fighters showed the identical split, not a one-off).
+  // Individual-competitor sports (no team roster -- MMA/Tennis/Golf) have
+  // no structured player-name field the way Player Props do; the raw
+  // selection/prop_player TEXT is all confluenceKey ever compared, so a
+  // short form and a full form of the same real person never matched.
+  // Resolves each individual-sport pick's name against known_players
+  // (built up over time at grading -- see registerKnownPlayer in
+  // grade_picks_espn_backfill) before it's ever grouped for confluence:
+  // an exact match on a real stored full name wins outright; a bare
+  // surname is trusted ONLY when it's unique across every known_players
+  // row for that sport (never guessed when two real people share it,
+  // same safety bar used everywhere else in this system for this exact
+  // question). A name with zero history in known_players yet (a debut,
+  // or the first time this system has ever graded them) is left exactly
+  // as typed -- there's nothing safe to resolve it against yet, same
+  // "gets better over time, never guesses" behavior known_players itself
+  // was built around, not a regression. Mutates the pick objects in
+  // place (adds _consensusSelection/_consensusPropPlayer) rather than
+  // returning a new array, so every caller that already holds a
+  // reference to these picks (buildBaseEntry, scoreConfluenceFor, the
+  // duplicate-group scan, etc.) sees the normalized value automatically
+  // without needing its own copy of this logic.
+  async function annotateConsensusNames(picks) {
+    const noTeamSportIds = new Set(sports.filter(s => !teams.some(t => t.sport_id === s.id)).map(s => s.id));
+    const relevantSportIds = [...new Set(picks.map(p => p.sport_id))].filter(id => noTeamSportIds.has(id));
+    if (!relevantSportIds.length) return;
+    const knownPlayers = await restAllPages(`known_players?select=name,sport_id&sport_id=in.(${relevantSportIds.join(',')})`);
+    const exactBySport = new Map();   // sport_id -> Map(normalized full name -> real name)
+    const surnamesBySport = new Map(); // sport_id -> Map(normalized surname -> Set(real names))
+    for (const kp of knownPlayers) {
+      if (!exactBySport.has(kp.sport_id)) { exactBySport.set(kp.sport_id, new Map()); surnamesBySport.set(kp.sport_id, new Map()); }
+      exactBySport.get(kp.sport_id).set(normalizeForMatch(kp.name), kp.name);
+      const tokens = kp.name.trim().split(/\s+/);
+      const surname = normalizeForMatch(tokens[tokens.length - 1]);
+      const surnames = surnamesBySport.get(kp.sport_id);
+      if (!surnames.has(surname)) surnames.set(surname, new Set());
+      surnames.get(surname).add(kp.name);
+    }
+    function resolve(rawName, sportId) {
+      if (!rawName || !noTeamSportIds.has(sportId)) return rawName;
+      const exact = exactBySport.get(sportId);
+      const hit = exact ? exact.get(normalizeForMatch(rawName)) : null;
+      if (hit) return hit;
+      const tokens = rawName.trim().split(/\s+/);
+      if (tokens.length === 1) {
+        const surnames = surnamesBySport.get(sportId);
+        const candidates = surnames ? surnames.get(normalizeForMatch(tokens[0])) : null;
+        if (candidates && candidates.size === 1) return [...candidates][0];
+      }
+      return rawName;
+    }
+    for (const p of picks) {
+      p._consensusSelection = resolve(p.selection, p.sport_id);
+      p._consensusPropPlayer = resolve(p.prop_player, p.sport_id);
+    }
   }
 
   // CONFIRMED real need, direct report: "should I add a refresh button for
@@ -18432,6 +18499,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat' +
       '&is_published=eq.true&is_parlay_leg=eq.false'
     );
+    await annotateConsensusNames(rows);
     const keySet = new Set(rows.map(confluenceKey));
     document.querySelectorAll('[data-leg-key]').forEach(row => {
       const isPub = keySet.has(row.getAttribute('data-leg-key'));
@@ -19466,6 +19534,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       if (from) pendingQuery += `&event_date=gte.${from}`;
       if (to) pendingQuery += `&event_date=lte.${to}`;
       const allPendingRaw = await restAllPages(pendingQuery);
+      await annotateConsensusNames(allPendingRaw);
       const confluencePool = allPendingRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
       const parlayCandidatePool = includeParlaysAsCandidates
         ? allPendingRaw.filter(p => p.bet_types && p.bet_types.name === 'Parlay')
@@ -20500,6 +20569,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         wrap.innerHTML = `<div class="empty-state">No picks found for ${targetDate}.</div>`;
         return;
       }
+      await annotateConsensusNames(allDayRaw);
       const confluencePool = allDayRaw.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay'));
       const parlayCandidatePool = allDayRaw.filter(p => p.bet_types && p.bet_types.name === 'Parlay');
 
@@ -22533,15 +22603,6 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
   // ---------- version check ----------
   const LOCAL_VERSION = 430; // bump this, and the matching row in Supabase, whenever this file is updated
-  // v427 is a deliberate ROLLBACK to v423's code (Publish Ranking's
-  // confluence scoring), direct report 2026-09-03: v424/425/426's
-  // consensus-name normalization broke live scoring in production --
-  // every MMA pick capped under 43 (previously clustering near 50) and
-  // the Unpublish control missing on already-published picks, with zero
-  // new data graded in between and the v426 hotfix not resolving either
-  // symptom. Rolled back rather than shipping a third guess while the
-  // tool couldn't be safely used -- see the parked feature branch notes
-  // for the real root-cause investigation before re-attempting this.
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
