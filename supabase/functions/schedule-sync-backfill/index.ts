@@ -882,6 +882,38 @@
 //     protected from this exact gap by ESPN's own "returns the whole
 //     tournament regardless of date" quirk (see Fix #13).
 //
+// 40. MMA now has real schedule coverage -- direct complaint: "91 picks to
+//     update the start time which isn't an acceptable solution given how
+//     much people seem to like giving out MMA picks in this group." MMA
+//     was previously lumped into the same "no automated schedule source"
+//     bucket as Golf/CFL, on the assumption ESPN had no MMA coverage at
+//     all -- untested, and wrong: confirmed directly, ESPN exposes
+//     mma/ufc, mma/bellator, and mma/pfl scoreboard endpoints (same shape
+//     as every other sport's scoreboard), each event's `competitions`
+//     array holding one entry PER FIGHT with its own real start time
+//     (confirmed live: UFC 316's early fights show 2025-06-07T22:00Z, its
+//     later fights 2025-06-08T00:00Z -- a card starting in primetime ET
+//     genuinely crosses into the next UTC day by its main event, so a
+//     single-date fetch would miss real fights on the pick's own stated
+//     event_date). Gets its own dedicated matching path (MMA_LEAGUE_SLUGS
+//     below), same architecture as Tennis's player-vs-player path rather
+//     than the generic team-vs-team one, but simpler: a fight card is a
+//     single night (no multi-week tournament window to widen across), and
+//     MMA has no home/away side to resolve (already in
+//     NO_HOME_AWAY_SPORTS). Fighter names arrive in every shape a capper
+//     types them in this real data (last name only -- "Pyfer"; full name
+//     -- "Sean O'Malley"; a multi-word surname with the given name dropped
+//     -- "Cortes Acosta" for "Waldo Cortes Acosta"; even first/last
+//     reversed -- "Wang Cong" for ESPN's own "Cong Wang") -- matched via
+//     exact-normalized, then order-invariant sorted-token comparison
+//     (fixes the reversed-name case), then a substring/surname check
+//     trusted only when it singles out exactly one real fighter fighting
+//     that day, same "unique across the whole day's pool" safety bar
+//     already used for team bare-locations and Tennis surnames elsewhere
+//     in this file. Also fills in event_name (the real card name, e.g.
+//     "UFC 316: Dvalishvili vs. O'Malley 2") the same way Tennis fills in
+//     tournamentName, closing the OTHER field these picks were missing.
+//
 // Run it once per date you want to catch up: POST /schedule-sync-backfill?date=2026-06-01
 // Optionally add &sport=MLB to run just one sport at a time, or &skipProps=true
 // to only touch game_start_time/home_away and never prop_team/event_name.
@@ -1078,6 +1110,22 @@ function splitTennisNames(selection: string): string[] {
   return selection.split(/\/| over | vs\.? /i).map(s => s.trim()).filter(Boolean);
 }
 
+const MMA_LEAGUE_SLUGS = ['ufc', 'bellator', 'pfl'];
+const MMA_PLACEHOLDER_NAMES = ['tba', 'tbd', 'opponenttba'];
+
+function splitMmaNames(selection: string): string[] {
+  return selection.split(/\/| vs\.? /i).map(s => s.trim()).filter(Boolean);
+}
+
+// Order-invariant identity for a fighter name -- normalize() already strips
+// spaces, so it can't tell "Wang Cong" from "Cong Wang" apart from a genuine
+// mismatch. Tokenizing FIRST, then sorting those tokens before normalizing
+// away the spaces, makes reversed name order compare equal (a real, confirmed
+// case: a capper's "Wang Cong" against ESPN's own "Cong Wang").
+function mmaSortedNameKey(name: string): string {
+  return name.trim().split(/\s+/).map(normalize).filter(Boolean).sort().join('|');
+}
+
 function suggestClosestTennisPlayer(rawName: string, candidateNames: string[]): string | null {
   const norm = normalize(rawName);
   if (!norm || !candidateNames.length) return null;
@@ -1207,6 +1255,7 @@ Deno.serve(async (req) => {
       const sportNormName = normalize(ourSport.name);
       const isSoccer = sportNormName === 'soccer';
       const isTennis = sportNormName === 'tennis';
+      const isMMA = sportNormName === 'mma';
       const isKBO = sportNormName === 'kbo';
       const isCricket = sportNormName === 'cricket';
       // CONFIRMED FIX, direct report 2026-08-30: "no matching CFL game
@@ -1229,7 +1278,7 @@ Deno.serve(async (req) => {
       // per-pick mismatch that it deserves its own honest category.
       const isCFL = sportNormName === 'cfl';
       const espnPath = ESPN_SPORT_MAP[sportNormName];
-      if (!isSoccer && !isTennis && !isKBO && !isCricket && (!espnPath || isCFL)) {
+      if (!isSoccer && !isTennis && !isMMA && !isKBO && !isCricket && (!espnPath || isCFL)) {
         const needsHomeAwayHere = !NO_HOME_AWAY_SPORTS.includes(sportNormName);
         const unsupportedPicks = await db(
           `picks?select=id,selection,home_away,game_start_time,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
@@ -1633,6 +1682,173 @@ Deno.serve(async (req) => {
           }
 
           overall.sports_processed.push(tennisSportResult);
+          continue;
+        }
+
+        if (isMMA) {
+          // A card's fights span more than one calendar date in UTC once
+          // it runs late into the night (confirmed live: UFC 316's later
+          // fights land on the day AFTER its own event date) -- fetch a
+          // +/-1 day window around targetDate, same reasoning as KBO's own
+          // window elsewhere in this file, rather than a single-date fetch
+          // that would miss real fights on the night side of midnight UTC.
+          const mmaDateSet = new Set<string>();
+          for (const offset of [-1, 0, 1]) {
+            const d = new Date(targetDate + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() + offset);
+            mmaDateSet.add(d.toISOString().slice(0, 10).replace(/-/g, ''));
+          }
+          const mmaResults = await Promise.allSettled(
+            [...mmaDateSet].flatMap(d => MMA_LEAGUE_SLUGS.map(slug =>
+              espnFetch(`https://site.api.espn.com/apis/site/v2/sports/mma/${slug}/scoreboard?dates=${d}`).then(r => r.ok ? r.json() : null)
+            ))
+          );
+
+          type MmaFight = { fightId: string; startTime: string; fighterNames: string[]; matchup: string; eventName: string | null };
+          const seenFightIds = new Set<string>();
+          const mmaFights: MmaFight[] = [];
+          for (const result of mmaResults) {
+            if (result.status !== 'fulfilled' || !result.value) continue;
+            for (const ev of (result.value.events || [])) {
+              for (const comp of (ev.competitions || [])) {
+                if (!comp.id || seenFightIds.has(comp.id)) continue;
+                seenFightIds.add(comp.id);
+                const names = (comp.competitors || [])
+                  .map((c: any) => c.athlete && c.athlete.displayName)
+                  .filter((n: string) => n && !MMA_PLACEHOLDER_NAMES.includes(normalize(n)));
+                if (names.length < 2) continue;
+                mmaFights.push({
+                  fightId: comp.id,
+                  startTime: comp.date || ev.date,
+                  fighterNames: names,
+                  matchup: names.join(' vs. '),
+                  eventName: ev.name || null
+                });
+              }
+            }
+          }
+
+          const mmaFighterNamesToday = [...new Set(mmaFights.flatMap(f => f.fighterNames))];
+          // Bare single-name token counts across the WHOLE day's card pool
+          // (every promotion, every fight) -- same "only trust a bare name
+          // when it's unique across everyone in play that day" safety bar
+          // already used for team bare-locations and Tennis surnames
+          // elsewhere in this file. The overwhelming majority of these
+          // picks give a last name only (e.g. "Pyfer"), so this is the path
+          // that actually resolves most of them.
+          const mmaTokenCounts = new Map<string, number>();
+          for (const n of mmaFighterNamesToday) {
+            for (const t of n.trim().split(/\s+/).map(normalize).filter(Boolean)) {
+              mmaTokenCounts.set(t, (mmaTokenCounts.get(t) || 0) + 1);
+            }
+          }
+
+          function findMmaFight(rawName: string): { fight: MmaFight; matchedName: string } | 'ambiguous' | null {
+            const norm = normalize(rawName);
+            if (!norm) return null;
+            const key = mmaSortedNameKey(rawName);
+            const candidates: { fight: MmaFight; matchedName: string }[] = [];
+            for (const fight of mmaFights) {
+              for (const name of fight.fighterNames) {
+                if (normalize(name) === norm || mmaSortedNameKey(name) === key) {
+                  candidates.push({ fight, matchedName: name });
+                  break;
+                }
+              }
+            }
+            if (!candidates.length && norm.length >= 4) {
+              // Substring/suffix match -- catches a multi-word surname with
+              // the given name dropped (e.g. "Cortes Acosta" for the real
+              // "Waldo Cortes Acosta"). Only trusted when every hit across
+              // the whole day's pool resolves to the SAME single fight
+              // (checked below via distinctFights), same as everywhere else
+              // in this file that allows a partial-name match.
+              for (const fight of mmaFights) {
+                for (const name of fight.fighterNames) {
+                  const nameNorm = normalize(name);
+                  if (nameNorm.includes(norm) || norm.includes(nameNorm)) {
+                    candidates.push({ fight, matchedName: name });
+                    break;
+                  }
+                }
+              }
+            }
+            if (!candidates.length) {
+              const tokens = rawName.trim().split(/\s+/).map(normalize).filter(Boolean);
+              if (tokens.length === 1 && (mmaTokenCounts.get(tokens[0]) || 0) === 1) {
+                for (const fight of mmaFights) {
+                  for (const name of fight.fighterNames) {
+                    if (name.trim().split(/\s+/).map(normalize).includes(tokens[0])) {
+                      candidates.push({ fight, matchedName: name });
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            const distinctFights = new Set(candidates.map(c => c.fight.fightId));
+            if (distinctFights.size === 1) return candidates[0];
+            if (distinctFights.size > 1) return 'ambiguous';
+            return null;
+          }
+
+          const mmaPicks = ((await db(
+            `picks?select=id,selection,prop_player,bet_type_id,event_name,event_date,bet_types(name,uses_prop_fields)&sport_id=eq.${ourSport.id}&and=(or(event_date.eq.${targetDate},date_entered.eq.${targetDate}),or(schedule_sync_status.is.null,schedule_sync_status.neq.matched))`
+          )) || []).filter((p: any) => {
+            const betTypeName = (p.bet_types && p.bet_types.name || '').toLowerCase();
+            return !betTypeName.includes('parlay');
+          });
+
+          const mmaSportResult = { sport: ourSport.name, fights_found: mmaFights.length, matched: [] as any[], unmatched: [] as any[] };
+
+          for (const pick of mmaPicks) {
+            const isProp = pick.bet_types && pick.bet_types.uses_prop_fields;
+            const tokens = isProp
+              ? (pick.prop_player ? splitMmaNames(pick.prop_player) : [])
+              : splitMmaNames(pick.selection);
+
+            if (!tokens.length) {
+              const note = `This pick has no fighter name recorded -- can't be matched to a fight card without one.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              mmaSportResult.unmatched.push({ id: pick.id, selection: '(no fighter name set)', reason: note });
+              continue;
+            }
+
+            const resolved = tokens.map(t => findMmaFight(t));
+            if (resolved.some(r => r === 'ambiguous')) {
+              const note = `"${tokens.join(' / ')}" matches more than one fighter fighting on/around ${targetDate} -- needs manual review to confirm which fight this is.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              mmaSportResult.unmatched.push({ id: pick.id, selection: tokens.join(' / '), reason: note });
+              continue;
+            }
+            const realResolved = resolved as ({ fight: MmaFight; matchedName: string } | null)[];
+            const missingTokens = tokens.filter((_, i) => !realResolved[i]);
+            if (missingTokens.length) {
+              const suggestions = missingTokens
+                .map(t => { const s = suggestClosestPlayer(t, mmaFighterNamesToday); return s ? `"${t}" -> "${s}"` : null; })
+                .filter(Boolean);
+              const note = `Could not find ${missingTokens.map(t => `"${t}"`).join(', ')} on any UFC/Bellator/PFL card within a day of ${targetDate} -- may be a name spelling issue, or this card/promotion isn't covered yet.${suggestions.length ? ' ' + suggestions.join(', ') + '.' : ''}`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              mmaSportResult.unmatched.push({ id: pick.id, selection: tokens.join(' / '), reason: note });
+              continue;
+            }
+            const fightIds = new Set(realResolved.map(r => r!.fight.fightId));
+            if (fightIds.size > 1) {
+              const note = `Each name in "${tokens.join(' / ')}" was found on today's card, but not in the same fight -- needs manual review.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
+              mmaSportResult.unmatched.push({ id: pick.id, selection: tokens.join(' / '), reason: note });
+              continue;
+            }
+            const fight = realResolved[0]!.fight;
+            const updatePayload: Record<string, unknown> = {
+              game_start_time: fight.startTime, schedule_sync_status: 'matched', schedule_sync_note: null
+            };
+            if (!skipProps && !pick.event_name && fight.eventName) updatePayload.event_name = fight.eventName;
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
+            mmaSportResult.matched.push({ id: pick.id, selection: tokens.join(' / '), start_time: fight.startTime, matchup: fight.matchup, event_name: updatePayload.event_name || pick.event_name || null });
+          }
+
+          overall.sports_processed.push(mmaSportResult);
           continue;
         }
 
