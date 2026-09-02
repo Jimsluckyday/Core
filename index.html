@@ -8175,6 +8175,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (p.line_flagged_for_review) detail += ` <span style="color:var(--stamp-amber);" title="${escapeHtml(p.line_flag_note || 'Flagged for a later look -- not blocking, grading proceeds normally against the entered line.')}">&#9873; line flagged</span>`;
       if (p.pick_tier > 0) detail += ` <span style="color:var(--stamp-amber);font-weight:bold;">&#11088; Tier ${p.pick_tier}</span>`;
       else if (p.pick_tier < 0) detail += ` <span style="color:var(--stamp-red);font-weight:bold;">&#9660; Tier ${p.pick_tier}</span>`;
+      // Direct follow-up 2026-09-02: "where in these files am I seeing the
+      // indication on what game it is. I don't see it." doubleheader_game
+      // and notes were added to the separate All Picks pop-out (v419/v420)
+      // but never shown here, on the actual day-to-day Pending Picks tab --
+      // Full edit already read/wrote both fields correctly the whole time,
+      // which is why editing looked fine but the summary row showed
+      // nothing. Same at-a-glance pattern as the Tier stamps just above;
+      // notes shows as a hover icon (not inline text) since a note can run
+      // long and this row is already dense.
+      if (p.doubleheader_game) detail += ` <span style="color:var(--ink-soft);font-weight:bold;">[Game ${p.doubleheader_game}]</span>`;
+      if (p.notes) detail += ` <span style="color:var(--ink-soft);cursor:help;" title="${escapeHtml(p.notes)}">&#128221;</span>`;
       // Collapsed by default -- clicking fetches and inserts this parlay's
       // linked legs as a sub-row right underneath, so the summary view
       // stays uncluttered but the detail is one click away.
@@ -22400,7 +22411,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 420; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 421; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
