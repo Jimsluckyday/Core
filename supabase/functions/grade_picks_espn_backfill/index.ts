@@ -544,6 +544,20 @@ Deno.serve(async (req) => {
       return combined < threshold ? 'win' : 'loss';
     }
 
+    // CONFIRMED REAL GAP, direct report 2026-09-03 (user directly validated
+    // real Jun 7 2025 data): "Bet type 'Both Teams to Score First 5' is not
+    // supported by this grader -- needs manual grading." Game-level, same
+    // shape as No/Yes Run First Inning above -- doesn't matter which team,
+    // just whether BOTH scored at least once through 5 (or 7) innings.
+    // Reuses first5_home/first7_home/away, already fetched for Team Total
+    // First 5/Moneyline First5/Total First5-7 above -- no new data needed.
+    function gradeBothTeamsToScoreFirstN(score: any, n: 5 | 7): 'win' | 'loss' | null {
+      const homeVal = n === 5 ? score.first5_home : score.first7_home;
+      const awayVal = n === 5 ? score.first5_away : score.first7_away;
+      if (homeVal === null || awayVal === null) return null;
+      return (homeVal > 0 && awayVal > 0) ? 'win' : 'loss';
+    }
+
     // Moneyline/Spread 1st Inning (MLB) and 1st Quarter/1st Half (NBA) --
     // direct request 2026-08-20: "if it's a question of it can be resolved
     // the answer should always be yes." Confirmed directly against ESPN's
@@ -2052,6 +2066,8 @@ Deno.serve(async (req) => {
             && !isTotalFirst5 && !isTotalFirst7;
           const isNRFI = betTypeNorm === 'norunfirstinning';
           const isYRFI = betTypeNorm === 'yesrunfirstinning';
+          const isBothTeamsToScoreFirst5 = betTypeNorm === 'bothteamstoscorefirst5';
+          const isBothTeamsToScoreFirst7 = betTypeNorm === 'bothteamstoscorefirst7';
           // Direct request 2026-08-20: "if it's a question of it can be
           // resolved the answer should always be yes." MLB Moneyline 1st
           // Inning reuses first_inning_home/away, already fetched for
@@ -2080,6 +2096,7 @@ Deno.serve(async (req) => {
           const propsSupportedForThisSport = PLAYER_PROP_SPORTS.includes(sportNormForProps);
           const supported = isMoneyline || isSpread || isTotalType || isNRFI || isYRFI
             || isTeamTotal || isTeamTotalFirst5 || isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7
+            || isBothTeamsToScoreFirst5 || isBothTeamsToScoreFirst7
             || isMoneyline1stInning || isSpread1stQuarter || isSpread1stHalf || isMoneyline1stHalf
             || isMoneyline1stQuarter
             || (isPlayerProp && propsSupportedForThisSport);
@@ -2178,7 +2195,7 @@ Deno.serve(async (req) => {
           // Moneyline/Spread already use. Team Total and Moneyline First5
           // are single-team bet types (per admin.html's uses_matchup_fields
           // list) and always fall through to the single-team path below.
-          if (hasSlash && (isTotalType || isNRFI || isYRFI || isTotalFirst5 || isTotalFirst7)) {
+          if (hasSlash && (isTotalType || isNRFI || isYRFI || isTotalFirst5 || isTotalFirst7 || isBothTeamsToScoreFirst5 || isBothTeamsToScoreFirst7)) {
             const [teamA, teamB] = pick.selection.split('/').map((s: string) => s.trim());
             const matchesA = findMatchingGames(teamA);
             const matchesB = findMatchingGames(teamB);
@@ -2283,6 +2300,8 @@ Deno.serve(async (req) => {
           else if (isMoneylineFirst5) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 5);
           else if (isTotalFirst5) grade = gradeTotalFirstN(game.score, 5, Number(pick.line));
           else if (isTotalFirst7) grade = gradeTotalFirstN(game.score, 7, Number(pick.line));
+          else if (isBothTeamsToScoreFirst5) grade = gradeBothTeamsToScoreFirstN(game.score, 5);
+          else if (isBothTeamsToScoreFirst7) grade = gradeBothTeamsToScoreFirstN(game.score, 7);
           else if (isMoneyline1stInning || isSpread1stQuarter || isMoneyline1stQuarter) {
             // Same field for all three -- see gradeMoneylinePeriod/gradeSpreadPeriod's
             // own comment: first_inning_home/away holds "period 1" of
@@ -2298,7 +2317,7 @@ Deno.serve(async (req) => {
           if (!grade) {
             const note = (isNRFI || isYRFI)
               ? '1st-inning score data looked incomplete or unclear -- needs manual review.'
-              : (isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7 || isTeamTotalFirst5)
+              : (isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7 || isTeamTotalFirst5 || isBothTeamsToScoreFirst5 || isBothTeamsToScoreFirst7)
               ? 'First 5/7 innings score data looked incomplete or unclear -- needs manual review.'
               : (isMoneyline1stInning || isSpread1stQuarter || isMoneyline1stQuarter)
               ? '1st period score data looked incomplete or unclear -- needs manual review.'
