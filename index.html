@@ -6579,6 +6579,28 @@ These are almost always the same day, so "Date entered" only fills in a starting
     try {
       if (editingId) {
         await rest(`picks?id=eq.${editingId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+        // Direct request 2026-09-03: "is there a timestamp to see when I
+        // publish vs when I grade... can we add one for future debugging."
+        // The automated grading tools now all stamp graded_at (see their
+        // own PATCH bodies) -- this covers the one remaining path, a
+        // manual result correction typed right into Full Edit's own
+        // dropdown. Deliberately a SEPARATE, guarded follow-up PATCH
+        // (graded_at=is.null) rather than folding it into payload above --
+        // this form re-saves result on EVERY edit regardless of whether
+        // it actually changed, and unconditionally stamping "now" here
+        // would silently overwrite a pick's real original grading time
+        // just because someone fixed an unrelated typo later. Same
+        // write-once safety already proven for first_scored_score.
+        if (payload.result && payload.result !== 'pending') {
+          try {
+            await rest(`picks?id=eq.${editingId}&graded_at=is.null`, {
+              method: 'PATCH',
+              body: JSON.stringify({ graded_at: new Date().toISOString() })
+            });
+          } catch (e) {
+            console.warn('Could not stamp graded_at for pick', editingId, e.message);
+          }
+        }
         let msg = 'Pick updated.';
         if (parlayNumberVal) {
           await linkLegToParlay(capper_id, event_date, sport_id, parlayNumberVal, editingId, payload.pick_tier, payload.raw_unit_size);
@@ -16468,7 +16490,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       try {
         await Promise.all(selectedPicks.map(p => rest(`picks?id=eq.${p.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ result: 'pending', grading_status: null, grading_note: null })
+          body: JSON.stringify({ result: 'pending', grading_status: null, grading_note: null, graded_at: null })
         })));
         wrap.innerHTML = `<div class="msg ok">Reset ${selectedPicks.length} pick${selectedPicks.length === 1 ? '' : 's'} back to pending.</div>`;
         await refreshPicksList();
@@ -18195,7 +18217,25 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
               payload.schedule_sync_status = 'matched';
               payload.schedule_sync_note = null;
             }
-            return rest(`picks?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+            return rest(`picks?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify(payload) }).then(async () => {
+              // Direct request 2026-09-03: "is there a timestamp to see
+              // when I publish vs when I grade... for future debugging."
+              // A separate, guarded follow-up (graded_at=is.null) rather
+              // than folding into payload above -- re-running the same
+              // corrections file a second time (a real, normal thing to
+              // do while researching) must never stamp a fresh "now" over
+              // a pick's real original grading time.
+              if (r.result) {
+                try {
+                  await rest(`picks?id=eq.${r.id}&graded_at=is.null`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ graded_at: new Date().toISOString() })
+                  });
+                } catch (e) {
+                  console.warn('Could not stamp graded_at for pick', r.id, e.message);
+                }
+              }
+            });
           }));
           wrap.innerHTML = `<div class="msg ok">Applied ${matchedRows.length} correction${matchedRows.length === 1 ? '' : 's'}.</div>`;
           $('gradingCorrectionsInput').value = '';
@@ -19840,7 +19880,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     wrap.innerHTML = '<div class="empty-state">Loading published picks...</div>';
 
     try {
-      let query = `picks?select=id,event_date,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result,pick_tier,published_at,published_score,published_was_hot,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&is_published=eq.true`;
+      let query = `picks?select=id,event_date,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result,pick_tier,published_at,graded_at,published_score,published_was_hot,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&is_published=eq.true`;
       if (capperFilter) query += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (statusFilter) query += `&result=eq.${statusFilter}`;
@@ -19948,11 +19988,19 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     });
 
     $('exportAllPublishedBtn').addEventListener('click', () => {
-      const cols = ['Date', 'Capper', 'Sport', 'Bet Type', 'Selection', 'Line', 'Player', 'Prop Team', 'Prop Stat', 'Tier', 'Opening Odds', 'Closing Odds', 'Result', 'Was Hot Pick', 'Score at Publish', 'Published At'];
+      // "Graded At" added directly alongside "Published At" 2026-09-03,
+      // direct request: "is there a timestamp to see when I publish vs
+      // when I grade the picks... for future debugging." Every grading
+      // path (automated backfill, manual Win/Loss/Push, Full Edit,
+      // Grading Corrections import) now stamps graded_at -- putting both
+      // timestamps side by side here is what actually answers "did this
+      // capper's record change between when I published and now,"
+      // instead of having to guess from the final score alone.
+      const cols = ['Date', 'Capper', 'Sport', 'Bet Type', 'Selection', 'Line', 'Player', 'Prop Team', 'Prop Stat', 'Tier', 'Opening Odds', 'Closing Odds', 'Result', 'Was Hot Pick', 'Score at Publish', 'Published At', 'Graded At'];
       const rows = picks.map(p => [
         p.event_date, p.cappers ? p.cappers.name : '', p.sports ? p.sports.name : '', p.bet_types ? p.bet_types.name : '',
         p.selection, p.line ?? '', p.prop_player || '', p.prop_team || '', p.prop_stat || '', p.pick_tier || 0, p.opening_odds ?? '', p.closing_odds ?? '',
-        p.result, p.published_was_hot ? 'Yes' : 'No', p.published_score ?? '', p.published_at || ''
+        p.result, p.published_was_hot ? 'Yes' : 'No', p.published_score ?? '', p.published_at || '', p.graded_at || ''
       ]);
       downloadCsv(`all-published-picks-${new Date().toISOString().split('T')[0]}.csv`, cols, rows);
     });
@@ -22464,7 +22512,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 428; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 429; // bump this, and the matching row in Supabase, whenever this file is updated
   // v427 is a deliberate ROLLBACK to v423's code (Publish Ranking's
   // confluence scoring), direct report 2026-09-03: v424/425/426's
   // consensus-name normalization broke live scoring in production --

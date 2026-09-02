@@ -324,7 +324,7 @@ Deno.serve(async (req) => {
         }
         const won = backed.order === 1;
         await db(supabaseUrl, serviceRoleKey, `picks?id=eq.${p.id}`, {
-          method: 'PATCH', body: JSON.stringify({ result: won ? 'win' : 'loss' })
+          method: 'PATCH', body: JSON.stringify({ result: won ? 'win' : 'loss', graded_at: new Date().toISOString() })
         });
         result.graded.push({ id: p.id, prop_player: p.prop_player, result: won ? 'win' : 'loss', finalOrder: backed.order });
         await registerKnownPlayer(supabaseUrl, serviceRoleKey, golfSport.id, (backed.athlete && backed.athlete.displayName) || p.prop_player);
@@ -385,7 +385,7 @@ Deno.serve(async (req) => {
       else outcome = 'push';
 
       await db(supabaseUrl, serviceRoleKey, `picks?id=eq.${p.id}`, {
-        method: 'PATCH', body: JSON.stringify({ result: outcome })
+        method: 'PATCH', body: JSON.stringify({ result: outcome, graded_at: new Date().toISOString() })
       });
       result.graded.push({ id: p.id, prop_player: p.prop_player, opponent: p.selection, scope: scopeLabel, backedVal, oppVal, result: outcome });
       // Both golfers in this matchup are now confirmed real (this exact

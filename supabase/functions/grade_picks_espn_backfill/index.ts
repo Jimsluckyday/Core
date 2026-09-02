@@ -387,14 +387,14 @@ Deno.serve(async (req) => {
               if (anyLoss) {
                 await db(`picks?id=eq.${parlay.id}`, {
                   method: 'PATCH',
-                  body: JSON.stringify({ result: 'loss', grading_status: 'graded', grading_note: null })
+                  body: JSON.stringify({ result: 'loss', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
                 });
                 parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: 'loss', legs: legs.map(legSummary) });
               } else if (allDecided && allWinOrPush) {
                 const grade = anyWin ? 'win' : 'push';
                 await db(`picks?id=eq.${parlay.id}`, {
                   method: 'PATCH',
-                  body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null })
+                  body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
                 });
                 parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: grade, legs: legs.map(legSummary) });
               } else if (anyAmbiguous) {
@@ -1550,7 +1550,7 @@ Deno.serve(async (req) => {
             const match = resolved.match;
             if (!match.completed) {
               if (match.voided) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1589,7 +1589,7 @@ Deno.serve(async (req) => {
               const threshold = Math.abs(line);
               const isOver = line < 0; // project-wide convention: negative line = Over
               const grade = combined === threshold ? 'push' : (isOver ? (combined > threshold ? 'win' : 'loss') : (combined < threshold ? 'win' : 'loss'));
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, total_games: combined });
               continue;
             }
@@ -1610,7 +1610,7 @@ Deno.serve(async (req) => {
               const setsThreshold = Math.abs(setsLine);
               const setsIsOver = setsLine < 0; // same project-wide convention: negative line = Over
               const setsGrade = match.setsPlayed === setsThreshold ? 'push' : (setsIsOver ? (match.setsPlayed > setsThreshold ? 'win' : 'loss') : (match.setsPlayed < setsThreshold ? 'win' : 'loss'));
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setsGrade, grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setsGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setsGrade, matchup: match.matchup, sets_played: match.setsPlayed });
               continue;
             }
@@ -1633,7 +1633,7 @@ Deno.serve(async (req) => {
                 tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
                 continue;
               }
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, own_games: ownGames, opp_games: oppGames });
               continue;
             }
@@ -1652,7 +1652,7 @@ Deno.serve(async (req) => {
               // convention for a market that never came into play is no
               // action, graded push, not left pending or lost.
               if (match.setsPlayed !== null && setMoneylineIndex >= match.setsPlayed) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1664,7 +1664,7 @@ Deno.serve(async (req) => {
                 continue;
               }
               const setGrade = setWinnerName === ownName ? 'win' : 'loss';
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setGrade, grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setGrade, matchup: match.matchup, set_index: setMoneylineIndex + 1 });
               continue;
             }
@@ -1682,7 +1682,7 @@ Deno.serve(async (req) => {
               // reached that set (shouldn't occur for set 1, but matters
               // for 4th/5th) has no action to grade.
               if (match.setsPlayed !== null && spreadSetIndex >= match.setsPlayed) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1702,14 +1702,14 @@ Deno.serve(async (req) => {
                 tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
                 continue;
               }
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setSpreadGrade, grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setSpreadGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setSpreadGrade, matchup: match.matchup, set_index: spreadSetIndex + 1, own_games: ownSetGames, opp_games: oppSetGames });
               continue;
             }
 
             if (isTotalSet) {
               if (match.setsPlayed !== null && totalSetIndex >= match.setsPlayed) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1727,7 +1727,7 @@ Deno.serve(async (req) => {
               const setThreshold = Math.abs(setLine);
               const setIsOver = setLine < 0; // same project-wide convention: negative line = Over
               const setTotalGrade = setCombined === setThreshold ? 'push' : (setIsOver ? (setCombined > setThreshold ? 'win' : 'loss') : (setCombined < setThreshold ? 'win' : 'loss'));
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setTotalGrade, grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setTotalGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setTotalGrade, matchup: match.matchup, set_index: totalSetIndex + 1, total_games: setCombined });
               continue;
             }
@@ -1742,7 +1742,7 @@ Deno.serve(async (req) => {
               continue;
             }
             const grade = won ? 'win' : 'loss';
-            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
             tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup });
           }
           overall.sports_processed.push(tennisSportResult);
@@ -2117,7 +2117,7 @@ Deno.serve(async (req) => {
               sportResult.ambiguous.push({ id: pick.id, selection: propLabel, reason: result.note });
               continue;
             }
-            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: result.grade, grading_status: 'graded', grading_note: null }) });
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: result.grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
             sportResult.graded.push({ id: pick.id, selection: propLabel, result: result.grade });
             await registerKnownPlayer(ourSport.id, result.matchedName || pick.prop_player, result.matchedTeamName);
             continue;
@@ -2141,7 +2141,7 @@ Deno.serve(async (req) => {
             }
             if (!entry.completed) {
               if (entry.voided) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
                 sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: entry.matchup });
                 continue;
               }
@@ -2155,7 +2155,7 @@ Deno.serve(async (req) => {
               continue;
             }
             const grade = entry.winner ? 'win' : 'loss';
-            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null }) });
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
             sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade });
             // Both fighters in this bout are now confirmed real (this
             // exact fight just resolved on ESPN's own card) -- register
@@ -2249,7 +2249,7 @@ Deno.serve(async (req) => {
             // it, not just Moneyline.
             if (isVoidGameStatus(game.statusName)) {
               const voidNote = `ESPN marked this game ${game.statusName === 'STATUS_POSTPONED' ? 'postponed' : 'canceled'} (${game.matchup}) -- graded push, no action, since it never completed on ${targetDate}.`;
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: game.matchup, note: voidNote });
               continue;
             }
@@ -2315,7 +2315,7 @@ Deno.serve(async (req) => {
 
           await db(`picks?id=eq.${pick.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null })
+            body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
           });
           sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: game.matchup });
         }

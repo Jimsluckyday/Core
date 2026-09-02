@@ -136,14 +136,14 @@ Deno.serve(async (req) => {
               if (anyLoss) {
                 await db(`picks?id=eq.${parlay.id}`, {
                   method: 'PATCH',
-                  body: JSON.stringify({ result: 'loss', grading_status: 'graded', grading_note: null })
+                  body: JSON.stringify({ result: 'loss', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
                 });
                 parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: 'loss' });
               } else if (allDecided && allWinOrPush) {
                 const grade = anyWin ? 'win' : 'push';
                 await db(`picks?id=eq.${parlay.id}`, {
                   method: 'PATCH',
-                  body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null })
+                  body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
                 });
                 parlayRollup.graded.push({ id: parlay.id, selection: parlay.selection, result: grade });
               } else if (anyAmbiguous) {
@@ -415,7 +415,7 @@ Deno.serve(async (req) => {
             // game voids every bet type on it, graded push instead of
             // left stuck pending forever.
             if (isVoidGameStatus(game.score && game.score.event_status)) {
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
               sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: game.matchup });
               continue;
             }
@@ -439,7 +439,7 @@ Deno.serve(async (req) => {
 
           await db(`picks?id=eq.${pick.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null })
+            body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
           });
           sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: game.matchup });
         }
