@@ -18408,18 +18408,19 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   async function annotateConsensusNames(picks) {
     const noTeamSportIds = new Set(sports.filter(s => !teams.some(t => t.sport_id === s.id)).map(s => s.id));
     const relevantSportIds = [...new Set(picks.map(p => p.sport_id))].filter(id => noTeamSportIds.has(id));
-    if (!relevantSportIds.length) return;
-    const knownPlayers = await restAllPages(`known_players?select=name,sport_id&sport_id=in.(${relevantSportIds.join(',')})`);
     const exactBySport = new Map();   // sport_id -> Map(normalized full name -> real name)
     const surnamesBySport = new Map(); // sport_id -> Map(normalized surname -> Set(real names))
-    for (const kp of knownPlayers) {
-      if (!exactBySport.has(kp.sport_id)) { exactBySport.set(kp.sport_id, new Map()); surnamesBySport.set(kp.sport_id, new Map()); }
-      exactBySport.get(kp.sport_id).set(normalizeForMatch(kp.name), kp.name);
-      const tokens = kp.name.trim().split(/\s+/);
-      const surname = normalizeForMatch(tokens[tokens.length - 1]);
-      const surnames = surnamesBySport.get(kp.sport_id);
-      if (!surnames.has(surname)) surnames.set(surname, new Set());
-      surnames.get(surname).add(kp.name);
+    if (relevantSportIds.length) {
+      const knownPlayers = await restAllPages(`known_players?select=name,sport_id&sport_id=in.(${relevantSportIds.join(',')})`);
+      for (const kp of knownPlayers) {
+        if (!exactBySport.has(kp.sport_id)) { exactBySport.set(kp.sport_id, new Map()); surnamesBySport.set(kp.sport_id, new Map()); }
+        exactBySport.get(kp.sport_id).set(normalizeForMatch(kp.name), kp.name);
+        const tokens = kp.name.trim().split(/\s+/);
+        const surname = normalizeForMatch(tokens[tokens.length - 1]);
+        const surnames = surnamesBySport.get(kp.sport_id);
+        if (!surnames.has(surname)) surnames.set(surname, new Set());
+        surnames.get(surname).add(kp.name);
+      }
     }
     function resolve(rawName, sportId) {
       if (!rawName || !noTeamSportIds.has(sportId)) return rawName;
@@ -18438,6 +18439,65 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       p._consensusSelection = resolve(p.selection, p.sport_id);
       p._consensusPropPlayer = resolve(p.prop_player, p.sport_id);
     }
+
+    // CONFIRMED REAL GAP, direct report 2026-09-03, validated against real
+    // June 2025 data before building: a "no side" bet (Over/Under/Total,
+    // No/Yes Run First Inning, Both Teams to Score -- exactly the set
+    // betTypeUsesHomeAway() already treats as having no real side to
+    // assign) has team order that's pure formatting, never signal --
+    // "Chicago Cubs/Washington Nationals" and "Washington Nationals/
+    // Chicago Cubs" are the same real bet. Confirmed 3 real cases split
+    // by word order alone across 3 different real nights (up to 4
+    // cappers in one group). Direct follow-up, same conversation: a
+    // handful of cappers (one repeat offender specifically) only ever
+    // name ONE team on these bets ("Boston Red Sox" instead of "Boston
+    // Red Sox/New York Yankees") -- confirmed 10 real cases, meaning
+    // every one of that capper's Over/Under picks was invisible to
+    // consensus, every night, not an occasional miss. NOT the same fix
+    // as the Spread case just above (direct confirmation: "Boston +8"
+    // vs "Yankees +8" on a Spread ARE two different real calls and must
+    // never merge) -- betTypeUsesHomeAway() is exactly the line already
+    // drawn elsewhere in this codebase between "picks a side" and
+    // "doesn't," reused here rather than inventing a second list.
+    //
+    // The single-team case needs a real opponent to build the same
+    // canonical pair the two-team case builds -- there's no way to spell
+    // that out of the text alone. Borrows it from whichever OTHER pick in
+    // THIS SAME batch already named both teams for the exact same
+    // (sport, game_start_time) -- safe and stable because every caller of
+    // this function already scopes its batch to one day (or one explicit
+    // date range) of real picks, so "who played whom" is settled fact for
+    // that batch, not a moving target between callers. A single-team pick
+    // whose game hasn't been schedule-synced yet (game_start_time still
+    // null) or whose opponent nobody else named that day is left exactly
+    // as typed -- same "don't guess" rule as everywhere else here.
+    function splitPair(sel) {
+      return (sel || '').split('/').map(s => s.trim()).filter(Boolean);
+    }
+    function pairKey(names) {
+      return names.map(n => normalizeForMatch(n)).filter(Boolean).sort().join('+');
+    }
+    const opponentByKey = new Map(); // `${sport_id}|${game_start_time}` -> [resolvedNameA, resolvedNameB]
+    for (const p of picks) {
+      const betTypeName = (p.bet_types && p.bet_types.name) || '';
+      if (betTypeUsesHomeAway(betTypeName)) continue;
+      if (!p.game_start_time) continue;
+      const parts = splitPair(p.selection);
+      if (parts.length !== 2) continue;
+      const key = `${p.sport_id}|${p.game_start_time}`;
+      if (!opponentByKey.has(key)) opponentByKey.set(key, parts.map(n => resolve(n, p.sport_id)));
+    }
+    for (const p of picks) {
+      const betTypeName = (p.bet_types && p.bet_types.name) || '';
+      if (betTypeUsesHomeAway(betTypeName)) continue;
+      const parts = splitPair(p.selection);
+      if (parts.length === 2) {
+        p._consensusSelection = pairKey(parts.map(n => resolve(n, p.sport_id)));
+      } else if (parts.length === 1 && p.game_start_time) {
+        const bothTeams = opponentByKey.get(`${p.sport_id}|${p.game_start_time}`);
+        if (bothTeams) p._consensusSelection = pairKey(bothTeams);
+      }
+    }
   }
 
   // CONFIRMED real need, direct report: "should I add a refresh button for
@@ -18455,7 +18515,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // automatically right after this session's own publish/unpublish action.
   async function refreshPublishedLegFlags() {
     const rows = await restAllPages(
-      'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat' +
+      'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,game_start_time,bet_types(name)' +
       '&is_published=eq.true&is_parlay_leg=eq.false'
     );
     await annotateConsensusNames(rows);
@@ -19446,7 +19506,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // would never publish a leg by itself (it was never his standalone
       // call), so legs never become their own scored/publishable candidate.
       const includeParlaysAsCandidates = !!($('prIncludeParlays') && $('prIncludeParlays').checked);
-      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,first_scored_score,capper_message_timestamp,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
+      let pendingQuery = 'picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,game_start_time,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,first_scored_score,capper_message_timestamp,cappers(name),sports(name),bet_types(name)&result=eq.pending&order=id.asc';
       if (sportFilter) pendingQuery += `&sport_id=eq.${sportFilter}`;
       if (from) pendingQuery += `&event_date=gte.${from}`;
       if (to) pendingQuery += `&event_date=lte.${to}`;
@@ -19529,7 +19589,8 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       let legDetailsById = {};
       const allLegIds = Object.values(parlayLegIdsByParlayId).flat();
       if (allLegIds.length) {
-        const legRows = await restAllPages(`picks?select=id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,result&id=in.(${allLegIds.join(',')})`);
+        const legRows = await restAllPages(`picks?select=id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,game_start_time,bet_types(name),result&id=in.(${allLegIds.join(',')})`);
+        await annotateConsensusNames(legRows);
         legRows.forEach(r => { legDetailsById[r.id] = r; });
       }
 
@@ -19546,9 +19607,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // regardless of which capper published it or which parlay it's
       // being viewed from.
       const publishedStraightRows = await restAllPages(
-        'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat' +
+        'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,game_start_time,bet_types(name)' +
         '&is_published=eq.true&is_parlay_leg=eq.false'
       );
+      await annotateConsensusNames(publishedStraightRows);
       const publishedStraightKeySet = new Set(publishedStraightRows.map(confluenceKey));
 
       // scoreParlayConfluence(entry, ctx) is now the shared top-level
@@ -20472,7 +20534,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // graded or still pending. Parlays are always included as their own
       // candidates here (unlike the live tool's opt-in checkbox) -- a full
       // historical review has no reason to hide half the picture.
-      const dayQuery = `picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,prop_team,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,result,published_score,published_score_breakdown,first_scored_score,first_scored_score_breakdown,cappers(name),sports(name),bet_types(name)&event_date=eq.${targetDate}&order=id.asc`;
+      const dayQuery = `picks?select=id,event_date,capper_id,sport_id,bet_type_id,selection,line,prop_player,prop_stat,prop_team,game_start_time,is_published,pick_tier,raw_confidence_signal,rundown_event_id,is_parlay_leg,result,published_score,published_score_breakdown,first_scored_score,first_scored_score_breakdown,cappers(name),sports(name),bet_types(name)&event_date=eq.${targetDate}&order=id.asc`;
       const allDayRaw = await restAllPages(dayQuery);
       if (!allDayRaw.length) {
         wrap.innerHTML = `<div class="empty-state">No picks found for ${targetDate}.</div>`;
@@ -20509,14 +20571,16 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       let legDetailsById = {};
       const allLegIds = Object.values(parlayLegIdsByParlayId).flat();
       if (allLegIds.length) {
-        const legRows = await restAllPages(`picks?select=id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,result&id=in.(${allLegIds.join(',')})`);
+        const legRows = await restAllPages(`picks?select=id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,game_start_time,bet_types(name),result&id=in.(${allLegIds.join(',')})`);
+        await annotateConsensusNames(legRows);
         legRows.forEach(r => { legDetailsById[r.id] = r; });
       }
 
       const publishedStraightRows = await restAllPages(
-        'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat' +
+        'picks?select=event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,game_start_time,bet_types(name)' +
         '&is_published=eq.true&is_parlay_leg=eq.false'
       );
+      await annotateConsensusNames(publishedStraightRows);
       const publishedStraightKeySet = new Set(publishedStraightRows.map(confluenceKey));
       const parlayCtx = { groups, parlayLegIdsByParlayId, legDetailsById, withBaseAllById, publishedStraightKeySet };
 
@@ -22511,7 +22575,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 424; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 425; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
