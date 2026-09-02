@@ -7614,7 +7614,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const completeness = $('filterCompleteness').value;
     const tierFilter = $('filterTier').value;
 
-    let query = `picks?select=id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,grading_status,grading_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
+    let query = `picks?select=id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,grading_status,grading_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,doubleheader_game,capper_id,sport_id,bet_type_id,source_image,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc`;
     // Supabase silently caps any single response at its own server-side max
     // (confirmed: 1000 rows, regardless of what limit= asks for) -- a limit
     // here only makes sense for a single, non-paginated rest() call safely
@@ -8721,6 +8721,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const propTeamCell = isProp
         ? `<input type="text" class="inline-propteam-input" data-id="${p.id}" value="${escapeHtml(p.prop_team || '')}" style="width:130px;font-family:inherit;font-size:11px;padding:3px 4px;" />`
         : '—';
+      // Direct report 2026-08-31: "I have no way of editing or seeing if
+      // I left a note on a game [doubleheader]... even if I set it in
+      // the new download of the sheet I have I have no way of validating
+      // or correcting it in the database." doubleheader_game was only
+      // ever visible/settable through Full edit (one pick at a time) --
+      // same gap Prop Team had before the fix just above, same fix here:
+      // a real, always-visible, always-editable control right in this
+      // table. Blank/1/2 only, matching the Add Pick form's own
+      // pickDoubleheaderGame field exactly.
+      const doubleheaderCell = `<select class="inline-doubleheader-select" data-id="${p.id}" style="font-family:inherit;font-size:11px;padding:2px 3px;">
+        <option value="" ${!p.doubleheader_game ? 'selected' : ''}>—</option>
+        <option value="1" ${Number(p.doubleheader_game) === 1 ? 'selected' : ''}>Game 1</option>
+        <option value="2" ${Number(p.doubleheader_game) === 2 ? 'selected' : ''}>Game 2</option>
+      </select>`;
       // CONFIRMED direct request 2026-08-14: correcting a pick's date to
       // match a real match found by hand (e.g. Flashscore) used to require
       // Full edit, a separate screen -- direct feedback that doing this for
@@ -8759,7 +8773,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
         missingCell,
         homeAwayCell,
         syncNoteCell,
-        propTeamCell
+        propTeamCell,
+        doubleheaderCell
       ];
       const cellsHtml = cells.map((c, i) => {
         // Sort/filter value must stay the PLAIN capper name (not the richer
@@ -8777,7 +8792,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // string (not the input's HTML) is what actually needs to sort.
         // Sits at index 1 now (not 0) since Date entered/Event date swapped
         // display order -- see the cells array above for the full story.
-        const sortVal = i === 1 ? (p.event_date || '') : (i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : (i === 19 ? (p.prop_team || '') : String(c))))))))))));
+        const sortVal = i === 1 ? (p.event_date || '') : (i === 12 ? p.result : (i === 11 ? oddsStatus : (i === 2 ? capperName : (i === 5 ? (p.prop_player || '') : (i === 7 ? p.selection : (i === 9 ? String(p.pick_tier ?? 0) : (i === 10 ? (p.raw_unit_size || '') : (i === 14 ? (p.event_name || '') : (i === 15 ? (p.game_start_time || '') : (i === 17 ? (p.home_away || '') : (i === 19 ? (p.prop_team || '') : (i === 20 ? (p.doubleheader_game || '') : String(c)))))))))))));
         const extraAttr = i === 12 ? ` data-result-cell="${p.id}"` : '';
         return `<td data-value="${escapeHtml(sortVal).toLowerCase()}"${extraAttr}>${c}</td>`;
       }).join('');
@@ -8821,7 +8836,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // "Status" (Published/Draft) removed -- direct feedback that it wasn't
     // needed here and was just taking up space as more columns got added
     // over time, on a table that's read on mobile as often as desktop.
-    const cols = ['Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team'];
+    const cols = ['Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Source', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team', 'DH game'];
     // Pick was excluded here when Selection first became a live input
     // (v218), matching the same pattern as Tier/Unit size -- but direct
     // feedback confirmed this broke a real, regularly-used workflow: the
@@ -8831,7 +8846,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // data-value attribute directly (not the live input), which the
     // inline-selection-input's own save handler now keeps in sync, so
     // filtering still reflects a correction the moment it's saved.
-    const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time', 'Home/Away']);
+    const noFilterCols = new Set(["Capper's usual", 'Tier', 'Unit size', 'Event name', 'Start time', 'Home/Away', 'DH game']);
     return `
       <table class="picks-table sortable-table" id="dataTable">
         <thead>
@@ -10236,6 +10251,31 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     });
   });
 
+  // Direct report 2026-08-31: "I have no way of editing or seeing if I
+  // left a note on a game [doubleheader]... I have no way of validating
+  // or correcting it in the database." Same real-column, always-editable
+  // pattern as Home/Away above -- this is the field's ONLY other
+  // read/write path besides Full edit (one pick at a time).
+  document.querySelectorAll('select.inline-doubleheader-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const op = opener();
+      if (!op) return;
+      const id = sel.getAttribute('data-id');
+      sel.disabled = true;
+      try {
+        await op.rest('picks?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ doubleheader_game: sel.value ? Number(sel.value) : null })
+        });
+        flashSaveStatus(sel, true);
+      } catch (e) {
+        flashSaveStatus(sel, false, e.message);
+      } finally {
+        sel.disabled = false;
+      }
+    });
+  });
+
   // This popup can't call the main tab's normalizeUnitSize by name (it's a
   // fully separate window, only window.opener.rest and similar exposed
   // functions are reachable) -- small enough to duplicate locally rather
@@ -10624,7 +10664,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // masking this gap until Missing Data (v215) made this the only
       // export path for that workflow. Added as the first column, reading
       // the same data-pick-id attribute the row itself already carries.
-      const cols = ['ID', 'Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team', 'Source Image'];
+      const cols = ['ID', 'Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team', 'DH game', 'Source Image'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -10741,9 +10781,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         // same read-the-input-value reasoning as Event name/Start time above.
         const propTeamCell = row.children[19];
         const propTeamVal = csvField(propTeamCell ? (propTeamCell.querySelector('input') ? propTeamCell.querySelector('input').value.trim() : '') : '');
+        // DH game (table col 20), added 2026-08-31 -- direct report: "I
+        // have no way of editing or seeing if I left a note on a
+        // game [doubleheader]... I have no way of validating or
+        // correcting it in the database." Holds a live <select>, same
+        // read-the-control's-value reasoning as Tier/Home-Away above.
+        const doubleheaderCell = row.children[20];
+        const doubleheaderSel = doubleheaderCell ? doubleheaderCell.querySelector('select') : null;
+        const doubleheaderVal = csvField(doubleheaderSel ? doubleheaderSel.value : '');
         const sourceImage = csvField(row.dataset.sourceImage || '');
         const id = csvField(row.dataset.pickId || '');
-        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, propTeamVal, sourceImage];
+        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, propTeamVal, doubleheaderVal, sourceImage];
       });
       // Direct request 2026-08-28: "we need this built into the ruleset of
       // the file we export so this can be cross compatible with any
@@ -22300,7 +22348,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 418; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 419; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
