@@ -18471,6 +18471,15 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const relevantSportIds = [...new Set(picks.map(p => p.sport_id))].filter(id => noTeamSportIds.has(id));
     const exactBySport = new Map();   // sport_id -> Map(normalized full name -> real name)
     const surnamesBySport = new Map(); // sport_id -> Map(normalized surname -> Set(real names))
+    function seedFullName(sportId, fullName) {
+      if (!exactBySport.has(sportId)) { exactBySport.set(sportId, new Map()); surnamesBySport.set(sportId, new Map()); }
+      exactBySport.get(sportId).set(normalizeForMatch(fullName), fullName);
+      const tokens = fullName.trim().split(/\s+/);
+      const surname = normalizeForMatch(tokens[tokens.length - 1]);
+      const surnames = surnamesBySport.get(sportId);
+      if (!surnames.has(surname)) surnames.set(surname, new Set());
+      surnames.get(surname).add(fullName);
+    }
     if (relevantSportIds.length) {
       let knownPlayers = [];
       try {
@@ -18478,14 +18487,30 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       } catch (e) {
         console.warn('Could not load known_players for consensus matching (has the migration been run yet?):', e.message);
       }
-      for (const kp of knownPlayers) {
-        if (!exactBySport.has(kp.sport_id)) { exactBySport.set(kp.sport_id, new Map()); surnamesBySport.set(kp.sport_id, new Map()); }
-        exactBySport.get(kp.sport_id).set(normalizeForMatch(kp.name), kp.name);
-        const tokens = kp.name.trim().split(/\s+/);
-        const surname = normalizeForMatch(tokens[tokens.length - 1]);
-        const surnames = surnamesBySport.get(kp.sport_id);
-        if (!surnames.has(surname)) surnames.set(surname, new Set());
-        surnames.get(surname).add(kp.name);
+      for (const kp of knownPlayers) seedFullName(kp.sport_id, kp.name);
+    }
+    // CONFIRMED REAL GAP, direct report 2026-09-03: known_players is only
+    // ever populated by grading (see registerKnownPlayer), so a name with
+    // zero graded history anywhere -- a season debut, a first-time
+    // opponent, the very first card a new fighter ever appears on -- has
+    // nothing to resolve a bare surname against even when another capper
+    // in this SAME batch already spelled the full name out today. Also
+    // seeds both maps from every full (multi-word) selection/prop_player
+    // already sitting in THIS batch, so "Pyfer" resolves against a
+    // same-night "Joe Pyfer" immediately, without waiting on a future
+    // grading pass. Skips any value containing "/" (that's a two-side
+    // pair's separator, e.g. an Over/Under matchup string, never a real
+    // person's name) so it never mistakes pair text for a debut player.
+    // Same "never guess" bar as known_players: two different real people
+    // sharing a batch AND a surname makes that surname ambiguous (set size
+    // > 1) and it's left unresolved, exactly like the known_players case.
+    for (const p of picks) {
+      if (!noTeamSportIds.has(p.sport_id)) continue;
+      for (const raw of [p.selection, p.prop_player]) {
+        if (!raw || raw.includes('/')) continue;
+        const tokens = raw.trim().split(/\s+/);
+        if (tokens.length < 2) continue;
+        seedFullName(p.sport_id, raw);
       }
     }
     function resolve(rawName, sportId) {
@@ -22691,7 +22716,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 431; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 432; // bump this, and the matching row in Supabase, whenever this file is updated
   // Consensus-name normalization (originally shipped as v424/425/426) was
   // rolled back 2026-09-03 (v427) after a reported live-scoring regression,
   // then re-investigated and re-applied here on top of v428-430. Root cause
@@ -22701,6 +22726,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // zeroed out real capper history (fixed v430). Both were pre-existing
   // and unrelated to consensus matching, which was re-verified correct via
   // the same isolated-harness tests used before the original ship.
+  // v432, direct report same day: player-name resolution originally only
+  // ever checked known_players (populated by grading), so a name with zero
+  // graded history anywhere -- a debut, a first-time opponent -- had
+  // nothing to resolve a bare surname against even when another capper in
+  // the exact same batch already spelled the full name out that day. Now
+  // also seeds from full names already present in the batch being scored,
+  // closing that day-1 cold-start gap (see annotateConsensusNamesInner's
+  // own comment for the fix and its safety bar).
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
