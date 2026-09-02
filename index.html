@@ -7491,12 +7491,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // NOT the same as "Team Total" or "Draw No Bet", which DO pick a real
   // side and correctly stay excluded from this list.
   const NO_SIDE_BET_TYPES = ['no run first inning', 'yes run first inning', 'both teams to score'];
+  // CONFIRMED REAL GAP, direct report 2026-09-03: real bet_types data has a
+  // "Both Teams to Score First 5" row -- an exact-string match against
+  // 'both teams to score' misses it entirely (same reason 'over/under' is
+  // matched by substring just below, not exact-equality, to already cover
+  // "Over/Under First 5"). Switched every NO_SIDE_BET_TYPES entry to the
+  // same substring check so a First-5/period/half variant of any of these
+  // is never missed the way this one was.
   function betTypeUsesHomeAway(betTypeName) {
     const n = (betTypeName || '').toLowerCase().trim();
     if (n.includes('parlay')) return false;
     if (n.includes('over/under')) return false;
     if (n === 'total') return false;
-    if (NO_SIDE_BET_TYPES.includes(n)) return false;
+    if (NO_SIDE_BET_TYPES.some(t => n.includes(t))) return false;
     return true;
   }
   // Direct request: Tennis, Golf, MMA, and Boxing are individual/combat
@@ -18470,15 +18477,40 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const noTeamSportIds = new Set(sports.filter(s => !teams.some(t => t.sport_id === s.id)).map(s => s.id));
     const relevantSportIds = [...new Set(picks.map(p => p.sport_id))].filter(id => noTeamSportIds.has(id));
     const exactBySport = new Map();   // sport_id -> Map(normalized full name -> real name)
-    const surnamesBySport = new Map(); // sport_id -> Map(normalized surname -> Set(real names))
-    function seedFullName(sportId, fullName) {
-      if (!exactBySport.has(sportId)) { exactBySport.set(sportId, new Map()); surnamesBySport.set(sportId, new Map()); }
-      exactBySport.get(sportId).set(normalizeForMatch(fullName), fullName);
+    const surnamesBySport = new Map(); // sport_id -> Map(normalized trailing suffix -> Set(real names))
+    // CONFIRMED REAL GAP, direct report 2026-09-03, found via real Jun 7
+    // 2025 data: "Cortes Acosta" (dropped first name "Waldo") never merged
+    // with "Waldo Cortes Acosta" -- the old version only ever registered
+    // the LAST token as a resolvable short form, so a two-word partial
+    // name (first name dropped, not just reduced to a bare surname) had
+    // nothing to match against. Registers every trailing suffix of a full
+    // name's tokens (not just the single last one), so "Cortes Acosta" is
+    // just as resolvable as bare "Acosta" -- both are trailing suffixes of
+    // "Waldo Cortes Acosta", found the same way. Same ambiguity bar as
+    // before: two different real full names sharing a trailing suffix
+    // makes that suffix ambiguous (set size > 1) and it's left unresolved.
+    // Deliberately NOT fixed here: a name whose short form is a LEADING
+    // token instead of a trailing one (e.g. family-name-first order, "Wang
+    // Cong" bet as bare "Wang") -- direct discussion 2026-09-03, holding
+    // that one since blindly matching any leading token risks merging two
+    // different real people who share a common first/given name, and the
+    // user expects most of these to shrink out through the name-check
+    // validation pass before it matters (this exact case was a single
+    // instance in the Jun 7 data, not merged, left as typed).
+    function seedSuffixes(sportId, fullName) {
+      if (!surnamesBySport.has(sportId)) surnamesBySport.set(sportId, new Map());
       const tokens = fullName.trim().split(/\s+/);
-      const surname = normalizeForMatch(tokens[tokens.length - 1]);
       const surnames = surnamesBySport.get(sportId);
-      if (!surnames.has(surname)) surnames.set(surname, new Set());
-      surnames.get(surname).add(fullName);
+      for (let start = 1; start < tokens.length; start++) {
+        const suffix = normalizeForMatch(tokens.slice(start).join(' '));
+        if (!surnames.has(suffix)) surnames.set(suffix, new Set());
+        surnames.get(suffix).add(fullName);
+      }
+    }
+    function seedFullName(sportId, fullName) {
+      if (!exactBySport.has(sportId)) exactBySport.set(sportId, new Map());
+      exactBySport.get(sportId).set(normalizeForMatch(fullName), fullName);
+      seedSuffixes(sportId, fullName);
     }
     if (relevantSportIds.length) {
       let knownPlayers = [];
@@ -18494,23 +18526,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // zero graded history anywhere -- a season debut, a first-time
     // opponent, the very first card a new fighter ever appears on -- has
     // nothing to resolve a bare surname against even when another capper
-    // in this SAME batch already spelled the full name out today. Also
-    // seeds both maps from every full (multi-word) selection/prop_player
-    // already sitting in THIS batch, so "Pyfer" resolves against a
-    // same-night "Joe Pyfer" immediately, without waiting on a future
-    // grading pass. Skips any value containing "/" (that's a two-side
-    // pair's separator, e.g. an Over/Under matchup string, never a real
-    // person's name) so it never mistakes pair text for a debut player.
-    // Same "never guess" bar as known_players: two different real people
-    // sharing a batch AND a surname makes that surname ambiguous (set size
-    // > 1) and it's left unresolved, exactly like the known_players case.
+    // in this SAME batch already spelled the full name out today. Seeds
+    // suffixes (not an exact self-match -- see seedSuffixes, deliberately
+    // NOT seedFullName here) from every full (multi-word) selection/
+    // prop_player already sitting in THIS batch, so "Pyfer" resolves
+    // against a same-night "Joe Pyfer" immediately, without waiting on a
+    // future grading pass. Using seedSuffixes rather than seedFullName
+    // matters: exact-registering a batch pick's own text would make it
+    // match itself first and never fall through to check whether it's
+    // actually a shorter form of some OTHER fuller name also in this batch
+    // (exactly the "Cortes Acosta" vs "Waldo Cortes Acosta" case above).
+    // Skips any value containing "/" (that's a two-side pair's separator,
+    // e.g. an Over/Under matchup string, never a real person's name) so it
+    // never mistakes pair text for a debut player. Same "never guess" bar
+    // as known_players: two different real people sharing a batch AND a
+    // trailing suffix makes that suffix ambiguous (set size > 1) and it's
+    // left unresolved, exactly like the known_players case.
     for (const p of picks) {
       if (!noTeamSportIds.has(p.sport_id)) continue;
       for (const raw of [p.selection, p.prop_player]) {
         if (!raw || raw.includes('/')) continue;
         const tokens = raw.trim().split(/\s+/);
         if (tokens.length < 2) continue;
-        seedFullName(p.sport_id, raw);
+        seedSuffixes(p.sport_id, raw);
       }
     }
     function resolve(rawName, sportId) {
@@ -18518,12 +18556,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const exact = exactBySport.get(sportId);
       const hit = exact ? exact.get(normalizeForMatch(rawName)) : null;
       if (hit) return hit;
-      const tokens = rawName.trim().split(/\s+/);
-      if (tokens.length === 1) {
-        const surnames = surnamesBySport.get(sportId);
-        const candidates = surnames ? surnames.get(normalizeForMatch(tokens[0])) : null;
-        if (candidates && candidates.size === 1) return [...candidates][0];
-      }
+      const surnames = surnamesBySport.get(sportId);
+      const candidates = surnames ? surnames.get(normalizeForMatch(rawName)) : null;
+      if (candidates && candidates.size === 1) return [...candidates][0];
       return rawName;
     }
     for (const p of picks) {
@@ -22716,7 +22751,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 432; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 433; // bump this, and the matching row in Supabase, whenever this file is updated
   // Consensus-name normalization (originally shipped as v424/425/426) was
   // rolled back 2026-09-03 (v427) after a reported live-scoring regression,
   // then re-investigated and re-applied here on top of v428-430. Root cause
@@ -22734,6 +22769,22 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // also seeds from full names already present in the batch being scored,
   // closing that day-1 cold-start gap (see annotateConsensusNamesInner's
   // own comment for the fix and its safety bar).
+  // v433, validated directly against real Jun 7 2025 data (not synthetic
+  // cases) at direct request -- "I need to trust that what you build works
+  // and not have to double check everything." Found and fixed two more
+  // real gaps that testing alone hadn't surfaced: (1) a dropped-first-name
+  // partial ("Cortes Acosta" for "Waldo Cortes Acosta") now resolves via a
+  // generalized trailing-suffix match, not just a bare last name -- see
+  // annotateConsensusNamesInner's own comment; (2) "Both Teams to Score
+  // First 5" wasn't recognized as a no-side/pair bet type at all (exact-
+  // string match missed the "First 5" variant) -- betTypeUsesHomeAway now
+  // uses the same substring check already used for Over/Under. Deliberately
+  // NOT fixed: a short form that's a LEADING token instead of a trailing
+  // one (family-name-first order, e.g. "Wang" for "Wang Cong") -- direct
+  // discussion 2026-09-03, held as a harder problem given the false-merge
+  // risk of guessing on a common first name, expected to matter less once
+  // this whole feature has had a chance to run and once real usage moves
+  // into sports/rosters where this convention is rarer.
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
