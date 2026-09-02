@@ -1822,6 +1822,29 @@ Deno.serve(async (req) => {
               continue;
             }
             const realResolved = resolved as ({ fight: MmaFight; matchedName: string } | null)[];
+            // CONFIRMED REAL GAP, direct follow-up 2026-09-02: "Vincente
+            // Luque" (an extra "n" -- the real fighter is "Vicente Luque",
+            // confirmed against the real Luque vs. Holland result) correctly
+            // produced the right suggestion in the note text, but that
+            // suggestion was never actually APPLIED -- unlike Tennis, which
+            // auto-corrects a single bad name once its suggestion resolves
+            // to exactly one real match. Same fix here: a token that misses
+            // outright gets one attempt at its suggested spelling, and only
+            // trusts it when THAT name resolves to exactly one real fight
+            // today (findMmaFight's own uniqueness check, the same safety
+            // bar every other match in this branch already relies on) --
+            // never a blind rewrite.
+            const spellingCorrections: Record<string, string> = {};
+            const stillMissingIdx = tokens.map((_, i) => i).filter(i => !realResolved[i]);
+            for (const i of stillMissingIdx) {
+              const suggestion = suggestClosestPlayer(tokens[i], mmaFighterNamesToday);
+              if (!suggestion) continue;
+              const suggested = findMmaFight(suggestion);
+              if (suggested && suggested !== 'ambiguous') {
+                realResolved[i] = suggested;
+                spellingCorrections[tokens[i]] = suggestion;
+              }
+            }
             const missingTokens = tokens.filter((_, i) => !realResolved[i]);
             if (missingTokens.length) {
               const suggestions = missingTokens
@@ -1840,12 +1863,15 @@ Deno.serve(async (req) => {
               continue;
             }
             const fight = realResolved[0]!.fight;
+            const correctionNote = Object.keys(spellingCorrections).length
+              ? `Auto-corrected spelling: ${Object.entries(spellingCorrections).map(([k, v]) => `"${k}" -> "${v}"`).join(', ')} -- confirmed as the only real fighter matching that name on this card, but please double-check this was the intended fighter.`
+              : null;
             const updatePayload: Record<string, unknown> = {
-              game_start_time: fight.startTime, schedule_sync_status: 'matched', schedule_sync_note: null
+              game_start_time: fight.startTime, schedule_sync_status: 'matched', schedule_sync_note: correctionNote
             };
             if (!skipProps && !pick.event_name && fight.eventName) updatePayload.event_name = fight.eventName;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
-            mmaSportResult.matched.push({ id: pick.id, selection: tokens.join(' / '), start_time: fight.startTime, matchup: fight.matchup, event_name: updatePayload.event_name || pick.event_name || null });
+            mmaSportResult.matched.push({ id: pick.id, selection: tokens.join(' / '), start_time: fight.startTime, matchup: fight.matchup, event_name: updatePayload.event_name || pick.event_name || null, spelling_corrections: spellingCorrections });
           }
 
           overall.sports_processed.push(mmaSportResult);
