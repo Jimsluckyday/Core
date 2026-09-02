@@ -7508,7 +7508,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // tool's own v335 comment). Flagging a leg as "missing odds" was
     // never a real gap, same "not a real gap" treatment as the
     // is_parlay_leg exclusion already applied to Unit size just below.
-    if (!p.odds_unavailable && !p.is_parlay_leg) {
+    // Direct follow-up 2026-09-02: "either we have odds on a parent or it
+    // gets cleared by the bulk fix of parlays not needing odds... it
+    // wastes my time and my token count chasing data we don't need to
+    // validate." The PARENT parlay wrapper itself (is_parlay_leg=false,
+    // it's not a leg -- it IS the parlay) was never excluded here the way
+    // it already is for Start time/Event name just below -- a parlay's
+    // combined price is exactly what "Bulk mark parlay odds unavailable"
+    // exists to resolve, not something this generic field-completeness
+    // scan should ever flag as a plain missing value to go research.
+    if (!p.odds_unavailable && !p.is_parlay_leg && betTypeName.toLowerCase() !== 'parlay') {
       if (p.opening_odds === null || p.opening_odds === undefined) missing.push('Opening odds');
       if (p.closing_odds === null || p.closing_odds === undefined) missing.push('Closing odds');
     }
@@ -17539,8 +17548,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // unavailable tool's own v335 comment). Flagging a leg as "missing
       // odds" was never a real gap, same is_parlay_leg exclusion already
       // used for Unit size just below.
-      if (has('mdCheckClosing') && !p.odds_unavailable && !p.is_parlay_leg && (p.closing_odds === null || p.closing_odds === undefined)) return true;
-      if (has('mdCheckOpening') && !p.odds_unavailable && !p.is_parlay_leg && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+      // Direct follow-up 2026-09-02: same fix as missingFieldsSummary's
+      // own Opening/Closing odds check -- the PARENT parlay wrapper
+      // itself was never excluded here the way it already is for Start
+      // time/Event name below, so it kept surfacing as "missing odds" to
+      // go research even though a parlay's combined price is exactly
+      // what Bulk mark parlay odds unavailable exists to resolve instead.
+      if (has('mdCheckClosing') && !p.odds_unavailable && !p.is_parlay_leg && betTypeName.toLowerCase() !== 'parlay' && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+      if (has('mdCheckOpening') && !p.odds_unavailable && !p.is_parlay_leg && betTypeName.toLowerCase() !== 'parlay' && (p.opening_odds === null || p.opening_odds === undefined)) return true;
       if (has('mdCheckHomeAway') && !p.home_away && !isFutures && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
       // CONFIRMED REAL BUG (found 2026-08-14), direct report: parlay legs
       // were showing up as individually-editable rows needing Unit size,
@@ -22426,7 +22441,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 422; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 423; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
