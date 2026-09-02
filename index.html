@@ -9471,7 +9471,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const sportId = document.getElementById('popAutoSport').value;
     const sportsListForLabel = op.getSports() || [];
     const sportLabel = sportId ? ((sportsListForLabel.find(s => String(s.id) === sportId) || {}).name || 'that sport') : 'ALL sports';
-    if (!confirm('This will look up and fill in Prop team (MLB/NBA/WNBA/NHL) and Event name/tournament (Tennis/Soccer) for picks missing them on ' + date + ' (' + sportLabel + '). Golf is not covered yet -- no schedule source exists for it.\\n\\nThis writes real changes to your data. Continue?')) return;
+    if (!confirm('This will look up and fill in Prop team (MLB/NBA/WNBA/NHL) and Event name/tournament/card (Tennis/Soccer/MMA) for picks missing them on ' + date + ' (' + sportLabel + '). Golf is not covered yet -- no schedule source exists for it.\\n\\nThis writes real changes to your data. Continue?')) return;
     const btn = document.getElementById('popAutoPropTeamBtn');
     btn.disabled = true;
     const summary = { date, sports: [], unsupported: [], tournaments: [] };
@@ -9552,8 +9552,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         summary.sports.push(sportResult);
       }
 
-      // ---- Part 2: Tennis/Soccer tournament (event_name) resolution ----
-      const tournamentSports = ['Tennis', 'Soccer'].filter(name => {
+      // ---- Part 2: Tennis/Soccer/MMA tournament/card (event_name) resolution ----
+      // Direct follow-up 2026-09-02: MMA event_name writes in
+      // schedule-sync-backfill were correctly gated behind skipProps
+      // (same as Tennis/Soccer), but MMA was never added to this list --
+      // the only other place that calls schedule-sync-backfill without
+      // skipProps -- so the write never actually ran for any MMA pick.
+      const tournamentSports = ['Tennis', 'Soccer', 'MMA'].filter(name => {
         if (!sportId) return true;
         const matchedSport = sportsListForLabel.find(s => String(s.id) === sportId);
         return matchedSport && matchedSport.name === name;
@@ -12071,7 +12076,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     if (!date) { alert('Pick a date first — this will not run without one.'); return; }
     const sportId = $('autoSport').value;
     const sportLabel = sportId ? (sports.find(s => String(s.id) === sportId)?.name || 'that sport') : 'ALL sports';
-    if (!confirm(`This will look up and fill in Prop team (MLB/NBA/WNBA/NHL) and Event name/tournament (Tennis/Soccer) for picks missing them on ${date} (${sportLabel}). Golf is not covered yet -- no schedule source exists for it.\n\nThis writes real changes to your data. Continue?`)) return;
+    if (!confirm(`This will look up and fill in Prop team (MLB/NBA/WNBA/NHL) and Event name/tournament/card (Tennis/Soccer/MMA) for picks missing them on ${date} (${sportLabel}). Golf is not covered yet -- no schedule source exists for it.\n\nThis writes real changes to your data. Continue?`)) return;
     const btn = $('autoPropTeamBtn');
     btn.disabled = true;
     const summary = { date, sports: [], unsupported: [], tournaments: [] };
@@ -12118,8 +12123,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         summary.sports.push(sportResult);
       }
 
-      // ---- Part 2: Tennis/Soccer tournament (event_name) resolution ----
-      const tournamentSports = ['Tennis', 'Soccer'].filter(name => {
+      // ---- Part 2: Tennis/Soccer/MMA tournament/card (event_name) resolution ----
+      // Direct follow-up 2026-09-02: "it got the date but skipped the event
+      // name so 96 picks now have no event name" -- MMA's own event_name
+      // write in schedule-sync-backfill was correctly gated behind
+      // skipProps (same as Tennis/Soccer, so "Find & Update Pick Info"
+      // never double-writes it), but MMA was never added to THIS list, the
+      // only other place that ever calls schedule-sync-backfill without
+      // skipProps -- so nothing ever actually ran the write. Same root
+      // cause as the CONFIRMED FIX #30 comment above this button
+      // describes for Tennis/Soccer, just never extended to MMA when MMA
+      // itself was added.
+      const tournamentSports = ['Tennis', 'Soccer', 'MMA'].filter(name => {
         if (!sportId) return true;
         const matchedSport = sports.find(s => String(s.id) === sportId);
         return matchedSport && matchedSport.name === name;
@@ -12520,7 +12535,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   <p>Run this FIRST, always. It checks every sport on that date at once (no sport filter, unlike the other three) and fills in Start Time and Home/Away — never Prop Team or Tournament, that's exclusively step 2. This is also the tool that catches a pick entered on the wrong calendar day (KBO/Tennis-style late-night games that land a day early or late in your local time) — it flags those instead of guessing, so you fix the date before doing any other work on that pick, rather than after.</p>
 
   <h2 class="step">2. Find &amp; Update Teams / Tournaments</h2>
-  <p>Run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament for Tennis/Soccer, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it.</p>
+  <p>Run this second, once you're confident every pick's date is actually correct. It looks up and fills in Prop team for MLB/NBA/WNBA/NHL Player Props, and Event name/tournament/card for Tennis/Soccer/MMA, for picks currently missing them on that date — the sole owner of both fields. Golf is not covered yet — no schedule source exists for it.</p>
 
   <h2 class="step">3. Find Missing Odds</h2>
   <p>Run this third, once matchups/tournaments are filled in. Never calls a live odds source (no paid odds API is wired in yet, same as the rest of this box being test data until one is) — it only finds and sorts picks still missing an opening or closing price on that date. Straight Moneyline picks (never period-qualified variants like "Moneyline First5", those move far less) come back separately, flagged as needing a real researched number — a flat default price is never safe for a market that can swing hundreds of points between a favorite and an underdog. Everything else is flagged as safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools instead of a one-by-one manual price.</p>
@@ -22411,7 +22426,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 421; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 422; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
