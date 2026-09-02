@@ -18406,12 +18406,37 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // duplicate-group scan, etc.) sees the normalized value automatically
   // without needing its own copy of this logic.
   async function annotateConsensusNames(picks) {
+    // CONFIRMED REAL BUG, direct report 2026-09-03, immediately after
+    // shipping: this function's known_players fetch threw an uncaught
+    // 404 in production (that table needs a one-time migration -- see
+    // refreshKnownPlayers' own comment on this exact table for the same
+    // caveat) and, because this was awaited directly with no guard,
+    // silently killed whatever called it partway through -- explains
+    // both symptoms reported: the MMA merge never ran (execution never
+    // reached it), and Publish Ranking's scores/publish-state came out
+    // wrong (everything downstream of the failed await never got real
+    // data). This function must NEVER throw, matching every other
+    // known_players caller's own defensive handling of this exact
+    // table -- any failure here means "resolve nothing, leave every
+    // pick exactly as typed," never "abort the caller."
+    try {
+      await annotateConsensusNamesInner(picks);
+    } catch (e) {
+      console.warn('annotateConsensusNames failed -- consensus matching falls back to raw text for this run:', e.message);
+    }
+  }
+  async function annotateConsensusNamesInner(picks) {
     const noTeamSportIds = new Set(sports.filter(s => !teams.some(t => t.sport_id === s.id)).map(s => s.id));
     const relevantSportIds = [...new Set(picks.map(p => p.sport_id))].filter(id => noTeamSportIds.has(id));
     const exactBySport = new Map();   // sport_id -> Map(normalized full name -> real name)
     const surnamesBySport = new Map(); // sport_id -> Map(normalized surname -> Set(real names))
     if (relevantSportIds.length) {
-      const knownPlayers = await restAllPages(`known_players?select=name,sport_id&sport_id=in.(${relevantSportIds.join(',')})`);
+      let knownPlayers = [];
+      try {
+        knownPlayers = await restAllPages(`known_players?select=name,sport_id&sport_id=in.(${relevantSportIds.join(',')})`);
+      } catch (e) {
+        console.warn('Could not load known_players for consensus matching (has the migration been run yet?):', e.message);
+      }
       for (const kp of knownPlayers) {
         if (!exactBySport.has(kp.sport_id)) { exactBySport.set(kp.sport_id, new Map()); surnamesBySport.set(kp.sport_id, new Map()); }
         exactBySport.get(kp.sport_id).set(normalizeForMatch(kp.name), kp.name);
@@ -22575,7 +22600,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 425; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 426; // bump this, and the matching row in Supabase, whenever this file is updated
   async function checkForUpdates() {
     if (!config) return;
     const badge = $('versionStatus');
