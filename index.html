@@ -18745,7 +18745,30 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       groupsByKey[key].push(entry);
     });
     return Object.values(groupsByKey).map(group => {
-      group.sort((a, b) => b.score.total - a.score.total);
+      // CONFIRMED REAL GAP, direct report 2026-09-03: "I've gone in and
+      // unpublished things from the rank pending picks section... never
+      // had to go look in all picks." Sorting by score alone meant an
+      // already-published entry only stayed the visible winner card by
+      // coincidence -- for a freshly-published pick, its score hasn't
+      // drifted yet, so it naturally scored highest and stayed on top,
+      // making Unpublish look like it was always directly reachable from
+      // here. Once enough backfill grading passes for that published
+      // entry's own score to drop below some other still-pending
+      // duplicate's, this flips: the never-published duplicate becomes
+      // the visible card, and the actually-live pick gets buried inside
+      // "SHOW ALL," reachable only by hunting through All Published
+      // Picks -- exactly the gap already being solved for a published
+      // PARLAY LEG a few lines below (see that comment), just never
+      // extended to a published STANDALONE entry in the same group.
+      // Published status now wins the sort outright; score only breaks
+      // ties among entries that share the same published state (or
+      // among multiple published entries, if that ever happens).
+      group.sort((a, b) => {
+        const aPub = a.pick.is_published ? 1 : 0;
+        const bPub = b.pick.is_published ? 1 : 0;
+        if (aPub !== bPub) return bPub - aPub;
+        return b.score.total - a.score.total;
+      });
       const winner = group[0];
       const duplicateEntries = group.slice(1);
 
@@ -22441,7 +22464,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 427; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 428; // bump this, and the matching row in Supabase, whenever this file is updated
   // v427 is a deliberate ROLLBACK to v423's code (Publish Ranking's
   // confluence scoring), direct report 2026-09-03: v424/425/426's
   // consensus-name normalization broke live scoring in production --
