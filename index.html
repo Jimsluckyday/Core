@@ -1780,6 +1780,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           <strong>The date range above filters on event_date (when the game actually happens), never date_entered (when the pick was posted).</strong> A pick entered today for a game two days from now will not appear until that later event date falls inside the range -- so this alone can't publish a pick before its game happens. Every card below also shows its own "Event:" date in the header so you can visually confirm before publishing. Scores every currently-pending pick using four equally-weighted signals (25% each): win % <em>in this exact sport + bet type combo</em> (e.g. Tennis Spreads specifically, not Spreads in general), overall win %, current streak (a bad streak actively drags the score down, not just withholds a bonus), and confluence — a bonus or PENALTY when other cappers independently picked this exact same game/selection/line. An agreeing capper above a 50% record helps the score; one below 50% actively hurts it, and the effect grows stronger both with a larger losing sample and with more agreeing cappers (capped at 3+). The sport+bet-type rate blends toward that capper's broader all-sport rate for that bet type until enough sport-specific picks pile up — so "2-0 in Tennis Spreads" leans on their overall Spread record at first, rather than either treating 2-0 as proven or ignoring it as meaningless. All win percentages are otherwise sample-size-adjusted the same way — a lucky small sample can't out-rank a proven track record. Click the small "N agreeing ▾" note under any score to see exactly which other cappers contributed to that pick's confluence bonus. Sort by Score to find the best candidates, then click Publish on however many you want featured.
           <strong>Include parlays as candidates</strong> is off by default -- a parlay is still a fundamentally weaker bet type in aggregate, so it stays out of the everyday list. Turn it on to go looking for the rare outlier: a capper's own track record specifically ON parlays (his real "Parlay" bet-type win %, e.g. "15-0 on 2-leg parlays") now scores exactly like any other bet type once this is checked. A parlay's overall win % stays excluded from his general record either way (same correlated-outcome reasoning as its legs) -- only its own bet-type-specific record counts. Its confluence is the average of each of ITS OWN legs' confluence (how much other cappers independently agree with each team in the combo), not a match on its own "N-Leg Parlay" label.
+          <strong>Direct fix 2026-09-03:</strong> a capper's Overall/streak/bet-type record now only ever excludes results dated on/after "Pending picks TO" -- not, as before, anything not strictly before "Pending picks FROM." The point was always right (don't let a capper's later results leak into a decision about an earlier date -- confirmed real need with picks spanning 2025 into 2026 in this same system), but anchoring it to the START of the range instead of the END meant widening the range toward the start of your data zeroed out real prior history instead of adding more of it -- confirmed live: a capper with dozens of real, already-graded picks inside the visible range showed a flat 0-0 record the moment "From" reached back to the start of his own history. Anchored to "To" instead, the full range you're viewing (and everything genuinely before it) always counts; only results dated after your own "To" are excluded.
         </div>
         <div id="publishRankWrap"></div>
       </div>
@@ -19362,10 +19363,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // later results is looking at the future relative to the date being
       // tested, exactly backwards from the point of backtesting in the
       // first place. Scoped with `lt` (strictly before), not `lte`, since
-      // a pick dated exactly `from` is presumably still pending/ungraded
-      // at the moment "as of `from`" is being evaluated, not a real result
-      // yet to count toward anyone's incoming record.  Only applies when
-      // `from` is actually set -- ranking live with no date filter keeps
+      // a pick dated exactly the cutoff is presumably still pending/
+      // ungraded at that moment, not a real result yet to count toward
+      // anyone's incoming record.
+      //
+      // CONFIRMED REAL BUG, direct report 2026-09-03: this was anchored
+      // to "Pending picks FROM" -- the START of the viewing range -- which
+      // is backwards. The actual, correct intent (confirmed directly: "I
+      // am putting in a date so I don't rank anything he has post Jun 7,"
+      // needed for real, since this system has picks spanning 2025 into
+      // 2026) is to keep LATER results from leaking into an earlier
+      // decision -- that only ever depends on the END of the range you're
+      // viewing, never the start. Anchoring it to FROM instead meant
+      // widening the range toward the start of the data zeroed out real
+      // prior history instead of adding more of it -- confirmed live: a
+      // capper with dozens of real, already-graded picks inside the
+      // visible range showed a flat 0-0 Overall record the instant "From"
+      // reached back to the start of his own history, even though none of
+      // it should ever have been excluded. Anchored to TO instead: every
+      // result genuinely before the date you're viewing always counts, in
+      // full, regardless of how far back "From" reaches; only a result
+      // dated on/after your own "To" is excluded, which is the only
+      // direction real look-ahead can ever come from. Only applies when
+      // `to` is actually set -- ranking live with no date filter keeps
       // using full all-time history exactly as before, unchanged.
       // A parlay's own bundled result (bet_type "Parlay") never counts
       // toward OVERALL, streak, or tier -- it's the same correlated outcome
@@ -19380,7 +19400,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // confident enough to call it standalone, so it's real evidence, just
       // weaker evidence. Straight bets count at full weight everywhere.
       let gradedQuery = "picks?select=capper_id,sport_id,bet_type_id,result,event_date,created_at,is_parlay_leg,pick_tier,bet_types(name)&result=in.(win,loss,push)&order=id.asc";
-      if (from) gradedQuery += `&event_date=lt.${from}`;
+      if (to) gradedQuery += `&event_date=lt.${to}`;
       const gradedRaw = await restAllPages(gradedQuery);
 
       const overallByCapper = {}; // capper_id -> { wins, losses, history:[] }
@@ -22512,7 +22532,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 429; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 430; // bump this, and the matching row in Supabase, whenever this file is updated
   // v427 is a deliberate ROLLBACK to v423's code (Publish Ranking's
   // confluence scoring), direct report 2026-09-03: v424/425/426's
   // consensus-name normalization broke live scoring in production --
