@@ -984,6 +984,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <input id="pickClosingOdds" type="number" step="1" placeholder="e.g. -136" />
         </div>
         <div class="field">
+          <label>Odds note (optional)</label>
+          <input id="pickOddsNote" type="text" placeholder="e.g. real lotto parlay, capper's own number -- not a typo" title="If you already know an unusually large price is real (not a transcription mistake), say so here -- this skips the automatic review flag entirely instead of it sitting in Flagged Lines waiting on you to confirm the same thing later." />
+        </div>
+        <div class="field">
           <label>Pick tier</label>
           <select id="pickTier">
             <option value="-2">Tier -2 — furthest below base</option>
@@ -2864,6 +2868,52 @@ These are almost always the same day, so "Date entered" only fills in a starting
   let tournaments = [];
 
   const $ = (id) => document.getElementById(id);
+
+  // American <-> decimal odds conversion -- the standard way to combine
+  // multiple legs' prices into one parlay price. Decimal odds are always
+  // > 1, so multiplying them is a safe, well-defined operation regardless
+  // of whether individual legs are favorites or underdogs (unlike trying
+  // to combine American odds directly, which have a sign discontinuity at
+  // 0 that makes direct combination meaningless).
+  function decimalFromAmerican(odds) {
+    return odds > 0 ? 1 + odds / 100 : 1 + 100 / Math.abs(odds);
+  }
+  function americanFromDecimal(dec) {
+    return dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1));
+  }
+  // Direct request 2026-09-03: "if we can build something instead where I
+  // can put in actual odds in each line and do the total for what a
+  // sports book would offer without boost." This is the real, standard
+  // sportsbook math for an unboosted parlay price -- not an estimate with
+  // hidden guesswork -- just the multiplicative combination every book
+  // uses internally before any promotional boost gets layered on top.
+  // Deliberately does NOT attempt to model any specific book's boost --
+  // direct confirmation: "we don't care what a sportsbook boost is as
+  // that would be up to the end user to look into."
+  function computeParlayAmericanOdds(legOddsArray) {
+    const combinedDecimal = legOddsArray.map(decimalFromAmerican).reduce((a, b) => a * b, 1);
+    return americanFromDecimal(combinedDecimal);
+  }
+
+  // Direct request 2026-09-03: "how do I make sure nothing breaks or [flag
+  // it for] manual validation" -- a real value like a 2-leg lotto parlay at
+  // +17900 is easy to mistake for a transcription error, and there's
+  // nothing in this file that would ever double-check an odds value's
+  // magnitude. Two thresholds, since a straight bet and a parlay's
+  // combined price have completely different normal ranges (direct
+  // confirmation of both): a straight bet's odds should almost never
+  // exceed +/-1000 in magnitude; a parlay's combined price legitimately
+  // scales with leg count, so it's compared against 3x what that many
+  // legs at a standard -110 each would produce, not a flat number.
+  const ODDS_REVIEW_STRAIGHT_THRESHOLD = 1000;
+  function oddsExceedsStraightThreshold(odds) {
+    return odds !== null && odds !== undefined && isFinite(odds) && Math.abs(odds) > ODDS_REVIEW_STRAIGHT_THRESHOLD;
+  }
+  function parlayComboExceedsThreshold(americanOdds, legCount) {
+    if (americanOdds === null || americanOdds === undefined || !isFinite(americanOdds) || !legCount) return false;
+    const standardDecimal = Math.pow(decimalFromAmerican(-110), legCount);
+    return decimalFromAmerican(americanOdds) > standardDecimal * 3;
+  }
 
   // American <-> decimal odds conversion -- the standard way to combine
   // multiple legs' prices into one parlay price. Decimal odds are always
@@ -6332,9 +6382,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // parlay_local_number is already stored on the summary row itself (see
     // linkLegToParlay above) -- this just surfaces it into the label
     // instead of leaving it invisible after the fact.
-    const [summaryRow] = await rest(`picks?select=parlay_local_number&id=eq.${summaryId}`);
+    const [summaryRow] = await rest(`picks?select=parlay_local_number,odds_note&id=eq.${summaryId}`);
     const localNumber = summaryRow ? summaryRow.parlay_local_number : null;
     const parlayLabel = localNumber ? `Parlay #${localNumber} - ` : '';
+    const summaryHasOddsNote = !!(summaryRow && summaryRow.odds_note && summaryRow.odds_note.trim());
 
     // Same odds-collapsing rule as the pipeline: whichever legs actually
     // HAVE odds entered all agree on the same value, that's the combined
@@ -6383,6 +6434,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
     } else {
       patch.opening_odds = null;
     }
+    // Direct request 2026-09-03: a parlay's combined price legitimately
+    // scales with leg count (a real long-shot parlay can look enormous
+    // and still be correct), so this checks the FINAL combined price
+    // against a leg-count-scaled threshold, not a flat number -- see
+    // parlayComboExceedsThreshold's own comment. Respects an odds_note
+    // already sitting on the summary row itself (set via Full Edit) the
+    // same way a straight pick's own note suppresses its flag.
+    patch.odds_flagged_for_review = !summaryHasOddsNote && parlayComboExceedsThreshold(patch.opening_odds, legs.length);
     await rest(`picks?id=eq.${summaryId}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
   // Exposed for the "All Picks" pop-out's own leg-delete handler (calls
@@ -6574,6 +6633,28 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (isProp && !$('propPlayer').value.trim()) { showMsg($('pickMsg'), 'Player Props need a player name — otherwise there is no way to identify or research this pick later.', 'error'); return; }
     if (isProp && !$('propStat').value.trim()) { showMsg($('pickMsg'), 'Player Props need a stat (e.g. Strikeouts, Points) — otherwise there is no way to identify or research this pick later.', 'error'); return; }
 
+    // Direct request 2026-09-03: only ever flags when there's no note
+    // already explaining the number -- a real, deliberately-large price
+    // (a lotto parlay, a huge underdog) is never blocked or altered, just
+    // optionally surfaced later for a second look if nobody's already said
+    // "this is fine." A parlay's own combined price legitimately scales
+    // with leg count (see parlayComboExceedsThreshold's own comment) --
+    // saving the Parlay SUMMARY row itself through this normal form (e.g.
+    // just adding a note, unrelated to its legs) must use that same
+    // leg-count-aware math, not the flat straight-bet threshold, or a
+    // perfectly ordinary 5-leg parlay price would get wrongly flagged
+    // every time its tier or notes get touched.
+    async function computeOddsFlagForSave() {
+      if ($('pickOddsNote').value.trim()) return false;
+      const isParlayWrapper = bt && normalizeForMatch(bt.name) === 'parlay';
+      if (isParlayWrapper && editingId) {
+        const legLinks = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${editingId}`);
+        return parlayComboExceedsThreshold(oddsVal ? Number(oddsVal) : null, legLinks.length);
+      }
+      return oddsExceedsStraightThreshold(oddsVal ? Number(oddsVal) : null) ||
+        oddsExceedsStraightThreshold(closingOddsVal ? Number(closingOddsVal) : null);
+    }
+
     const payload = {
       capper_id,
       sport_id: sport_id || null,
@@ -6584,6 +6665,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
       line,
       opening_odds: oddsVal ? Number(oddsVal) : null,
       closing_odds: closingOddsVal ? Number(closingOddsVal) : null,
+      odds_note: $('pickOddsNote').value.trim() || null,
+      odds_flagged_for_review: await computeOddsFlagForSave(),
       home_away: homeAway || null,
       doubleheader_game: doubleheaderGameVal ? Number(doubleheaderGameVal) : null,
       event_name: $('pickEventName').value.trim() || null,
@@ -6695,6 +6778,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickLine').value = '';
         $('pickOpeningOdds').value = '';
         $('pickClosingOdds').value = '';
+        $('pickOddsNote').value = '';
         $('pickHomeAway').value = '';
         $('pickDoubleheaderGame').value = '';
         $('pickEventName').value = '';
@@ -6733,6 +6817,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickLine').value = '';
         $('pickOpeningOdds').value = '';
         $('pickClosingOdds').value = '';
+        $('pickOddsNote').value = '';
         $('pickHomeAway').value = '';
         $('pickDoubleheaderGame').value = '';
         $('pickEventName').value = '';
@@ -6831,6 +6916,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickLine').value = '';
     $('pickOpeningOdds').value = '';
     $('pickClosingOdds').value = '';
+    $('pickOddsNote').value = '';
     $('pickHomeAway').value = '';
     $('pickDoubleheaderGame').value = '';
     $('pickEventName').value = '';
@@ -6982,6 +7068,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     }
     $('pickOpeningOdds').value = p.opening_odds ?? '';
     $('pickClosingOdds').value = p.closing_odds ?? '';
+    $('pickOddsNote').value = p.odds_note ?? '';
     $('pickHomeAway').value = p.home_away || '';
     $('pickDoubleheaderGame').value = p.doubleheader_game ? String(p.doubleheader_game) : '';
     populatePickTournamentDropdown(p.event_name || '');
@@ -17269,7 +17356,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const wrap = $('flaggedLinesWrap');
     wrap.innerHTML = '<div class="empty-state">Loading flagged picks...</div>';
     try {
-      const picks = await restAllPages('picks?select=id,event_date,selection,line,result,line_flag_note,tier_needs_review,tier_review_note,result_marker_flag,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&or=(line_flagged_for_review.eq.true,tier_needs_review.eq.true,result_marker_flag.eq.true)&order=event_date.desc');
+      const picks = await restAllPages('picks?select=id,event_date,selection,line,result,line_flag_note,tier_needs_review,tier_review_note,result_marker_flag,opening_odds,closing_odds,odds_note,odds_flagged_for_review,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&or=(line_flagged_for_review.eq.true,tier_needs_review.eq.true,result_marker_flag.eq.true,odds_flagged_for_review.eq.true)&order=event_date.desc');
       renderFlaggedLines(picks);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
@@ -17295,6 +17382,20 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       }
       if (p.result_marker_flag) {
         badges.push(`<div><span style="color:var(--stamp-red);font-weight:bold;">&#9989; Check mark/X visible</span> please confirm</div>`);
+      }
+      if (p.odds_flagged_for_review) {
+        // Direct request 2026-09-03: a real, deliberately-large price (a
+        // lotto parlay, a huge underdog) should never be blocked or
+        // altered -- this is purely "someone should glance at this once,"
+        // same non-blocking spirit as every other flag here. Shows
+        // whichever odds are actually on file (opening/closing, or both)
+        // so the reviewer doesn't have to open the pick just to see the
+        // number that triggered this.
+        const oddsShown = [
+          p.opening_odds !== null && p.opening_odds !== undefined ? `Open ${p.opening_odds > 0 ? '+' : ''}${p.opening_odds}` : null,
+          p.closing_odds !== null && p.closing_odds !== undefined ? `Close ${p.closing_odds > 0 ? '+' : ''}${p.closing_odds}` : null,
+        ].filter(Boolean).join(' / ');
+        badges.push(`<div><span style="color:var(--stamp-amber);font-weight:bold;">&#9873; Unusual odds</span> ${escapeHtml(oddsShown)} -- confirm it's real, or add a note on the pick to explain it and it won't flag again.</div>`);
       }
       return `
       <tr>
@@ -22844,7 +22945,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 436; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 437; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v437, direct request 2026-09-03: "a lotto play... will seem like a
+  // transcription mistake when it's not... build into the uploader and
+  // future transcription notes so we can either leave a proper note or
+  // flag it for manual validation if there is no (this is ok) type of
+  // note." Extends the existing flag+note pattern (line_flag_note,
+  // tier_review_note) to odds: a new "Odds note" field on Add Pick/Full
+  // Edit, plus an automatic odds_flagged_for_review check that ONLY fires
+  // when that note is empty -- a straight bet's odds are checked against a
+  // flat +/-1000 threshold, a parlay's combined price against 3x what its
+  // real leg count would produce at standard -110 odds (confirmed via
+  // AskUserQuestion: both "recommended" options). Never blocks or alters
+  // anything -- surfaces in the existing "Flagged lines" tool alongside
+  // line/tier flags. REQUIRES two new columns before this does anything:
+  // `alter table picks add column if not exists odds_note text;` and
+  // `alter table picks add column if not exists odds_flagged_for_review
+  // boolean not null default false;` -- run those in Supabase first.
+  // KNOWN SCOPE GAP: the separate inline batch-odds-editing table (used
+  // when reviewing many "missing odds" picks at once) does not yet have
+  // this note field or flag check -- only Add Pick, Full Edit, and the
+  // parlay-leg-combining path (refreshParlaySummary) are covered.
   // v436, direct request same day as v435: "would it make sense... if they
   // come up on the missing opening/closing odds we export them the same
   // way as a moneyline bet." The "Find Missing Odds" tool (both the main
