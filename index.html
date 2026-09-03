@@ -2865,6 +2865,32 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
   const $ = (id) => document.getElementById(id);
 
+  // American <-> decimal odds conversion -- the standard way to combine
+  // multiple legs' prices into one parlay price. Decimal odds are always
+  // > 1, so multiplying them is a safe, well-defined operation regardless
+  // of whether individual legs are favorites or underdogs (unlike trying
+  // to combine American odds directly, which have a sign discontinuity at
+  // 0 that makes direct combination meaningless).
+  function decimalFromAmerican(odds) {
+    return odds > 0 ? 1 + odds / 100 : 1 + 100 / Math.abs(odds);
+  }
+  function americanFromDecimal(dec) {
+    return dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1));
+  }
+  // Direct request 2026-09-03: "if we can build something instead where I
+  // can put in actual odds in each line and do the total for what a
+  // sports book would offer without boost." This is the real, standard
+  // sportsbook math for an unboosted parlay price -- not an estimate with
+  // hidden guesswork -- just the multiplicative combination every book
+  // uses internally before any promotional boost gets layered on top.
+  // Deliberately does NOT attempt to model any specific book's boost --
+  // direct confirmation: "we don't care what a sportsbook boost is as
+  // that would be up to the end user to look into."
+  function computeParlayAmericanOdds(legOddsArray) {
+    const combinedDecimal = legOddsArray.map(decimalFromAmerican).reduce((a, b) => a * b, 1);
+    return americanFromDecimal(combinedDecimal);
+  }
+
   // Standard sportsbook payout at a flat $100 stake.
   // Negative odds (favorites) risk more to win less; positive odds
   // (underdogs) profit the full number shown per $100 bet.
@@ -6327,6 +6353,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // leg to chime in added nothing except throwing away real information.
     const oddsValues = legs.map(l => l.opening_odds).filter(v => v !== null && v !== undefined);
     const allSame = oddsValues.length > 0 && oddsValues.every(v => v === oddsValues[0]);
+    // Direct request 2026-09-03: previously the ONLY way to get a parlay's
+    // own odds populated was to type the single combined price onto every
+    // leg (the allSame case above) -- there was no path for genuinely
+    // different real per-leg odds at all; they just sat unused on the legs
+    // while the parlay's own price stayed null. Now: when every leg has
+    // its own real, distinct price, compute the actual no-boost combined
+    // parlay price from them (see computeParlayAmericanOdds) instead of
+    // discarding that real data. Requires ALL legs to have odds -- a
+    // partial set (some legs priced, some blank) can't be multiplied into
+    // a real combined price without guessing the missing leg's number, so
+    // it's left null, same "don't know beats a wrong guess" rule as
+    // everywhere else here.
+    const allLegsHaveOwnOdds = oddsValues.length === legs.length && legs.length > 0;
 
     const patch = { selection: `${parlayLabel}${legs.length} Leg${legs.length === 1 ? '' : 's'}` };
     if (allSame) {
@@ -6335,6 +6374,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
         if (leg.opening_odds !== null) {
           await rest(`picks?id=eq.${leg.id}`, { method: 'PATCH', body: JSON.stringify({ opening_odds: null }) });
         }
+      }
+    } else if (allLegsHaveOwnOdds) {
+      patch.opening_odds = computeParlayAmericanOdds(oddsValues);
+      for (const leg of legs) {
+        await rest(`picks?id=eq.${leg.id}`, { method: 'PATCH', body: JSON.stringify({ opening_odds: null }) });
       }
     } else {
       patch.opening_odds = null;
@@ -22751,7 +22795,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 433; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 434; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v434, direct request 2026-09-03: "if I wanted to have a parlay show
+  // odds I had to put in the same value for each leg... if we can build
+  // something instead where I can put in actual odds in each line and do
+  // the total for what a sports book would offer without boost." Previously
+  // the ONLY way to get a parlay's own odds populated was the copy-the-
+  // same-number-onto-every-leg workaround (see refreshParlaySummary's own
+  // comment) -- genuinely different real per-leg odds just sat unused,
+  // contributing nothing. Now computes the real, standard no-boost combined
+  // parlay price via decimal-odds multiplication (computeParlayAmericanOdds)
+  // whenever every leg has its own distinct real price, removing the need
+  // for that workaround going forward.
   // Consensus-name normalization (originally shipped as v424/425/426) was
   // rolled back 2026-09-03 (v427) after a reported live-scoring regression,
   // then re-investigated and re-applied here on top of v428-430. Root cause
