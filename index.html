@@ -9678,7 +9678,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     btn.disabled = true;
     document.getElementById('popAutomationResultsWrap').innerHTML = '<div style="font-size:11px;">Finding picks missing odds...</div>';
     try {
-      let query = 'picks?select=id,selection,sport_id,sports(name),bet_type_id,bet_types(name),opening_odds,closing_odds,odds_unavailable&event_date=eq.' + date + '&result=eq.pending&is_parlay_leg=eq.false';
+      let query = 'picks?select=id,selection,sport_id,sports(name),bet_type_id,bet_types(name),opening_odds,closing_odds,odds_unavailable,is_parlay_leg&event_date=eq.' + date + '&result=eq.pending';
       if (sportId) query += '&sport_id=eq.' + sportId;
       const candidates = await op.restAllPages(query);
       const missing = candidates.filter(function (p) { return !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined || p.closing_odds === null || p.closing_odds === undefined); });
@@ -9686,16 +9686,28 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       for (const p of missing) {
         const betTypeName = p.bet_types ? p.bet_types.name : '';
         const isStraightMoneyline = op.normalizeForMatch(betTypeName) === 'moneyline';
+        // Same reasoning as the main tab's copy of this tool -- see its
+        // own comment (direct request 2026-09-03): a parlay leg missing
+        // odds has no safe automatic path either, same as Moneyline.
+        const needsRealOdds = isStraightMoneyline || p.is_parlay_leg;
         const which = [];
         if (p.opening_odds === null || p.opening_odds === undefined) which.push('opening');
         if (p.closing_odds === null || p.closing_odds === undefined) which.push('closing');
+        let detail;
+        if (isStraightMoneyline && p.is_parlay_leg) {
+          detail = betTypeName + ' parlay leg -- no safe default for Moneyline, and a parlay leg needs its own real number either way.';
+        } else if (isStraightMoneyline) {
+          detail = betTypeName + ' needs a real researched price, no safe default for this market.';
+        } else if (p.is_parlay_leg) {
+          detail = betTypeName + ' parlay leg -- needs its own real price so the parlay\'s combined odds compute correctly; Bulk-fill Standard Odds deliberately skips parlay legs.';
+        } else {
+          detail = betTypeName + ' is safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.';
+        }
         const item = {
           id: p.id, sport: p.sports ? p.sports.name : '', selection: p.selection,
-          reason: 'Missing ' + which.join(' & ') + ' -- ' + (isStraightMoneyline
-            ? betTypeName + ' needs a real researched price, no safe default for this market.'
-            : betTypeName + ' is safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.')
+          reason: 'Missing ' + which.join(' & ') + ' -- ' + detail
         };
-        (isStraightMoneyline ? summary.needs_real_odds : summary.bulk_fillable).push(item);
+        (needsRealOdds ? summary.needs_real_odds : summary.bulk_fillable).push(item);
       }
       renderPopAutomationResult('Missing odds check for ' + date, summary, 'missing_odds');
     } catch (e) {
@@ -12266,7 +12278,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     btn.disabled = true;
     $('automationResultsWrap').innerHTML = '<div class="empty-state">Finding picks missing odds...</div>';
     try {
-      let query = `picks?select=id,selection,sport_id,sports(name),bet_type_id,bet_types(name),opening_odds,closing_odds,odds_unavailable&event_date=eq.${date}&result=eq.pending&is_parlay_leg=eq.false`;
+      let query = `picks?select=id,selection,sport_id,sports(name),bet_type_id,bet_types(name),opening_odds,closing_odds,odds_unavailable,is_parlay_leg&event_date=eq.${date}&result=eq.pending`;
       if (sportId) query += `&sport_id=eq.${sportId}`;
       const candidates = await restAllPages(query);
       const missing = candidates.filter(p => !p.odds_unavailable && (p.opening_odds === null || p.opening_odds === undefined || p.closing_odds === null || p.closing_odds === undefined));
@@ -12274,9 +12286,31 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       for (const p of missing) {
         const betTypeName = p.bet_types ? p.bet_types.name : '';
         const isStraightMoneyline = normalizeForMatch(betTypeName) === 'moneyline';
+        // CONFIRMED REAL GAP, direct request 2026-09-03: "if they come up
+        // on the missing opening/closing odds we export them the same way
+        // as a moneyline bet." Parlay legs used to be excluded from this
+        // check entirely (is_parlay_leg=eq.false above), back when a leg's
+        // own odds never mattered on their own. Now that refreshParlaySummary
+        // computes the parlay's real combined price FROM each leg's own
+        // number (v434) -- and Bulk-fill Standard Odds deliberately never
+        // touches legs (v435, exactly to avoid a false collision) -- a leg
+        // missing odds has no safe automatic path at all, same as a
+        // straight Moneyline. Routed into the same needs_real_odds bucket
+        // rather than building a separate queue for it.
+        const needsRealOdds = isStraightMoneyline || p.is_parlay_leg;
         const which = [];
         if (p.opening_odds === null || p.opening_odds === undefined) which.push('opening');
         if (p.closing_odds === null || p.closing_odds === undefined) which.push('closing');
+        let detail;
+        if (isStraightMoneyline && p.is_parlay_leg) {
+          detail = `${betTypeName} parlay leg -- no safe default for Moneyline, and a parlay leg needs its own real number either way.`;
+        } else if (isStraightMoneyline) {
+          detail = `${betTypeName} needs a real researched price, no safe default for this market.`;
+        } else if (p.is_parlay_leg) {
+          detail = `${betTypeName} parlay leg -- needs its own real price so the parlay's combined odds compute correctly; Bulk-fill Standard Odds deliberately skips parlay legs.`;
+        } else {
+          detail = `${betTypeName} is safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.`;
+        }
         const item = {
           id: p.id, sport: p.sports ? p.sports.name : '', selection: p.selection,
           // CONFIRMED REAL BUG, direct report 2026-08-22: "these don't tell
@@ -12285,11 +12319,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           // END of a long sentence that's IDENTICAL on every row, so the
           // table's 70-char truncation (truncateReason) cut it off before
           // it ever got there. Leads with the actual variable now.
-          reason: `Missing ${which.join(' & ')} -- ` + (isStraightMoneyline
-            ? `${betTypeName} needs a real researched price, no safe default for this market.`
-            : `${betTypeName} is safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.`)
+          reason: `Missing ${which.join(' & ')} -- ` + detail
         };
-        (isStraightMoneyline ? summary.needs_real_odds : summary.bulk_fillable).push(item);
+        (needsRealOdds ? summary.needs_real_odds : summary.bulk_fillable).push(item);
       }
       renderAutomationResult(`Missing odds check for ${date}`, summary, 'missing_odds');
     } catch (e) {
@@ -22812,7 +22844,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 435; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 436; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v436, direct request same day as v435: "would it make sense... if they
+  // come up on the missing opening/closing odds we export them the same
+  // way as a moneyline bet." The "Find Missing Odds" tool (both the main
+  // tab and the pop-out copy) used to exclude parlay legs entirely
+  // (is_parlay_leg=eq.false) -- correct back when a leg's own odds never
+  // mattered on their own, but now that v434/435 mean a leg needs a real
+  // individually-entered price with no safe bulk default, a leg missing
+  // odds had no path to get flagged for manual research at all. Both
+  // copies now include legs and route them into the same needs_real_odds
+  // bucket as straight Moneyline, with their own explanatory reason text.
   // v435, direct report same day as v434: "if a capper happens to put in
   // all spread bets and we normalize all spread in the bulk tool how does
   // that work" -- a real, confirmed collision, not hypothetical. Bulk-fill
