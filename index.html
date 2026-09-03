@@ -16879,6 +16879,23 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
       if (from) query += `&event_date=gte.${from}`;
       if (to) query += `&event_date=lte.${to}`;
+      // CONFIRMED REAL GAP, direct report 2026-09-03: the Parlay-wrapper
+      // exclusion just above (2026-08-30) only excludes rows whose OWN
+      // bet_type is literally "Parlay" -- a parlay LEG's bet_type is
+      // whatever it really is (Spread, Over/Under, etc.), so a capper
+      // whose whole parlay happens to be all-Spread legs sailed straight
+      // through this filter untouched, even when Spread is picked
+      // explicitly (not just "All bet types"). That's a real collision
+      // with refreshParlaySummary's per-leg combining logic: filling every
+      // leg of that parlay with the SAME flat default (e.g. -110) makes
+      // them agree, which reads as "the capper quoted one combined price"
+      // and discards the real compounding entirely (four independent -110
+      // legs are worth roughly +1228 combined, not -110). A parlay leg's
+      // price has to be a real, deliberately-entered number for that
+      // combining logic to work -- never a generic synthetic default --
+      // so legs are excluded here unconditionally, regardless of which
+      // bet type is selected.
+      query += '&is_parlay_leg=eq.false';
       if (which === 'opening') query += `&opening_odds=is.null`;
       else if (which === 'closing') query += `&closing_odds=is.null`;
       else query += `&or=(opening_odds.is.null,closing_odds.is.null)`;
@@ -22795,7 +22812,19 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 434; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 435; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v435, direct report same day as v434: "if a capper happens to put in
+  // all spread bets and we normalize all spread in the bulk tool how does
+  // that work" -- a real, confirmed collision, not hypothetical. Bulk-fill
+  // standard odds already excluded the Parlay WRAPPER row (2026-08-30),
+  // but never excluded parlay LEGS -- a leg's own bet_type is whatever it
+  // really is (Spread, Over/Under, etc.), so an all-Spread parlay's legs
+  // sailed straight through, even with Spread picked explicitly. Filling
+  // every leg of that parlay with the same flat default made them agree,
+  // which v434's new combining logic reads as "the capper quoted one
+  // combined price" -- discarding the real compounding (four independent
+  // -110 legs are worth ~+1228 combined, not -110). Parlay legs are now
+  // excluded from this tool unconditionally.
   // v434, direct request 2026-09-03: "if I wanted to have a parlay show
   // odds I had to put in the same value for each leg... if we can build
   // something instead where I can put in actual odds in each line and do
