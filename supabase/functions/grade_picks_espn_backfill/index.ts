@@ -223,6 +223,21 @@ const ESPN_SPORT_MAP: Record<string, string> = {
   // "ambiguous" the way an structurally-almost-impossible MLB/NBA/NHL tie
   // safely does today.
   mls: 'soccer/usa.1',
+  // ADDED 2026-09-04, direct request: "is there a lookup similar to UFC
+  // for PFL." Confirmed directly against ESPN's real API before shipping
+  // (same discipline as every other mapping here) -- mma/pfl is a real,
+  // working slug on the exact same scoreboard endpoint, and a real
+  // completed card (PFL Dubai: Nurmagomedov vs. Davis, 2026-02-07, 13
+  // bouts) came back in the EXACT same shape UFC already uses (event-
+  // level competitions[] holding every bout, each with competitors[]
+  // carrying athlete.displayName/winner, status.type.completed/name) --
+  // so this reuses the entire existing MMA fighter-matching branch below
+  // unchanged, just generalized from "sport is literally named mma" to
+  // also recognize "pfl" as its own separate, correctly-scoped Sport
+  // (not lumped into the same "MMA" row as UFC -- PFL and UFC fighters
+  // are two non-overlapping rosters, same cross-contamination reasoning
+  // as keeping MLS out of a generic "Soccer" bucket).
+  pfl: 'mma/pfl',
 };
 
 Deno.serve(async (req) => {
@@ -1991,7 +2006,13 @@ Deno.serve(async (req) => {
         // card (rare, but real in a sport with many Brazilian/Portuguese
         // surnames) is detected and flagged as ambiguous rather than
         // silently resolved to whichever fighter registered first.
-        const isMma = normalize(ourSport.name) === 'mma';
+        // Generalized 2026-09-04 to also cover PFL (a second, separately-
+        // registered MMA promotion, own ESPN_SPORT_MAP slug) -- everything
+        // below reads generically off competitions[]/competitors[]/
+        // athlete.displayName/winner, nothing UFC-specific, so no other
+        // change was needed to extend this to a second promotion.
+        const MMA_LIKE_SPORTS = new Set(['mma', 'pfl']);
+        const isMma = MMA_LIKE_SPORTS.has(sportNormName);
         type FighterEntry = { displayName: string; opponentName: string; matchup: string; completed: boolean; voided: boolean; winner: boolean | null; ambiguous?: boolean };
         const fighterLookup = new Map<string, FighterEntry>();
         const fighterDisplayNames: string[] = [];
@@ -2201,7 +2222,7 @@ Deno.serve(async (req) => {
             const entry = fighterLookup.get(key);
             if (!entry) {
               const cardList = fighterDisplayNames.length ? ` Today's card: ${fighterDisplayNames.join(', ')}.` : '';
-              const note = `Could not find "${pick.selection}" on today's UFC card -- may be a name spelling issue, or this event isn't the one this pick means.${cardList}`;
+              const note = `Could not find "${pick.selection}" on today's ${ourSport.name} card -- may be a name spelling issue, or this event isn't the one this pick means.${cardList}`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
               sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
               continue;
