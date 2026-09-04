@@ -204,6 +204,25 @@ const ESPN_SPORT_MAP: Record<string, string> = {
   // see the isMma branch below for why this needs its own matching path
   // entirely separate from the team-vs-team logic every other sport uses.
   mma: 'mma/ufc',
+  // ADDED 2026-09-04, direct request: "if it is available in ESPN to do
+  // automatically my answer will always be yes... our goal is 100%
+  // automation." Confirmed directly against ESPN's real API before
+  // shipping (same discipline as every other mapping here) -- a live
+  // fetch against soccer/usa.1 returned real 2026 MLS games (both
+  // upcoming and a completed one, Columbus Crew 1-3 New England
+  // Revolution) in the exact same competitions[0].competitors[] shape
+  // (homeAway, team.displayName/location/shortDisplayName/name/
+  // abbreviation, score, status.type.completed/name) every other sport
+  // here already relies on -- so the entire existing generic team-
+  // matching/scoring/void-game pipeline works unchanged, no sport-
+  // specific parsing needed, just this one mapping entry. The one real
+  // difference from every sport already in this map: MLS games can and
+  // regularly do end in a genuine draw (no shootout in the regular
+  // season) -- see DRAW_LOSES_SPORTS/gradeMoneyline's own comment for why
+  // that needs its own explicit handling rather than falling through to
+  // "ambiguous" the way an structurally-almost-impossible MLB/NBA/NHL tie
+  // safely does today.
+  mls: 'soccer/usa.1',
 };
 
 Deno.serve(async (req) => {
@@ -467,11 +486,23 @@ Deno.serve(async (req) => {
       return { result: 'push', multiplier: 1 };
     }
 
-    function gradeMoneyline(score: any, isHome: boolean): 'win' | 'loss' | null {
+    // Direct follow-up 2026-09-04, adding MLS: a plain "Moneyline" pick
+    // with no separate Draw selection is a real, standard 2-way soccer
+    // market -- every sportsbook settles a tie as a LOSS on both sides,
+    // never a push or "can't tell." That's a genuinely different rule
+    // than every other sport this file already grades (MLB/NBA/NHL
+    // structurally can't tie; a rare NFL tie is conventionally a PUSH,
+    // not a loss) -- so this can't be a universal default, only applied
+    // for sports actually using that no-draw-option convention. Extend
+    // DRAW_LOSES_SPORTS, not this function, if another such soccer
+    // competition/sport is added later.
+    const DRAW_LOSES_SPORTS = new Set(['mls']);
+    function gradeMoneyline(score: any, isHome: boolean, drawLoses: boolean = false): 'win' | 'loss' | null {
       const won = isHome ? score.winner_home === 1 : score.winner_away === 1;
       const lost = isHome ? score.winner_away === 1 : score.winner_home === 1;
       if (won) return 'win';
       if (lost) return 'loss';
+      if (drawLoses && score.score_home === score.score_away) return 'loss';
       return null;
     }
 
@@ -2309,7 +2340,7 @@ Deno.serve(async (req) => {
           }
 
           let grade: Grade | 'win' | 'loss' | 'push' | null = null;
-          if (isMoneyline) grade = gradeMoneyline(game.score, matchedIsHome!);
+          if (isMoneyline) grade = gradeMoneyline(game.score, matchedIsHome!, DRAW_LOSES_SPORTS.has(sportNormName));
           else if (isSpread) grade = gradeSpread(game.score, matchedIsHome!, Number(pick.line));
           else if (isTotalType) grade = gradeTotal(game.score, Number(pick.line));
           else if (isNRFI) grade = gradeNoRunFirstInning(game.score);
