@@ -2013,7 +2013,20 @@ Deno.serve(async (req) => {
         // change was needed to extend this to a second promotion.
         const MMA_LIKE_SPORTS = new Set(['mma', 'pfl']);
         const isMma = MMA_LIKE_SPORTS.has(sportNormName);
-        type FighterEntry = { displayName: string; opponentName: string; matchup: string; completed: boolean; voided: boolean; winner: boolean | null; ambiguous?: boolean };
+        // endRound added 2026-09-04 for Total Rounds grading -- direct
+        // question, then request: "should I use Total for over/under
+        // rounds or should we setup total rounds like we do total sets."
+        // Confirmed directly against a real 13-bout PFL card (2026-02-07)
+        // that ESPN's own comp.status.period already IS the real ending
+        // round, for both an early finish (period 1, clock "1:17") and a
+        // fight that went the full scheduled distance (period 3 or 5,
+        // clock "5:00") -- no separate "scheduled rounds" lookup needed,
+        // since settlement only ever cares how many rounds were actually
+        // contested, not whether that happened to be the maximum. Unlike
+        // Moneyline (winner), this needs no draw/no-contest special case
+        // at all -- Total Rounds only cares how far the fight got, which
+        // is well-defined even when there's no official winner.
+        type FighterEntry = { displayName: string; opponentName: string; matchup: string; completed: boolean; voided: boolean; winner: boolean | null; endRound: number | null; ambiguous?: boolean };
         const fighterLookup = new Map<string, FighterEntry>();
         const fighterDisplayNames: string[] = [];
         if (isMma) {
@@ -2052,11 +2065,15 @@ Deno.serve(async (req) => {
               const nameB = b.athlete && b.athlete.displayName;
               if (!nameA || !nameB) continue;
               const matchup = `${nameA} vs ${nameB}`;
+              // Only trusted once the bout is actually completed -- mid-
+              // fight, period reflects the CURRENT round, not a final one.
+              const endRound = (completed && typeof comp.status?.period === 'number') ? comp.status.period : null;
               const registerFighter = (name: string, opponent: string, winnerVal: any) => {
                 const entry: FighterEntry = {
                   displayName: name, opponentName: opponent, matchup, completed,
                   voided: isVoidGameStatus(compStatusName),
-                  winner: typeof winnerVal === 'boolean' ? winnerVal : null
+                  winner: typeof winnerVal === 'boolean' ? winnerVal : null,
+                  endRound
                 };
                 registerKey(normalize(name), entry);
                 const surname = name.trim().split(/\s+/).pop();
@@ -2171,11 +2188,20 @@ Deno.serve(async (req) => {
           const isPlayerProp = betTypeNorm === 'playerprop';
           const sportNormForProps = normalize(ourSport.name);
           const propsSupportedForThisSport = PLAYER_PROP_SPORTS.includes(sportNormForProps);
+          // ADDED 2026-09-04, direct request: "should we setup total
+          // rounds like we do total sets" -- kept as its own bet type
+          // (not reusing plain "Total") for the exact same reason Tennis
+          // splits Total (games) from Total (Sets): a bare Line number
+          // alone can't tell you which scale it's on later. MMA-only --
+          // see the isMma && isTotalRounds branch below, which reads
+          // entry.endRound (comp.status.period) rather than any score.
+          const isTotalRounds = betTypeNorm === 'totalrounds';
           const supported = isMoneyline || isSpread || isTotalType || isNRFI || isYRFI
             || isTeamTotal || isTeamTotalFirst5 || isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7
             || isBothTeamsToScoreFirst5 || isBothTeamsToScoreFirst7
             || isMoneyline1stInning || isSpread1stQuarter || isSpread1stHalf || isMoneyline1stHalf
             || isMoneyline1stQuarter
+            || (isMma && isTotalRounds)
             || (isPlayerProp && propsSupportedForThisSport);
 
           if (!supported) {
@@ -2255,6 +2281,58 @@ Deno.serve(async (req) => {
             // exact fight just resolved on ESPN's own card) -- register
             // the opponent too, not just whichever side this one pick
             // happened to name, so a resolved bout seeds both names at once.
+            await registerKnownPlayer(ourSport.id, entry.displayName);
+            await registerKnownPlayer(ourSport.id, entry.opponentName);
+            continue;
+          }
+
+          // Total Rounds -- two-sided (not tied to either fighter), same
+          // "needs both names" shape as a Tennis Total, so it's resolved
+          // via fighterLookup on BOTH names rather than the single-name
+          // lookup Moneyline uses above.
+          if (isMma && isTotalRounds) {
+            if (!pick.selection.includes('/')) {
+              const note = `"${pick.selection}" -- Total Rounds needs both fighters' names (e.g. "FighterA/FighterB"), since it isn't tied to either side.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const [nameA, nameB] = pick.selection.split('/').map((s: string) => s.trim());
+            const entryA = fighterLookup.get(normalize(nameA));
+            const entryB = fighterLookup.get(normalize(nameB));
+            if (!entryA || !entryB || entryA.ambiguous || entryB.ambiguous || entryA.matchup !== entryB.matchup) {
+              const cardList = fighterDisplayNames.length ? ` Today's card: ${fighterDisplayNames.join(', ')}.` : '';
+              const note = (!entryA || !entryB)
+                ? `Could not find both "${nameA}" and "${nameB}" on today's ${ourSport.name} card -- may be a name spelling issue.${cardList}`
+                : (entryA.ambiguous || entryB.ambiguous)
+                ? `"${pick.selection}" -- one of these names matches more than one fighter's surname on today's card, needs manual review.`
+                : `"${pick.selection}" doesn't resolve to two fighters in the same real bout today.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const entry = entryA;
+            if (!entry.completed) {
+              if (entry.voided) {
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+                sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: entry.matchup });
+                continue;
+              }
+              sportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: entry.matchup, reason: `Matched to ${entry.matchup}, but ESPN has not marked this fight final yet -- not a name-matching issue, check back later.` });
+              continue;
+            }
+            if (entry.endRound === null || pick.line === null || pick.line === undefined) {
+              const note = `${entry.matchup} finished, but a real ending-round number or this pick's own line wasn't available -- needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const line = Number(pick.line);
+            const threshold = Math.abs(line);
+            const isOver = line < 0; // project-wide convention: negative line = Over
+            const grade = entry.endRound === threshold ? 'push' : (isOver ? (entry.endRound > threshold ? 'win' : 'loss') : (entry.endRound < threshold ? 'win' : 'loss'));
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+            sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: entry.matchup, end_round: entry.endRound });
             await registerKnownPlayer(ourSport.id, entry.displayName);
             await registerKnownPlayer(ourSport.id, entry.opponentName);
             continue;
