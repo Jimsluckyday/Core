@@ -192,30 +192,57 @@ Deno.serve(async (req) => {
     const rundownSportsData = await sportsRes.json();
     const rundownSportsList = rundownSportsData.sports || [];
 
-    function gradeMoneyline(score: any, isHome: boolean): 'win' | 'loss' | null {
+    type Grade = { result: 'win' | 'loss' | 'push'; multiplier: number };
+
+    // Direct request 2026-09-04: a quarter-line (a Spread/Total ending in
+    // .25 or .75 -- common in soccer, e.g. an Asian Handicap or a split
+    // total like "-2.75") is really two equal half-stakes on the two
+    // adjacent half-lines around it (2.75 = half on 2.5, half on 3.0). The
+    // simple single-threshold math below was already exactly correct for
+    // whole-number and half-number lines (a push is only possible on a
+    // whole number, and a half-number line can never tie an integer score
+    // either way) -- it just silently couldn't express the ONE real
+    // in-between case a quarter-line adds: landing exactly on its
+    // whole-number half nets a HALF win (or half loss) instead of a full
+    // one, since the other half -- itself a genuine .5 line -- pushes.
+    // That in-between case always resolves to a definite win or loss
+    // direction, never a real double-push (a .5 sub-line can't tie), so
+    // the existing 'win'/'loss'/'push' RESULT was actually always correct
+    // even before this fix -- only the dollar magnitude was overstated by
+    // 2x on that one boundary value. `margin` is signed so positive always
+    // means "win" and negative means "loss," matching both callers below.
+    function gradeMarginWithQuarterLine(margin: number, line: number): Grade {
+      const frac = Math.abs(line % 1);
+      const isQuarterLine = Math.abs(frac - 0.25) < 1e-6 || Math.abs(frac - 0.75) < 1e-6;
+      if (isQuarterLine && Math.abs(Math.abs(margin) - 0.25) < 1e-6) {
+        return { result: margin > 0 ? 'win' : 'loss', multiplier: 0.5 };
+      }
+      if (margin > 0) return { result: 'win', multiplier: 1 };
+      if (margin < 0) return { result: 'loss', multiplier: 1 };
+      return { result: 'push', multiplier: 1 };
+    }
+
+    function gradeMoneyline(score: any, isHome: boolean): Grade | null {
       const won = isHome ? score.winner_home === 1 : score.winner_away === 1;
       const lost = isHome ? score.winner_away === 1 : score.winner_home === 1;
-      if (won) return 'win';
-      if (lost) return 'loss';
+      if (won) return { result: 'win', multiplier: 1 };
+      if (lost) return { result: 'loss', multiplier: 1 };
       return null;
     }
 
-    function gradeSpread(score: any, isHome: boolean, line: number): 'win' | 'loss' | 'push' {
+    function gradeSpread(score: any, isHome: boolean, line: number): Grade {
       const ownScore = isHome ? score.score_home : score.score_away;
       const oppScore = isHome ? score.score_away : score.score_home;
       const adjusted = (ownScore - oppScore) + line;
-      if (adjusted > 0) return 'win';
-      if (adjusted < 0) return 'loss';
-      return 'push';
+      return gradeMarginWithQuarterLine(adjusted, line);
     }
 
-    function gradeTotal(score: any, line: number): 'win' | 'loss' | 'push' {
+    function gradeTotal(score: any, line: number): Grade {
       const combined = score.score_home + score.score_away;
       const threshold = Math.abs(line);
       const isOver = line < 0;
-      if (combined === threshold) return 'push';
-      if (isOver) return combined > threshold ? 'win' : 'loss';
-      return combined < threshold ? 'win' : 'loss';
+      const margin = isOver ? (combined - threshold) : (threshold - combined);
+      return gradeMarginWithQuarterLine(margin, line);
     }
 
     const overall = {
@@ -423,7 +450,7 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          let grade: 'win' | 'loss' | 'push' | null = null;
+          let grade: Grade | null = null;
           if (isMoneyline) grade = gradeMoneyline(game.score, matchedIsHome!);
           else if (isSpread) grade = gradeSpread(game.score, matchedIsHome!, Number(pick.line));
           else if (isTotal) grade = gradeTotal(game.score, Number(pick.line));
@@ -439,9 +466,9 @@ Deno.serve(async (req) => {
 
           await db(`picks?id=eq.${pick.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
+            body: JSON.stringify({ result: grade.result, grading_multiplier: grade.multiplier, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
           });
-          sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: game.matchup });
+          sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade.result, matchup: game.matchup });
         }
         console.log(`[GRADE TIMING] ${ourSport.name} -- finished all ${picks.length} picks at t=${Date.now() - t0}ms`);
 

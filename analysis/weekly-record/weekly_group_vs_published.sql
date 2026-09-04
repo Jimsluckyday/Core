@@ -16,6 +16,13 @@
 -- loss = -100, push = 0, win = odds (if positive) or 10000/abs(odds)
 -- (if negative), using opening_odds if present else closing_odds.
 -- Pending picks are counted but excluded from win%/profit (outcome unknown).
+--
+-- grading_multiplier (default 1) scales that -- it's only ever 0.5, on a
+-- quarter-line Spread/Total/Team Total (e.g. a soccer "-2.75" total) that
+-- landed exactly on its whole-number half: a genuine half win/half push or
+-- half loss/half push, not a full one. See grade_picks/index.ts's
+-- gradeMarginWithQuarterLine for the full math -- this mirrors it exactly
+-- so this query's numbers always match the app's own reports.
 
 with week_bounds as (
   select date '2025-06-01' as start_date, date '2025-06-07' as end_date
@@ -28,13 +35,13 @@ base as (
     p.is_published,
     coalesce(p.opening_odds, p.closing_odds) as odds_used,
     case
-      when p.result = 'loss' then -100
+      when p.result = 'loss' then -100 * coalesce(p.grading_multiplier, 1)
       when p.result = 'push' then 0
       when p.result = 'win' and coalesce(p.opening_odds, p.closing_odds) is not null then
-        case when coalesce(p.opening_odds, p.closing_odds) > 0
+        (case when coalesce(p.opening_odds, p.closing_odds) > 0
           then coalesce(p.opening_odds, p.closing_odds)
           else 10000.0 / abs(coalesce(p.opening_odds, p.closing_odds))
-        end
+        end) * coalesce(p.grading_multiplier, 1)
       else null
     end as profit
   from picks p, week_bounds w

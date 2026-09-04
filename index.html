@@ -2976,16 +2976,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // Standard sportsbook payout at a flat $100 stake.
   // Negative odds (favorites) risk more to win less; positive odds
   // (underdogs) profit the full number shown per $100 bet.
-  function calcProfit(odds, result) {
+  // `multiplier` defaults to 1 -- it's only ever less than that for a
+  // quarter-line Spread/Total/Team Total (e.g. a soccer "-2.75" total)
+  // that landed exactly on its whole-number half, which the grading
+  // functions record as grading_multiplier=0.5 (a genuine half win/half
+  // push, or half loss/half push -- see grade_picks/index.ts's own
+  // comment on gradeMarginWithQuarterLine for the full math). Every other
+  // pick's grading_multiplier is 1 (or absent on an older row, via the
+  // `?? 1` at each call site below), so this is a no-op everywhere else.
+  function calcProfit(odds, result, multiplier = 1) {
     // Only a WIN actually needs odds -- the payout size depends on the
     // price. Loss and push are fixed dollar amounts on a standard $100
     // bet regardless of what the odds were, so they must never be
     // blocked by a missing odds value the way they previously were.
-    if (result === 'loss') return -100;
+    if (result === 'loss') return -100 * multiplier;
     if (result === 'push') return 0;
     if (result !== 'win') return null; // pending — unknown yet
     if (odds === null || odds === undefined || !isFinite(odds)) return null;
-    return odds > 0 ? odds : (100 * 100 / Math.abs(odds));
+    return (odds > 0 ? odds : (100 * 100 / Math.abs(odds))) * multiplier;
   }
 
   // Current hot/cold streak, in picks (not days). A push is skipped —
@@ -14757,7 +14765,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const pending = picks.filter(p => p.result === 'pending').length;
     const cappers = new Set(picks.map(p => p.capper_id)).size;
     const decided = picks.filter(p => p.result === 'win' || p.result === 'loss' || p.result === 'push');
-    const profits = decided.map(p => calcProfit(p.opening_odds ?? p.closing_odds ?? null, p.result));
+    const profits = decided.map(p => calcProfit(p.opening_odds ?? p.closing_odds ?? null, p.result, p.grading_multiplier ?? 1));
     const valued = profits.filter(v => v !== null);
     const totalProfit = valued.reduce((sum, v) => sum + v, 0);
     const winPct = (wins + losses) > 0 ? Math.round((1000 * wins) / (wins + losses)) / 10 : null;
@@ -14829,7 +14837,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const to = $('wrTo').value;
     const filterSummary = from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time';
 
-    let query = 'picks?select=id,capper_id,result,is_published,opening_odds,closing_odds,event_date&is_parlay_leg=eq.false';
+    let query = 'picks?select=id,capper_id,result,is_published,opening_odds,closing_odds,grading_multiplier,event_date&is_parlay_leg=eq.false';
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
 
@@ -14978,7 +14986,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' · ');
 
-    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
+    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,grading_multiplier,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
@@ -15000,7 +15008,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       b.history.push({ result: p.result, event_date: p.event_date, created_at: p.created_at });
 
       const oddsUsed = p.opening_odds ?? p.closing_odds ?? null;
-      const val = calcProfit(oddsUsed, p.result);
+      const val = calcProfit(oddsUsed, p.result, p.grading_multiplier ?? 1);
       if (val !== null) { b.valueSum += val; b.valuedCount++; }
     }
     const rows = Object.values(byCapper).map(b => ({
@@ -16857,7 +16865,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       try {
         await Promise.all(selectedPicks.map(p => rest(`picks?id=eq.${p.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ result: 'pending', grading_status: null, grading_note: null, graded_at: null })
+          body: JSON.stringify({ result: 'pending', grading_status: null, grading_note: null, graded_at: null, grading_multiplier: 1 })
         })));
         wrap.innerHTML = `<div class="msg ok">Reset ${selectedPicks.length} pick${selectedPicks.length === 1 ? '' : 's'} back to pending.</div>`;
         await refreshPicksList();
@@ -23142,9 +23150,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 439; // bump this, and the matching row in Supabase, whenever this file is updated
-  // v439, direct request 2026-09-04: "the red line doesn't indicate to me
-  // organically that MLS is the problem... highlight the specific cell."
+  const LOCAL_VERSION = 440; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v440, direct request 2026-09-04: "no matter how small the percentage
+  // of bets is we want accuracy" -- a soccer Total/Spread ending in .25 or
+  // .75 (a quarter-line -- half stake on each of the two adjacent half-
+  // lines) was being graded as a FULL win/loss instead of a half win/half
+  // push at the one exact whole-number boundary where that distinction
+  // matters (e.g. a -2.75 total hitting exactly 3 goals). The categorical
+  // win/loss/push was actually always correct -- only the dollar magnitude
+  // was overstated by 2x on that boundary. Fixed at the source: both
+  // grade_picks/index.ts and grade_picks_espn_backfill/index.ts now detect
+  // a quarter-line and record a new `grading_multiplier` (0.5 only on that
+  // boundary, 1 everywhere else -- REQUIRES `alter table picks add column
+  // if not exists grading_multiplier numeric not null default 1;` run in
+  // Supabase first, and both edge functions redeployed). calcProfit() here
+  // takes that multiplier as an optional 3rd argument (default 1, so every
+  // existing call site and every pre-existing pick is completely
+  // unaffected) -- wired through the Weekly Record tool and the Capper
+  // Leaderboard, the two places that independently recompute profit from
+  // raw (odds, result) rather than reading a view. KNOWN SCOPE GAP: the
+  // Consensus Picks tool reads from the daily_consensus VIEW (averaged
+  // across cappers, no single line to check) and is NOT covered by this
+  // fix -- flagged, not fixed, since that view would need its own
+  // multiplier logic to do the same thing correctly.
   // Downloaded entry template (downloadEntryTemplate): the row-highlight
   // OR() now also covers Prop Stat (a brand-new "Prop Stat Check" column,
   // AB -- the one soft-checked field that never had a computed check

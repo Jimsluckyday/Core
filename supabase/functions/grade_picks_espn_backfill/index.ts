@@ -438,6 +438,35 @@ Deno.serve(async (req) => {
       });
     }
 
+    type Grade = { result: 'win' | 'loss' | 'push'; multiplier: number };
+
+    // Direct request 2026-09-04 (same fix as grade_picks/index.ts, ported
+    // here for consistency since this file duplicates the same threshold
+    // math): a quarter-line (Spread/Total/Team Total ending in .25 or .75
+    // -- common in soccer, e.g. an Asian Handicap or a split total like
+    // "-2.75") is really two equal half-stakes on the two adjacent
+    // half-lines around it. The simple single-threshold math below was
+    // already exactly correct for whole-number and half-number lines (a
+    // push is only possible on a whole number, and a half-number line can
+    // never tie an integer score either way) -- it just couldn't express
+    // the one real in-between case a quarter-line adds: landing exactly on
+    // its whole-number half nets a HALF win (or half loss), not a full
+    // one, since the other half -- itself a genuine .5 line -- pushes.
+    // That in-between case always resolves to a definite win or loss
+    // direction, never a real double-push, so the existing result was
+    // already correct even before this fix -- only the dollar magnitude
+    // was overstated by 2x on that one boundary value.
+    function gradeMarginWithQuarterLine(margin: number, line: number): Grade {
+      const frac = Math.abs(line % 1);
+      const isQuarterLine = Math.abs(frac - 0.25) < 1e-6 || Math.abs(frac - 0.75) < 1e-6;
+      if (isQuarterLine && Math.abs(Math.abs(margin) - 0.25) < 1e-6) {
+        return { result: margin > 0 ? 'win' : 'loss', multiplier: 0.5 };
+      }
+      if (margin > 0) return { result: 'win', multiplier: 1 };
+      if (margin < 0) return { result: 'loss', multiplier: 1 };
+      return { result: 'push', multiplier: 1 };
+    }
+
     function gradeMoneyline(score: any, isHome: boolean): 'win' | 'loss' | null {
       const won = isHome ? score.winner_home === 1 : score.winner_away === 1;
       const lost = isHome ? score.winner_away === 1 : score.winner_home === 1;
@@ -446,22 +475,19 @@ Deno.serve(async (req) => {
       return null;
     }
 
-    function gradeSpread(score: any, isHome: boolean, line: number): 'win' | 'loss' | 'push' {
+    function gradeSpread(score: any, isHome: boolean, line: number): Grade {
       const ownScore = isHome ? score.score_home : score.score_away;
       const oppScore = isHome ? score.score_away : score.score_home;
       const adjusted = (ownScore - oppScore) + line;
-      if (adjusted > 0) return 'win';
-      if (adjusted < 0) return 'loss';
-      return 'push';
+      return gradeMarginWithQuarterLine(adjusted, line);
     }
 
-    function gradeTotal(score: any, line: number): 'win' | 'loss' | 'push' {
+    function gradeTotal(score: any, line: number): Grade {
       const combined = score.score_home + score.score_away;
       const threshold = Math.abs(line);
       const isOver = line < 0;
-      if (combined === threshold) return 'push';
-      if (isOver) return combined > threshold ? 'win' : 'loss';
-      return combined < threshold ? 'win' : 'loss';
+      const margin = isOver ? (combined - threshold) : (threshold - combined);
+      return gradeMarginWithQuarterLine(margin, line);
     }
 
     // Game-level -- doesn't matter which team, just whether EITHER team
@@ -489,12 +515,11 @@ Deno.serve(async (req) => {
     // convention is already what's being typed in) was previously routed
     // straight to unsupported_bet_type even though the exact same
     // final-score data already being fetched is all it needs.
-    function gradeTeamTotal(ownScore: number, line: number): 'win' | 'loss' | 'push' {
+    function gradeTeamTotal(ownScore: number, line: number): Grade {
       const threshold = Math.abs(line);
       const isOver = line < 0;
-      if (ownScore === threshold) return 'push';
-      if (isOver) return ownScore > threshold ? 'win' : 'loss';
-      return ownScore < threshold ? 'win' : 'loss';
+      const margin = isOver ? (ownScore - threshold) : (threshold - ownScore);
+      return gradeMarginWithQuarterLine(margin, line);
     }
 
     // Sums the first N linescore entries (innings) for one team -- null
@@ -2283,7 +2308,7 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          let grade: 'win' | 'loss' | 'push' | null = null;
+          let grade: Grade | 'win' | 'loss' | 'push' | null = null;
           if (isMoneyline) grade = gradeMoneyline(game.score, matchedIsHome!);
           else if (isSpread) grade = gradeSpread(game.score, matchedIsHome!, Number(pick.line));
           else if (isTotalType) grade = gradeTotal(game.score, Number(pick.line));
@@ -2332,11 +2357,20 @@ Deno.serve(async (req) => {
             continue;
           }
 
+          // Only gradeSpread/gradeTotal/gradeTeamTotal return the richer
+          // {result, multiplier} shape (they're the only bet types a
+          // quarter-line can apply to) -- everything else above still
+          // returns a plain result string, so normalize both shapes here
+          // rather than changing every other grading function's signature
+          // just to satisfy one shared variable's type.
+          const gradeResult = typeof grade === 'string' ? grade : grade.result;
+          const gradeMultiplier = typeof grade === 'string' ? 1 : grade.multiplier;
+
           await db(`picks?id=eq.${pick.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
+            body: JSON.stringify({ result: gradeResult, grading_multiplier: gradeMultiplier, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() })
           });
-          sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: game.matchup });
+          sportResult.graded.push({ id: pick.id, selection: pick.selection, result: gradeResult, matchup: game.matchup });
         }
 
         overall.sports_processed.push(sportResult);
