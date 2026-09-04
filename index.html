@@ -4773,7 +4773,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // the two prior column reorders this feature went through had to
         // carefully re-verify against. Appending here changes nothing
         // about any existing column.
-        'Doubleheader Game # (1 or 2 -- leave blank unless the same two teams play twice today)'];
+        'Doubleheader Game # (1 or 2 -- leave blank unless the same two teams play twice today)',
+        // Direct request 2026-09-04: "highlight any row in red that has
+        // anything we've built it to throw an error for" -- Prop Stat was
+        // the one soft-checked field with NO computed Check column feeding
+        // the row highlight below (only a native Excel warning popup,
+        // which nothing else in this sheet reads). Appended at the very
+        // end rather than grouped with the other Check columns for the
+        // exact same reason Doubleheader Game # is out here instead of
+        // with the typed block above -- every formula/validation in this
+        // file is anchored to a FIXED column number, and inserting a
+        // column in the middle would shift all of them.
+        'Prop Stat Check'];
       HEADERS.forEach((h, i) => {
         const c = ws.getCell(1, i + 1);
         c.value = h;
@@ -4782,7 +4793,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         c.border = TEMPLATE_BORDER;
       });
-      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 16, 14, 16, 8, 8, 16, 8, 16, 10, 24, 13, 12, 20, 14, 12, 14, 14, 14, 16, 14];
+      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 16, 14, 16, 8, 8, 16, 8, 16, 10, 24, 13, 12, 20, 14, 12, 14, 14, 14, 16, 14, 14];
       WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
       // Example illustrates the posted-date fill-down AND a real two-sided
@@ -4839,9 +4850,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // adjust it per row, exactly like the dropdowns already do -- this
       // is defined ONCE, outside the row loop, and the SAME object is
       // reused on every row so ExcelJS consolidates it into one rule.
+      // Pulled out as its own fragment (direct request 2026-09-04) so the
+      // row/cell error highlighting further down can test the exact same
+      // condition as the popup warning below, instead of drifting out of
+      // sync with a second hand-copied version of this formula.
+      const dateFormatOkFormula = (ref) => `AND(LEN(${ref})>=8,LEN(${ref})<=10,LEN(${ref})-LEN(SUBSTITUTE(${ref},"/",""))=2,ISNUMBER(VALUE(RIGHT(${ref},4))))`;
       const dateFormatValidation = (anchorRef) => ({
         type: 'custom', allowBlank: true,
-        formulae: [`AND(LEN(${anchorRef})>=8,LEN(${anchorRef})<=10,LEN(${anchorRef})-LEN(SUBSTITUTE(${anchorRef},"/",""))=2,ISNUMBER(VALUE(RIGHT(${anchorRef},4))))`],
+        formulae: [dateFormatOkFormula(anchorRef)],
         showErrorMessage: true, errorStyle: 'warning',
         errorTitle: 'Check the date format',
         error: 'Dates should be typed as M/D/YYYY, with the slashes (e.g. 06/01/2025). What you entered doesn\'t match that -- double check it before continuing.'
@@ -5035,6 +5051,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 27).font = TEMPLATE_INPUT_FONT;
         ws.getCell(row, 27).border = TEMPLATE_BORDER;
         ws.getCell(row, 27).dataValidation = { type: 'list', allowBlank: true, formulae: ['"1,2"'] };
+        // Prop Stat Check (column 28) -- same "OK"/"NEW? add in Setup"
+        // pattern as Capper/Sport/Bet Type above, just never had one until
+        // now. Blank whenever Prop Stat itself is blank (every non-prop
+        // bet type), exactly like those other checks skip themselves when
+        // their own typed column is empty.
+        ws.getCell(row, 28).value = { formula: `IF(${propStatAddr}="","",IF(COUNTIF(PropStats!$A$2:$A$${PROPSTATS_LAST},${propStatAddr})>0,"OK","NEW? add in Setup"))` };
+        ws.getCell(row, 28).font = TEMPLATE_CHECK_FONT;
+        ws.getCell(row, 28).border = TEMPLATE_BORDER;
+        ws.getCell(row, 28).alignment = { horizontal: 'center' };
         // Soft (warning, not blocking) team-name check -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
         // typed for non-team bets, so rejecting anything off the list
@@ -5060,20 +5085,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // down across many rows in one motion, since nothing draws the eye
       // back to check each one afterward. Highlights the ENTIRE typed
       // row the instant any of its Capper/Sport/Bet Type/Team 1/Team 2/
-      // Prop Team Check columns (U-Z) says "NEW?" -- no macro, pure
-      // conditional formatting, so it survives LibreOffice's headless
-      // recalc exactly like the existing data validations do (a macro-
-      // driven version was tried once already for a different feature
-      // and had to be reverted after breaking under LibreOffice -- see
-      // the removed Search column's own history). Same single-rule-
-      // anchored-to-row-3 pattern as every other validation in this file,
-      // so it consolidates into one rule instead of one per row. Two
-      // ranges (typed columns, then the Doubleheader column past the
-      // computed/check block) since a conditional formatting range can't
-      // skip over columns in between.
+      // Prop Team/Prop Stat Check columns (U-Z, AB) says "NEW?", OR its
+      // Date entry/Event Date fails the same format check as the popup
+      // warning on those two cells -- no macro, pure conditional
+      // formatting, so it survives LibreOffice's headless recalc exactly
+      // like the existing data validations do (a macro-driven version was
+      // tried once already for a different feature and had to be reverted
+      // after breaking under LibreOffice -- see the removed Search
+      // column's own history). Same single-rule-anchored-to-row-3 pattern
+      // as every other validation in this file, so it consolidates into
+      // one rule instead of one per row. Two ranges (typed columns, then
+      // the Doubleheader column past the computed/check block) since a
+      // conditional formatting range can't skip over columns in between.
+      // Direct request 2026-09-04, same day: "the red line doesn't
+      // indicate to me organically [which field] is the problem" -- a
+      // SECOND set of rules below this one paints just the one offending
+      // cell in yellow, so the row draws the eye first and the yellow
+      // cell answers "which one" without scrolling right to read U-AB.
       const newEntryHighlight = {
         type: 'expression',
-        formulae: ['OR(LEFT($U3,4)="NEW?",LEFT($V3,4)="NEW?",LEFT($W3,4)="NEW?",LEFT($X3,4)="NEW?",LEFT($Y3,4)="NEW?",LEFT($Z3,4)="NEW?")'],
+        formulae: [`OR(LEFT($U3,4)="NEW?",LEFT($V3,4)="NEW?",LEFT($W3,4)="NEW?",LEFT($X3,4)="NEW?",LEFT($Y3,4)="NEW?",LEFT($Z3,4)="NEW?",LEFT($AB3,4)="NEW?",AND($A3<>"",NOT(${dateFormatOkFormula('$A3')})),AND($B3<>"",NOT(${dateFormatOkFormula('$B3')})))`],
         style: {
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } },
           font: { color: { argb: 'FF9C0006' } }
@@ -5081,6 +5112,32 @@ These are almost always the same day, so "Date entered" only fills in a starting
       };
       ws.addConditionalFormatting({ ref: `A3:Q${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 1 }] });
       ws.addConditionalFormatting({ ref: `AA3:AA${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 2 }] });
+
+      // Cell-level highlight -- same idea, but painted ONLY on the single
+      // typed cell that's actually wrong, in a color that reads as
+      // distinct from the row's red (a standard Excel "yellow fill, dark
+      // yellow text" combo), so "MLS" in the Sport cell itself lights up
+      // instead of making you scroll right to see which Check column
+      // said "NEW?". One rule per typed field that has a check to fail;
+      // Doubleheader Game # has no check (dropdown-only) so it's skipped.
+      const cellErrorHighlight = (formula, priority) => ({
+        type: 'expression',
+        formulae: [formula],
+        style: {
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB9C' } },
+          font: { color: { argb: 'FF9C6500' }, bold: true }
+        },
+        priority
+      });
+      ws.addConditionalFormatting({ ref: `C3:C${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($U3,4)="NEW?"', 10)] }); // Capper
+      ws.addConditionalFormatting({ ref: `D3:D${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($V3,4)="NEW?"', 11)] }); // Sport
+      ws.addConditionalFormatting({ ref: `E3:E${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($W3,4)="NEW?"', 12)] }); // Bet Type
+      ws.addConditionalFormatting({ ref: `F3:F${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($X3,4)="NEW?"', 13)] }); // Team 1 / Player
+      ws.addConditionalFormatting({ ref: `G3:G${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($Y3,4)="NEW?"', 14)] }); // Team 2 / Opponent
+      ws.addConditionalFormatting({ ref: `I3:I${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($AB3,4)="NEW?"', 15)] }); // Prop Stat
+      ws.addConditionalFormatting({ ref: `J3:J${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($Z3,4)="NEW?"', 16)] }); // Prop Team
+      ws.addConditionalFormatting({ ref: `A3:A${LAST_DATA_ROW}`, rules: [cellErrorHighlight(`AND($A3<>"",NOT(${dateFormatOkFormula('$A3')}))`, 17)] }); // Date entry
+      ws.addConditionalFormatting({ ref: `B3:B${LAST_DATA_ROW}`, rules: [cellErrorHighlight(`AND($B3<>"",NOT(${dateFormatOkFormula('$B3')}))`, 18)] }); // Event Date
 
       ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
 
@@ -23085,7 +23142,20 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 438; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 439; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v439, direct request 2026-09-04: "the red line doesn't indicate to me
+  // organically that MLS is the problem... highlight the specific cell."
+  // Downloaded entry template (downloadEntryTemplate): the row-highlight
+  // OR() now also covers Prop Stat (a brand-new "Prop Stat Check" column,
+  // AB -- the one soft-checked field that never had a computed check
+  // column feeding the highlight before) and bad Date entry/Event Date
+  // formatting, not just the original 6 NEW?-checked fields. A SECOND set
+  // of conditional-formatting rules paints just the one offending typed
+  // cell in yellow (Excel's standard "yellow fill, dark yellow text"),
+  // so which field is wrong reads at a glance instead of requiring a
+  // scroll right to column U-AB. Verified against a real LibreOffice
+  // headless recalc (zero formula errors) reproducing the exact MLS
+  // scenario -- Sport Check correctly returns "NEW? add in Setup" for it.
   // v438, direct request 2026-09-03: "may need to run a week a month, 6
   // months etc to get a better rounded example for analysis." New "Weekly
   // record: group vs. published" tool (Reports tab, next to Consensus)
