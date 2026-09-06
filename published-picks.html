@@ -124,6 +124,22 @@
     white-space: nowrap;
   }
   .tag.sport { color: var(--gold); border-color: rgba(212,161,42,0.4); }
+  /* CONFIRMED REQUEST 2026-09-06: a customer mistook "Moneyline First5" for
+     a plain full-game Moneyline (it grades on the 5-inning score only, and
+     had pushed while the final score suggested a loss) -- the bet-type tag
+     was the same small, dim, outlined style as the sport tag next to it, so
+     the "First5" qualifier was easy to miss. Any bet type that ISN'T one of
+     the three plain, no-surprises full-game markets (or Parlay, which is
+     visually distinct via its leg breakdown) now gets a bigger, bold,
+     filled tag instead of blending in -- see isPlainBetType() in the JS. */
+  .tag.variant {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 9px;
+    border: none;
+    background: var(--gold);
+    color: #1a1206;
+  }
 
   .hot-badge {
     font-family: 'Space Mono', monospace;
@@ -816,7 +832,7 @@
           <div class="ticket-top">
             <div class="tags">
               <span class="tag sport">${escapeHtml(p.sports ? p.sports.name : '')}</span>
-              <span class="tag">${escapeHtml(p.bet_types ? p.bet_types.name : '')}</span>
+              <span class="tag${isPlainBetType(p.bet_types ? p.bet_types.name : '') ? '' : ' variant'}">${escapeHtml(p.bet_types ? p.bet_types.name : '')}</span>
               ${tournamentTag}
             </div>
             ${cornerBadge}
@@ -878,6 +894,17 @@
   const PARLAY_STAKE = 25;
   function stakeForBetType(betTypeName) {
     return (betTypeName || '').trim().toLowerCase() === 'parlay' ? PARLAY_STAKE : STRAIGHT_STAKE;
+  }
+
+  // The three plain, no-surprises full-game markets, plus Parlay (already
+  // visually distinct via its own leg breakdown) -- anything else is a
+  // qualified variant (Moneyline First5, Team Total, 1st Half, etc.) that
+  // grades differently than a viewer would assume from the base word alone,
+  // and gets the bold "variant" tag style instead of the plain sport-tag
+  // style. See the .tag.variant CSS comment for why this exists.
+  const PLAIN_BET_TYPES = ['moneyline', 'spread', 'total', 'parlay'];
+  function isPlainBetType(betTypeName) {
+    return PLAIN_BET_TYPES.includes((betTypeName || '').trim().toLowerCase());
   }
 
   // Standard American-odds profit on a flat stake (see stakeForBetType
