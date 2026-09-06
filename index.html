@@ -23363,7 +23363,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 450; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 451; // bump this, and the matching row in Supabase, whenever this file is updated
+  // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
+  // 178-179 versions behind (last real entry v271/v272, Aug 16) without
+  // anyone noticing -- each one already had its own "update this
+  // automatically, same turn, no need to ask" rule, and both broke at the
+  // exact same version, meaning some session ended (compacted/hit a
+  // limit) without either getting its final update, and nothing after
+  // that resumed the habit. Every single time LOCAL_VERSION goes up,
+  // ALSO update BOTH of these, same turn, using this exact commit message
+  // as the text:
+  //   1. C:\Users\jherd\Downloads\telegram-pipeline\Core-Betting-Solutions-Changelog_2.docx
+  //      (append a Version | Changelog row)
+  //   2. C:\Users\jherd\Downloads\telegram-pipeline\PROJECT-STATE.md
+  //      (append a dated, detailed entry -- this file is a snapshot +
+  //      running narrative, not just a one-liner; match its existing
+  //      entries' level of detail, and update the "Last verified" date
+  //      at the top)
+  // Not a "do it later" TODO, not something that waits for the user to
+  // ask. This comment exists specifically so a future session (including
+  // one working from a compacted summary that dropped this instruction)
+  // still sees the rule at the exact moment it becomes relevant, without
+  // needing to rediscover either file or remember the convention from
+  // memory alone.
   // v450, direct follow-up 2026-09-06: "don't over value parlay's...
   // lottery ones... a single win doesn't boost their ROI to unrealistic
   // proportions." A parlay's combined odds (only ever stored on the
