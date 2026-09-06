@@ -15047,13 +15047,15 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <td><span style="color:${streakColor};font-weight:bold;">${streakLabel(streak)}</span></td>
       <td>${r.value !== null ? `${r.value >= 0 ? '+' : '−'}$${Math.abs(r.value).toFixed(2)}` : '—'}
           <span style="color:var(--ink-soft);font-size:10px;"> (${r.valuedCount}/${r.total_picks} w/ odds)</span></td>
+      <td>${r.unit_value !== null ? `${r.unit_value >= 0 ? '+' : '−'}$${Math.abs(r.unit_value).toFixed(2)}` : '—'}
+          <span style="color:var(--ink-soft);font-size:10px;"> (${r.unitSizedCount}/${r.total_picks} sized)</span></td>
       <td><button type="button" class="analysis-btn" data-capper-id="${r.capper_id}" data-capper-name="${escapeHtml(r.capper_name)}">Analysis &rarr;</button></td>
     </tr>`;
     }).join('');
     return `
       <p class="stub-title" style="margin-bottom:8px;">${title}</p>
       <table class="picks-table" style="margin-bottom:20px;">
-        <thead><tr><th>#</th><th>Capper</th><th>Total picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th><th>Streak</th><th>Value @ $100</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>Capper</th><th>Total picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th><th>Streak</th><th>Value @ $100</th><th>Unit-Adjusted Value</th><th></th></tr></thead>
         <tbody>${body}</tbody>
       </table>`;
   }
@@ -15086,7 +15088,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   ${topBottomTableHtml('Bottom 5', bottomRows)}
   ${csvExportPopoutScript('top-bottom-cappers')}
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
-    Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show.
+    Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show. "Value @ $100" treats every pick as the same size; "Unit-Adjusted Value" weights each pick's profit by that pick's own recorded unit size, so a capper who correctly saves bigger sizing for their best picks shows it here even when their flat win rate doesn't — a capper with no numeric unit size recorded defaults to 1 for that pick (shown in the "X/Y sized" count), never guessed at a specific weight.
   </div>
 <script>
 (function() {
@@ -15152,7 +15154,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' · ');
 
-    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,grading_multiplier,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
+    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,grading_multiplier,raw_unit_size,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
@@ -15163,7 +15165,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     for (const p of picks) {
       const id = p.capper_id;
       if (!byCapper[id]) {
-        byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, valueSum: 0, valuedCount: 0, history: [] };
+        byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, valueSum: 0, valuedCount: 0, unitValueSum: 0, unitValuedCount: 0, unitSizedCount: 0, history: [] };
       }
       const b = byCapper[id];
       b.total_picks++;
@@ -15176,11 +15178,32 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const oddsUsed = p.opening_odds ?? p.closing_odds ?? null;
       const val = calcProfit(oddsUsed, p.result, p.grading_multiplier ?? 1);
       if (val !== null) { b.valueSum += val; b.valuedCount++; }
+
+      // Direct request 2026-09-06: flat $100/pick treats a capper's 5-unit
+      // "best bet" the same as their 1-unit throwaway, which hides exactly
+      // the signal a real bettor following their own sizing would feel --
+      // a capper who correctly saves size for their best picks looks no
+      // different here than one who doesn't. Weights each pick's profit by
+      // its own raw_unit_size (same normalizeUnitSize parsing Add Pick's
+      // own unit-size field already uses) instead of assuming every pick
+      // is sized the same. A non-numeric or missing unit size (a star-
+      // rating capper, or one who's never used units) defaults to 1 --
+      // conservative and transparent, not guessed -- and unitSizedCount
+      // below reports exactly how many of a capper's picks that default
+      // actually applied to, same "how much of this can you trust"
+      // disclosure already used for odds coverage.
+      const parsedUnit = Number(normalizeUnitSize(p.raw_unit_size || ''));
+      const hasRealUnit = p.raw_unit_size && !Number.isNaN(parsedUnit) && parsedUnit > 0;
+      const unitMultiplier = hasRealUnit ? parsedUnit : 1;
+      if (hasRealUnit) b.unitSizedCount++;
+      const unitVal = val !== null ? val * unitMultiplier : null;
+      if (unitVal !== null) { b.unitValueSum += unitVal; b.unitValuedCount++; }
     }
     const rows = Object.values(byCapper).map(b => ({
       ...b,
       win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null,
       value: b.valuedCount > 0 ? b.valueSum : null,
+      unit_value: b.unitValuedCount > 0 ? b.unitValueSum : null,
       streak: computeStreak(b.history)
     }));
 
@@ -23316,7 +23339,23 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 448; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 449; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v449, direct request 2026-09-06: flat $100/pick (the existing "Value
+  // @ $100" column, Top & Bottom Cappers) treats a capper's 5-unit best
+  // bet the same as their 1-unit throwaway -- hiding exactly the signal a
+  // real bettor following that capper's own sizing would feel. Added a
+  // second, "Unit-Adjusted Value" column alongside it: same calcProfit()
+  // math already proven for Value @ $100, just weighted by each pick's
+  // own raw_unit_size (parsed the same way Add Pick's own unit-size field
+  // already is) instead of assuming every pick is sized identically. A
+  // pick with no numeric unit size (a star-rating capper, or a blank)
+  // defaults to a 1x weight rather than guessing what a text label like
+  // "Super Max Play" should numerically mean -- and exactly how many of a
+  // capper's picks that default applied to is shown right in the column
+  // ("X/Y sized"), same transparency already used for odds coverage.
+  // Deliberately additive only -- Top 5/Bottom 5 selection still sorts by
+  // win % exactly as before; this is a new column to read by eye, not a
+  // change to who qualifies as top/bottom.
   // v448, direct request 2026-09-06: "Is there a way to do this
   // pre-emptively as we build out a sport?" -- v446/v447's any-sport
   // fix only helps once a stat has ALREADY been added somewhere; adding a
