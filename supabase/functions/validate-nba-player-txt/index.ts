@@ -6,35 +6,28 @@
 // lookup, same safety principle as validate-mlb-player/validate-wnba-
 // player/validate-nhl-player.
 //
-// CONFIRMED FIX (2026-08-14), direct report: "we have the team/tournament
-// button for the missing data tied to ball don't lie which failed" --
-// a real production run showed 45 checked, 0 resolved, almost every
-// failure reading "Player search failed (429)". Root cause: this function
-// was still on BALLDONTLIE's players/games endpoints, which have a
-// confirmed 5-requests-per-minute free-tier ceiling (the same limit Fix
-// #19 in this file's own prior version had to work around with
-// sequential requests and pagination) -- a real production batch of 45
-// player checks blows straight through that. validate-wnba-player was
-// ALREADY rebuilt on ESPN for exactly this reason back on 2026-08-12 (see
-// that file's own header) and never had this problem; this NBA version
-// just never got the same treatment. Rebuilt here on the identical ESPN-
-// based approach as validate-wnba-player, substituting basketball/nba for
-// basketball/wnba -- confirmed directly (same session as the WNBA build)
-// that ESPN's own team roster endpoint
-// (site.api.espn.com/.../teams/{id}/roster) has NO observed rate limit at
-// all (8 rapid real requests in ~2 seconds, zero issues). No API key or
-// secret needed at all anymore -- BALLDONTLIE_API_KEY is no longer
-// required by this function.
+// REBUILT 2026-09-06, direct report: "Luguentz Dort"/"Bennedict Mathurin"
+// (both real, correctly-spelled 2025 NBA Finals players) kept failing this
+// check no matter what was fixed. Root cause was the HONEST CAVEAT this
+// file used to carry (see prior version): ESPN's roster endpoint only
+// ever returns each team's CURRENT, real-time roster, with no historical
+// option at all -- fine for a same-day Add Pick lookup, but for anything
+// entered even a season later, a player who's since moved teams (or is a
+// free agent) silently vanishes from this check even though they
+// definitely played that day. Confirmed directly: neither player is on
+// the Thunder's or Pacers' CURRENT roster, despite both being real
+// starters in the actual June 5 2025 Finals Game 1 box score, each with
+// real recorded minutes.
 //
-// HONEST CAVEAT, carried over from validate-wnba-player: ESPN's roster
-// endpoint only returns each team's CURRENT roster -- querying a past
-// season returns zero athletes, so there's no real historical/date-
-// anchored option here. For an interactive Add Pick lookup or a same-
-// day/recent-day bulk check (the real use case for this button) this is
-// a non-issue; BALLDONTLIE's own data wasn't meaningfully more historical
-// either (its "roster" data was an all-time list including retired
-// players, not a real season-accurate snapshot), so this isn't a
-// regression on that front.
+// New approach, same fix already proven for validate-mlb-player-txt: ask
+// ESPN's own box score for that specific game instead of the current
+// roster. Confirmed directly against that same real Finals game that
+// ESPN's box score lists the FULL active game-day roster for both teams
+// (15 Pacers, 14 Thunder) -- including players who did NOT play, each
+// tagged with a real reason ("COACH'S DECISION", or an actual injury) --
+// so this can only ever miss a player who was genuinely inactive/not with
+// that team that day, never one an API's own "current roster only" gap
+// silently drops.
 //
 // Call with: POST /validate-nba-player
 // Body: { date: "2026-06-03", checks: [{ id: "1", playerName: "Jalen Brunson" }, ...] }
@@ -67,7 +60,7 @@ function normalize(s: string): string {
 // full name via plain equality/substring, no matter how correct the pick
 // is -- normalize("J. Duran") = "jduran" is neither equal to nor a
 // substring match against normalize("Jarren Duran") = "jarrenduran".
-// Builds the same shape from the roster's own full name so it can be
+// Builds the same shape from the box score's own full name so it can be
 // registered as an extra lookup key below.
 function initialSurname(fullName: string): string | null {
   const parts = fullName.trim().split(/\s+/);
@@ -162,29 +155,34 @@ Deno.serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // No rate limit on this endpoint (confirmed directly) -- safe to fetch
-    // every team's roster in parallel, unlike BALLDONTLIE.
-    const rosterResults = await Promise.allSettled(
-      [...teamsToday.keys()].map(id =>
-        espnFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${id}/roster`).then(r => r.ok ? r.json() : null)
-      )
+    // One box score per GAME (not per team) -- the real, ground-truth
+    // game-day roster for both teams at once, including players who
+    // didn't play, instead of a "current roster" reconstruction attempt.
+    // No rate limit observed on this endpoint (same family already
+    // confirmed rate-limit-free for the roster endpoint this replaces).
+    const summaryResults = await Promise.allSettled(
+      games.map((g: any) => espnFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=${g.id}`).then(r => r.ok ? r.json() : null))
     );
     const rosterByNorm = new Map<string, { teamName: string; opponent: string; displayName: string }>();
-    let i = 0;
-    let rostersFetched = 0;
-    for (const id of teamsToday.keys()) {
-      const result = rosterResults[i++];
-      const t = teamsToday.get(id)!;
+    let boxscoresFetched = 0;
+    for (const result of summaryResults) {
       if (result.status !== 'fulfilled' || !result.value) continue;
-      rostersFetched++;
-      const athletes = result.value.athletes || [];
-      for (const a of athletes) {
-        const name = a.fullName || a.displayName;
-        if (!name) continue;
-        const entry = { teamName: t.teamName, opponent: t.opponent, displayName: name };
-        rosterByNorm.set(normalize(name), entry);
-        const alias = initialSurname(name);
-        if (alias && !rosterByNorm.has(alias)) rosterByNorm.set(alias, entry);
+      const players = result.value.boxscore && result.value.boxscore.players;
+      if (!Array.isArray(players)) continue;
+      boxscoresFetched++;
+      for (const teamBlock of players) {
+        const teamId = teamBlock.team && teamBlock.team.id;
+        const t = teamId && teamsToday.get(teamId);
+        if (!t) continue;
+        const athletes = (teamBlock.statistics && teamBlock.statistics[0] && teamBlock.statistics[0].athletes) || [];
+        for (const a of athletes) {
+          const name = a.athlete && a.athlete.displayName;
+          if (!name) continue;
+          const entry = { teamName: t.teamName, opponent: t.opponent, displayName: name };
+          rosterByNorm.set(normalize(name), entry);
+          const alias = initialSurname(name);
+          if (alias && !rosterByNorm.has(alias)) rosterByNorm.set(alias, entry);
+        }
       }
     }
 
@@ -204,13 +202,13 @@ Deno.serve(async (req) => {
       }
       return {
         id: check.id, verifiable: true, valid: false,
-        reason: `"${check.playerName}" was not found on any NBA roster for a team playing on ${targetDate}`,
+        reason: `"${check.playerName}" was not found in any real box score for a game played on ${targetDate}`,
         teamsCheckedCount: teamsToday.size
       };
     });
 
     return new Response(JSON.stringify({
-      status: 'checked', date: targetDate, teamsPlayingToday: teamsToday.size, rostersFetched, results
+      status: 'checked', date: targetDate, teamsPlayingToday: teamsToday.size, boxscoresFetched, results
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

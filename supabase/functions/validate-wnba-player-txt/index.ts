@@ -6,31 +6,25 @@
 // Never writes to any table -- purely a lookup, same safety principle as
 // validate-mlb-player/validate-nba-player/validate-nhl-player.
 //
-// Built 2026-08-12, direct request right after the schedule-sync-backfill
-// WNBA prop-lookup fix: "I don't think we build in WNBA and should add
-// that."
+// REBUILT 2026-09-06, direct report: a WNBA player who genuinely played
+// still couldn't be found by this check. Same root cause just fixed in
+// validate-nba-player-txt (identical HONEST CAVEAT this file used to
+// carry): ESPN's roster endpoint only ever returns each team's CURRENT,
+// real-time roster, with no historical option at all -- so a player who's
+// since moved teams (or is a free agent) silently vanishes from this
+// check even for a date when they definitely played. Confirmed directly
+// on the NBA side against a real 2025 Finals game before porting the fix
+// here: two correctly-spelled, real starters from that game were missing
+// from both teams' CURRENT rosters, yet both were right there in the real
+// box score with real recorded minutes.
 //
-// REVISED same day, direct follow-up: "would it be beneficial to have
-// something I run once a day or week... which the uploader/add picks
-// would check against?" -- while researching that question, confirmed
-// directly that ESPN's OWN team roster endpoint
-// (site.api.espn.com/.../teams/{id}/roster) has NO observed rate limit at
-// all (8 rapid real requests in ~2 seconds, zero issues), unlike
-// BALLDONTLIE's confirmed 5-requests-per-minute free-tier ceiling that
-// this file's FIRST version had to work around with sequential requests
-// and pagination. Rebuilt on ESPN instead -- same trusted, already-proven
-// source used everywhere else in this project for schedule/roster data,
-// no API key or secret needed at all, and noticeably simpler and faster
-// as a direct result (no more 30-90+ second lookups).
-//
-// HONEST CAVEAT, confirmed directly: ESPN's roster endpoint only returns
-// each team's CURRENT roster -- querying a past season returns zero
-// athletes, so there's no real historical/date-anchored option here. For
-// an interactive Add Pick lookup (entering a pick at or near real time)
-// this is a non-issue; BALLDONTLIE's own data wasn't meaningfully more
-// historical either (its "roster" data was an all-time list including
-// retired players, not a real season-accurate snapshot), so this isn't a
-// regression on that front.
+// New approach, same fix already proven for validate-mlb-player-txt and
+// validate-nba-player-txt: ask ESPN's own box score for that specific
+// game instead of the current roster. A box score lists the FULL active
+// game-day roster for both teams -- including players who did NOT play,
+// each tagged with a real reason -- so this can only ever miss a player
+// who was genuinely inactive/not with that team that day, never one an
+// API's own "current roster only" gap silently drops.
 //
 // Call with: POST /validate-wnba-player
 // Body: { date: "2026-06-01", checks: [{ id: "1", playerName: "Natisha Hiedeman" }, ...] }
@@ -61,7 +55,7 @@ function normalize(s: string): string {
 // player-txt, same matching logic ported here): a capper writing "J.
 // Duran"-style first-initial-plus-surname names never matches a roster's
 // full name via plain equality/substring, no matter how correct the pick
-// is. Builds that same shape from the roster's own full name so it can
+// is. Builds that same shape from the box score's own full name so it can
 // be registered as an extra lookup key below.
 function initialSurname(fullName: string): string | null {
   const parts = fullName.trim().split(/\s+/);
@@ -156,29 +150,34 @@ Deno.serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // No rate limit on this endpoint (confirmed directly) -- safe to fetch
-    // every team's roster in parallel, unlike BALLDONTLIE.
-    const rosterResults = await Promise.allSettled(
-      [...teamsToday.keys()].map(id =>
-        espnFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams/${id}/roster`).then(r => r.ok ? r.json() : null)
-      )
+    // One box score per GAME (not per team) -- the real, ground-truth
+    // game-day roster for both teams at once, including players who
+    // didn't play, instead of a "current roster" reconstruction attempt.
+    // No rate limit observed on this endpoint (same family already
+    // confirmed rate-limit-free for the roster endpoint this replaces).
+    const summaryResults = await Promise.allSettled(
+      games.map((g: any) => espnFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/summary?event=${g.id}`).then(r => r.ok ? r.json() : null))
     );
     const rosterByNorm = new Map<string, { teamName: string; opponent: string; displayName: string }>();
-    let i = 0;
-    let rostersFetched = 0;
-    for (const id of teamsToday.keys()) {
-      const result = rosterResults[i++];
-      const t = teamsToday.get(id)!;
+    let boxscoresFetched = 0;
+    for (const result of summaryResults) {
       if (result.status !== 'fulfilled' || !result.value) continue;
-      rostersFetched++;
-      const athletes = result.value.athletes || [];
-      for (const a of athletes) {
-        const name = a.fullName || a.displayName;
-        if (!name) continue;
-        const entry = { teamName: t.teamName, opponent: t.opponent, displayName: name };
-        rosterByNorm.set(normalize(name), entry);
-        const alias = initialSurname(name);
-        if (alias && !rosterByNorm.has(alias)) rosterByNorm.set(alias, entry);
+      const players = result.value.boxscore && result.value.boxscore.players;
+      if (!Array.isArray(players)) continue;
+      boxscoresFetched++;
+      for (const teamBlock of players) {
+        const teamId = teamBlock.team && teamBlock.team.id;
+        const t = teamId && teamsToday.get(teamId);
+        if (!t) continue;
+        const athletes = (teamBlock.statistics && teamBlock.statistics[0] && teamBlock.statistics[0].athletes) || [];
+        for (const a of athletes) {
+          const name = a.athlete && a.athlete.displayName;
+          if (!name) continue;
+          const entry = { teamName: t.teamName, opponent: t.opponent, displayName: name };
+          rosterByNorm.set(normalize(name), entry);
+          const alias = initialSurname(name);
+          if (alias && !rosterByNorm.has(alias)) rosterByNorm.set(alias, entry);
+        }
       }
     }
 
@@ -197,13 +196,13 @@ Deno.serve(async (req) => {
       }
       return {
         id: check.id, verifiable: true, valid: false,
-        reason: `"${check.playerName}" was not found on any WNBA roster for a team playing on ${targetDate}`,
+        reason: `"${check.playerName}" was not found in any real box score for a game played on ${targetDate}`,
         teamsCheckedCount: teamsToday.size
       };
     });
 
     return new Response(JSON.stringify({
-      status: 'checked', date: targetDate, teamsPlayingToday: teamsToday.size, rostersFetched, results
+      status: 'checked', date: targetDate, teamsPlayingToday: teamsToday.size, boxscoresFetched, results
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {
