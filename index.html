@@ -9883,7 +9883,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         } else if (isStraightMoneyline) {
           detail = betTypeName + ' needs a real researched price, no safe default for this market.';
         } else if (p.is_parlay_leg) {
-          detail = betTypeName + ' parlay leg -- needs its own real price so the parlay\'s combined odds compute correctly; Bulk-fill Standard Odds deliberately skips parlay legs.';
+          detail = betTypeName + ' parlay leg -- needs its own real price so the parlay\\'s combined odds compute correctly; Bulk-fill Standard Odds deliberately skips parlay legs.';
         } else {
           detail = betTypeName + ' is safe for Bulk-fill Standard Odds or Bulk-match Odds in Data Tools.';
         }
@@ -23159,7 +23159,52 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 441; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 442; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v442, direct report 2026-09-06: v441 did NOT actually fix the reported
+  // symptom -- every "All Picks" pop-out (not just parlays, every date)
+  // was STILL throwing the exact same "Uncaught SyntaxError: Failed to
+  // execute 'write' on 'Document': Unexpected identifier 's'" after v441
+  // shipped, confirmed loaded, hard-refreshed, and after clearing browser
+  // history. This was a SECOND, independent instance of the same species
+  // of bug as v441 (single- vs double-backslash escaping inside
+  // openAllPicksTab's outer win.document.write(`...`) template literal),
+  // in a completely different spot: the Find Missing Odds automation's
+  // parlay-leg detail message, `detail = betTypeName + ' parlay leg --
+  // needs its own real price so the parlay\'s combined odds compute
+  // correctly...'`. The apostrophe in "parlay's" needed to survive as a
+  // real \' escape into the popup's own single-quoted string, which
+  // requires DOUBLING the backslash at this (outer) level -- written with
+  // only one backslash, the outer literal's own escape processing consumed
+  // it, leaving a bare, unescaped apostrophe sitting inside the popup's
+  // single-quoted string. That terminated the string mid-word at
+  // "parlay'", leaving "s combined odds..." as orphaned tokens -- which is
+  // exactly, character for character, "Unexpected identifier 's'". This is
+  // a PARSE-TIME failure of the popup's entire inline <script> block, so it
+  // broke EVERY button on EVERY open of "All Picks" regardless of which
+  // pick or date was involved, whether or not this specific Find Missing
+  // Odds code path ever actually ran -- explaining why v441's fix (which
+  // was real, and did eliminate the ORIGINAL backspace-byte bug) never
+  // resolved the user's actual live symptom: it fixed a genuine bug that
+  // simply wasn't the one still causing the reported error.
+  // FOUND this time via a much broader, systematic sweep instead of
+  // chasing data: extracted the exact template-literal boundaries of
+  // EVERY win.document.write(`...`) call in the whole file (19 of them,
+  // not just this one) and scanned each for ANY single-backslash instance
+  // of the FULL set of real JS escape characters (n t r f v b 0 x u ' " `
+  // and line-continuation) -- not just the control-character subset
+  // (n t r f v b 0) checked after v441, which is exactly why this one
+  // wasn't caught the first time. Verified conclusively (not just by
+  // inspection) by reproducing the exact mechanism in isolation: evaluating
+  // the old single-backslash source as a real JS template literal, then
+  // parsing the resulting string, threw the identical
+  // "Unexpected identifier 's'" error; doing the same with the doubled
+  // backslash parsed clean. See CLAUDE.md-equivalent note: any comment or
+  // string written inside one of these 19 popup-building template literals
+  // that needs a REAL backslash-escape (not just a backtick or ${) to
+  // survive into the popup's own script MUST double every backslash, and
+  // this needs checking against the full escape set, not just the
+  // "control character" ones -- an apostrophe, quote, hex/unicode escape,
+  // or line-continuation backslash is exactly as dangerous as \b was.
   // v441, direct report 2026-09-05: "the drop down for Parlays isn't
   // working" -- EVERY parlay's "All Picks" edit pop-out was completely
   // non-interactive (legs toggle, Export to CSV, everything), throwing
