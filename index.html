@@ -630,6 +630,24 @@
         <div id="propStatListWrap" style="margin-top:10px;"></div>
       </div>
 
+      <div style="font-size:10px;color:var(--ink-soft);margin:14px 0 8px;">
+        Direct request 2026-09-06: for a new sport with a similar prop set to one already on file (e.g. adding NCAA Football after NFL, or UFL after NFL) -- copies every stat from an existing sport onto another one in bulk, instead of waiting for each stat to get called on a real pick and typing it in one at a time. Only copies stats the target sport doesn't already have (a name already covered there, sport-specific or any-sport, is skipped, never duplicated) -- each copy becomes its own independent, sport-specific entry, so editing/removing one afterward never touches the source sport's own list.
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Copy stats from</label>
+          <select id="copyStatsFromSport"></select>
+        </div>
+        <div class="field">
+          <label>Into</label>
+          <select id="copyStatsToSport"></select>
+        </div>
+        <div style="align-self:flex-end;">
+          <button type="button" class="ghost" id="copyStatsBtn">Copy stats</button>
+        </div>
+      </div>
+      <div id="copyStatsMsg" style="margin-top:6px;"></div>
+
       <p class="stub-title" style="margin-top:24px;">Tournaments / events</p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Used to power the Event/Tournament dropdown when entering picks for tennis, golf, soccer, and similar event-based sports — the entry form only shows tournaments relevant to the sport and rough date being entered, so nobody has to already know what's currently happening in a given sport just to log a pick.
@@ -3977,6 +3995,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
     btSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     btSportSel.value = keepBtSport;
+
+    // Copy Stats tool (Prop stats section) -- both sides need one real
+    // sport picked, no "All sports" option, same as propStatSport.
+    ['copyStatsFromSport', 'copyStatsToSport'].forEach(id => {
+      const sel = $(id);
+      const keep = sel.value;
+      sel.innerHTML = sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+      if (sports.some(s => String(s.id) === String(keep))) sel.value = keep;
+    });
   }
 
   $('addSportBtn').addEventListener('click', async () => {
@@ -3989,8 +4016,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         body: JSON.stringify([{ name }])
       });
       $('newSportName').value = '';
-      showMsg($('capperMsg'), `Added "${escapeHtml(name)}".`, 'ok');
       await refreshSports(created && created.id);
+      // Direct request 2026-09-06: for a sport with a similar prop set to
+      // one already on file (NCAA Football after NFL, UFL after NFL),
+      // point straight at the Copy Stats tool below with "Into" already
+      // set to the sport just added -- just pick "from" and click Copy,
+      // instead of waiting for each stat to get called on a real pick.
+      if (created && created.id) $('copyStatsToSport').value = created.id;
+      showMsg($('capperMsg'), `Added "${escapeHtml(name)}". If a similar sport is already on file, use "Copy stats from another sport" below (Prop stats) to start it with a full stat list instead of building it from scratch.`, 'ok');
     } catch (e) {
       showMsg($('capperMsg'), e.message, 'error');
     }
@@ -5362,6 +5395,36 @@ These are almost always the same day, so "Date entered" only fills in a starting
       await refreshPropStats();
     } catch (e) {
       showMsg($('propStatMsg'), e.message, 'error');
+    }
+  });
+
+  $('copyStatsBtn').addEventListener('click', async () => {
+    const fromId = $('copyStatsFromSport').value;
+    const toId = $('copyStatsToSport').value;
+    if (!fromId || !toId) { showMsg($('copyStatsMsg'), 'Pick both a "from" and an "into" sport.', 'error'); return; }
+    if (fromId === toId) { showMsg($('copyStatsMsg'), 'Pick two different sports.', 'error'); return; }
+    // Only the source sport's OWN specific stats get copied -- any-sport
+    // stats are already available everywhere, including the target, so
+    // there's nothing to copy for those.
+    const sourceStats = propStats.filter(p => String(p.sport_id) === String(fromId));
+    if (!sourceStats.length) { showMsg($('copyStatsMsg'), `That sport has no stats of its own to copy (any-sport stats are already available everywhere).`, 'error'); return; }
+    // Skip anything the target sport can already reach -- its own
+    // sport-specific stats, or any-sport ones -- so re-running this after
+    // adding a few stats by hand never creates duplicates.
+    const alreadyReachable = new Set(
+      propStats.filter(p => p.sport_id === null || String(p.sport_id) === String(toId)).map(p => p.name.toLowerCase())
+    );
+    const toCopy = sourceStats.filter(p => !alreadyReachable.has(p.name.toLowerCase()));
+    if (!toCopy.length) { showMsg($('copyStatsMsg'), 'The target sport already has every one of those stats.', 'ok'); return; }
+    try {
+      await rest('prop_stats', { method: 'POST', body: JSON.stringify(toCopy.map(p => ({ name: p.name, sport_id: toId }))) });
+      const skipped = sourceStats.length - toCopy.length;
+      showMsg($('copyStatsMsg'), `Copied ${toCopy.length} stat${toCopy.length === 1 ? '' : 's'}${skipped ? ` (${skipped} already there, skipped)` : ''}.`, 'ok');
+      $('propStatListPanel').style.display = 'block';
+      $('togglePropStatListBtn').textContent = 'Hide stats list';
+      await refreshPropStats();
+    } catch (e) {
+      showMsg($('copyStatsMsg'), e.message, 'error');
     }
   });
 
@@ -23253,7 +23316,22 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 447; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 448; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v448, direct request 2026-09-06: "Is there a way to do this
+  // pre-emptively as we build out a sport?" -- v446/v447's any-sport
+  // fix only helps once a stat has ALREADY been added somewhere; adding a
+  // new sport with a similar prop set to an existing one (NCAA Football
+  // after NFL, UFL after NFL) still meant waiting for each stat to get
+  // called on a real pick, then manually adding and (per v447) reconciling
+  // it, one at a time, as it came up. New "Copy stats from another sport"
+  // tool in Setup -> Prop stats: pick a source sport and a target sport,
+  // and every one of the source's own stats the target doesn't already
+  // have (sport-specific or any-sport) gets created for the target in one
+  // batch -- each copy is its own independent, sport-specific row, so
+  // editing one afterward never touches the source sport's list. Adding a
+  // new sport now also pre-fills this tool's "Into" field with the sport
+  // just created, so the natural next step (copy a similar sport's stats
+  // in) is one click away instead of a separate thing to remember to do.
   // v447, direct follow-up 2026-09-06: "if I already have this for Hockey
   // will it overwrite this and cause an issue?" -- caught a real gap in
   // v446 before it shipped a real incident: marking a stat "any sport"
