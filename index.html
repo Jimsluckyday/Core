@@ -10596,11 +10596,20 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // (\\d, \\., \\b), not single -- this whole block is text inside the
   // outer template literal that builds this pop-out, and that literal's
   // own string-escape processing silently consumes one backslash from any
-  // \X it doesn't recognize as a real escape. A single \d/\./\b here would
-  // survive as plain d/./b in the actual popup script -- no error, no
-  // warning, just a regex that quietly stops matching real unit sizes at
-  // all. Doubling here is what makes a single, correct \d/\./\b actually
-  // reach the popup's own runtime code.
+  // \\X it doesn't recognize as a real escape. A single \\d/\\./\\b here
+  // would survive as plain d/./b in the actual popup script -- EXCEPT \\b
+  // specifically IS a real JS string escape (backspace, charCode 8), so it
+  // doesn't survive as bare "b" the way \\d/\\. do -- it silently becomes
+  // an actual backspace control character embedded in the popup's written
+  // HTML. CONFIRMED REAL BUG, direct report 2026-09-05: this exact
+  // paragraph's own single-backslash examples (before this fix) WERE the
+  // literal source of a real, reproducible "Failed to execute 'write' on
+  // 'Document': Unexpected identifier" error on every parlay pop-out --
+  // found only by hex-scanning the live popup's own document.documentElement.outerHTML
+  // for stray control characters, since no amount of database/data
+  // scanning could ever find it (the corrupted byte lives in this comment,
+  // not in any pick's data). Doubling here is what makes a single, correct
+  // \\d/\\./\\b actually reach the popup's own runtime code.
   function normalizeUnitSizeLocal(raw) {
     const trimmed = (raw || '').trim();
     if (!trimmed) return trimmed;
@@ -23150,7 +23159,37 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 440; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 441; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v441, direct report 2026-09-05: "the drop down for Parlays isn't
+  // working" -- EVERY parlay's "All Picks" edit pop-out was completely
+  // non-interactive (legs toggle, Export to CSV, everything), throwing
+  // "Uncaught SyntaxError: Failed to execute 'write' on 'Document':
+  // Unexpected identifier 's'" on open. Root cause took an extremely long
+  // diagnostic chain to find, since it was neither a data problem nor a
+  // real logic bug: normalizeUnitSizeLocal's own explanatory comment (just
+  // above that function, inside openAllPicksTab's giant template literal)
+  // illustrated its backslash-doubling rule using SINGLE backslashes
+  // (\d/\./\b) instead of the doubled ones (\\d/\\./\\b) it was describing.
+  // \d and \. aren't real JS string escapes, so they degrade harmlessly to
+  // bare letters when the OUTER template literal's own escape processing
+  // runs -- but \b IS a real escape (backspace, charCode 8), so it didn't
+  // degrade to "b" the way the comment assumed; it silently became an
+  // actual backspace control character embedded in the popup's own
+  // written HTML, corrupting the inline <script> tag's parse the moment
+  // the popup's browser tried to execute it for real. Confirmed via a
+  // methodical process of elimination: full-table scans for backtick/${
+  // in every picks/cappers/sports/bet_types text field (all clean),
+  // byte-identical confirmation between the live Vercel deployment and
+  // this local file, ruling out browser extensions/incognito/Refresh-
+  // button-reentry, and finally a full character-code sweep of the
+  // broken popup's own live document.documentElement.outerHTML -- which
+  // found exactly 2 real backspace bytes, both inside this same comment.
+  // Fixed by doubling the comment's OWN illustrative backslashes to match
+  // what it was already telling the reader to do in the real code below
+  // it. Verified end-to-end: re-extracted and ran the exact real function
+  // against real parlay data, confirmed zero control characters in the
+  // generated output and a clean parse in a real document (previously 2
+  // backspace bytes, now 0).
   // v440, direct request 2026-09-04: "no matter how small the percentage
   // of bets is we want accuracy" -- a soccer Total/Spread ending in .25 or
   // .75 (a quarter-line -- half stake on each of the two adjacent half-
