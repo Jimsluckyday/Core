@@ -16642,7 +16642,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // mixed found/missing leg set can't be safely auto-recovered via a
     // plain re-paste).
     const reviewHtml = parlayReviewNeeded.length
-      ? `<div style="background:var(--stamp-amber);color:var(--ink);padding:10px;border-radius:3px;margin-bottom:12px;">
+      ? `<div style="background:var(--stamp-amber);color:#000;padding:10px;border-radius:3px;margin-bottom:12px;">
           <strong>&#9888; ${parlayReviewNeeded.length} parlay${parlayReviewNeeded.length === 1 ? '' : 's'} need${parlayReviewNeeded.length === 1 ? 's' : ''} a manual database look -- do not re-import these:</strong>
           <ul style="margin:6px 0 0 18px;font-size:11px;font-weight:normal;">
             ${parlayReviewNeeded.map(p => {
@@ -23159,7 +23159,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 442; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 443; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v443, direct report 2026-09-06: the Verify Upload tool's "N parlays
+  // need a manual look" banner used background:var(--stamp-amber) with
+  // color:var(--ink) (#22281f) -- only ~3.5:1 contrast, hard to read.
+  // Two other amber banners in this file (futures-tracking banner,
+  // futures-migration-missing banner) already use color:#000 on this same
+  // background (~5:1 contrast) -- this one was just never updated to match.
+  // Same fix applied here: color:#000.
   // v442, direct report 2026-09-06: v441 did NOT actually fix the reported
   // symptom -- every "All Picks" pop-out (not just parlays, every date)
   // was STILL throwing the exact same "Uncaught SyntaxError: Failed to
