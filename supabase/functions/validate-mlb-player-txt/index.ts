@@ -5,20 +5,32 @@
 // writes to any table -- purely a lookup, same safety principle as
 // validate-schedule.
 //
-// Approach: fetch the day's schedule to get every team playing, then
-// fetch each of those teams' active rosters AS OF THAT DATE, and check
-// whether the named player appears on any of them. MLB Stats API doesn't
-// offer a clean "look up this player's current team" in one call
-// (confirmed by direct testing, not assumed), so this goes the reliable
-// way instead: known teams -> known rosters -> name match.
+// REBUILT 2026-09-06, direct report: "Pete Alonso has always been an
+// issue and never gets found." The original approach (fetch each team's
+// roster with a `date` param, hoping it reconstructs that team's real
+// roster as of that historical date) turned out to be unreliable past a
+// season's opening days -- confirmed directly by testing Alonso's own
+// Mets roster fetch across five real dates: found on 2024-06-08 and
+// 2025-04-01 (opening day), but MISSING on 2025-01-15 (offseason,
+// expected), 2025-06-08, AND 2025-09-01 -- despite his own 2025 season
+// stats and the real June 8 box score both confirming he was a Met the
+// entire time. MLB's roster-by-date endpoint simply doesn't reconstruct
+// history reliably once the season is a couple months in; this has
+// nothing to do with him personally, but he's exactly the kind of
+// frequently-picked player who kept surfacing it.
 //
-// Rosters are fetched with a `date` param so this works correctly on
-// historical picks -- without it, the roster endpoint silently returns
-// today's real-world roster instead of the roster on the date being
-// checked, which false-positives on any player who's since been traded,
-// injured, DFA'd, or sent down (confirmed directly against a real case:
-// a Diamondbacks pitcher who started and won on 2026-06-07 was missing
-// from today's roster fetch but present once `date=2026-06-07` was added).
+// New approach: instead of asking "who was on this team's roster on this
+// date" (unreliable), ask "who actually appears in this date's real game
+// box score" (fully reliable, ground truth) -- confirmed directly that a
+// box score's players list includes the FULL 26-man game-day roster for
+// each team, not just those who recorded a stat (a real Mets box score
+// checked directly: 26 total, including 3 bench and 11 bullpen players
+// who never appeared in the box score's stat lines). This is the exact
+// same box-score-based technique grade_picks_espn_backfill's own MLB
+// Total Bases/Singles grading already relies on -- proven reliable there,
+// now reused here for the same reason: a player can only ever be missing
+// from a REAL box score by being genuinely inactive/not on the roster
+// that specific day, never by an API's own historical-reconstruction gap.
 //
 // Call with: POST /validate-mlb-player
 // Body: { date: "2026-06-04", checks: [{ id: "row-1", playerName: "Carlos Rodon" }, ...] }
@@ -53,7 +65,7 @@ function normalize(s: string): string {
 // normalize("Jarren Duran") ("jarrenduran") nor the input is a substring
 // of the other, so the existing exact/substring check can never match an
 // abbreviated first name no matter how correct it is. This builds the
-// same "first initial + surname" shape from the roster's own full name
+// same "first initial + surname" shape from the box score's own full name
 // so it can be compared on equal terms.
 function initialSurname(fullName: string): string | null {
   const parts = fullName.trim().split(/\s+/);
@@ -88,70 +100,72 @@ Deno.serve(async (req) => {
     const games = (scheduleData.dates && scheduleData.dates[0] && scheduleData.dates[0].games) || [];
 
     console.log(`[MLB PLAYER DEBUG] Games found for ${targetDate}: ${games.length}`);
-    console.log(`[MLB PLAYER DEBUG] Raw first game (unprocessed):`, JSON.stringify(games[0] || null).slice(0, 1500));
 
-    // Collect every team playing today, with which game/opponent they're
-    // in, so a match can be reported with real context, not just yes/no.
-    const teamsToday: { teamId: number; teamName: string; opponent: string }[] = [];
-    for (const g of games) {
-      const away = g.teams && g.teams.away && g.teams.away.team;
-      const home = g.teams && g.teams.home && g.teams.home.team;
-      if (away && home) {
-        teamsToday.push({ teamId: away.id, teamName: away.name, opponent: `@ ${home.name}` });
-        teamsToday.push({ teamId: home.id, teamName: home.name, opponent: `vs ${away.name}` });
-      }
-    }
-
-    if (!teamsToday.length) {
+    if (!games.length) {
       return new Response(JSON.stringify({ status: 'no_games', date: targetDate, results: checks.map((c: any) => ({ id: c.id, verifiable: true, valid: false, reason: `No MLB games found at all on ${targetDate}` })) }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // Fetch every team's active roster AS OF targetDate (not today's real
-    // roster -- see note at top of file). MLB's API is free with no
-    // documented rate limit for this kind of light use, so one roster
-    // call per team playing today (typically 18-30 teams) is reasonable.
-    const rosters: { teamId: number; teamName: string; opponent: string; players: string[] }[] = [];
-    let loggedFirstRoster = false;
-    for (const t of teamsToday) {
+    // One box score per GAME (not per team, so half as many requests as
+    // the old per-team roster approach) -- this is the real, ground-truth
+    // game-day roster for both teams at once, not a reconstruction attempt.
+    const players: { teamName: string; opponent: string; fullName: string }[] = [];
+    let boxscoresFetched = 0;
+    for (const g of games) {
+      const gamePk = g.gamePk;
+      const awayTeam = g.teams && g.teams.away && g.teams.away.team;
+      const homeTeam = g.teams && g.teams.home && g.teams.home.team;
+      if (!gamePk || !awayTeam || !homeTeam) continue;
       try {
-        const rosterRes = await fetch(`https://statsapi.mlb.com/api/v1/teams/${t.teamId}/roster?rosterType=active&date=${targetDate}`);
-        if (!rosterRes.ok) continue;
-        const rosterData = await rosterRes.json();
-        if (!loggedFirstRoster) {
-          console.log(`[MLB PLAYER DEBUG] Raw first roster response (unprocessed, team ${t.teamName}):`, JSON.stringify(rosterData).slice(0, 1500));
-          loggedFirstRoster = true;
+        // Same small courtesy delay grade_picks_espn_backfill already uses
+        // before each MLB Stats API boxscore fetch -- no documented rate
+        // limit, kept anyway since that's the proven-safe pattern.
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const boxRes = await fetch(`https://statsapi.mlb.com/api/v1/game/${gamePk}/boxscore`);
+        if (!boxRes.ok) continue;
+        const box = await boxRes.json();
+        boxscoresFetched++;
+        for (const side of ['home', 'away'] as const) {
+          const team = box.teams && box.teams[side];
+          const teamInfo = side === 'home' ? homeTeam : awayTeam;
+          const opponentInfo = side === 'home' ? awayTeam : homeTeam;
+          if (!team || !team.players) continue;
+          for (const pid of Object.keys(team.players)) {
+            const fullName = team.players[pid].person && team.players[pid].person.fullName;
+            if (!fullName) continue;
+            players.push({
+              teamName: teamInfo.name,
+              opponent: side === 'home' ? `vs ${opponentInfo.name}` : `@ ${opponentInfo.name}`,
+              fullName
+            });
+          }
         }
-        const players = (rosterData.roster || [])
-          .map((r: any) => r.person && r.person.fullName)
-          .filter(Boolean);
-        rosters.push({ teamId: t.teamId, teamName: t.teamName, opponent: t.opponent, players });
       } catch (e) {
-        console.log(`[MLB PLAYER DEBUG] Roster fetch failed for team ${t.teamName}:`, String(e));
+        console.log(`[MLB PLAYER DEBUG] Boxscore fetch failed for gamePk ${gamePk}:`, String(e));
       }
     }
 
-    console.log(`[MLB PLAYER DEBUG] Rosters successfully fetched: ${rosters.length} of ${teamsToday.length} teams`);
+    console.log(`[MLB PLAYER DEBUG] Box scores successfully fetched: ${boxscoresFetched} of ${games.length} games, ${players.length} total player entries`);
 
     const results = checks.map((check: any) => {
       const norm = normalize(check.playerName || '');
       if (!norm) return { id: check.id, verifiable: true, valid: false, reason: 'No player name provided' };
-      const match = rosters.find(r => r.players.some((p: string) => {
-        const pn = normalize(p);
-        return pn === norm || pn.includes(norm) || norm.includes(pn) || initialSurname(p) === norm;
-      }));
+      const match = players.find(p => {
+        const pn = normalize(p.fullName);
+        return pn === norm || pn.includes(norm) || norm.includes(pn) || initialSurname(p.fullName) === norm;
+      });
       if (match) {
         return { id: check.id, verifiable: true, valid: true, team: match.teamName, matchup: `${match.teamName} ${match.opponent}` };
       }
       return {
         id: check.id, verifiable: true, valid: false,
-        reason: `"${check.playerName}" was not found on any active roster playing on ${targetDate}`,
-        teamsCheckedCount: rosters.length
+        reason: `"${check.playerName}" was not found in any real box score on ${targetDate} -- check spelling, or this player genuinely didn't appear in a game that day.`,
+        gamesCheckedCount: boxscoresFetched
       };
     });
 
-    return new Response(JSON.stringify({ status: 'checked', date: targetDate, teamsPlayingToday: teamsToday.length, rostersFetched: rosters.length, results }), {
+    return new Response(JSON.stringify({ status: 'checked', date: targetDate, gamesPlaying: games.length, boxscoresFetched, results }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
