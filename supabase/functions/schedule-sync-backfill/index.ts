@@ -914,6 +914,27 @@
 //     "UFC 316: Dvalishvili vs. O'Malley 2") the same way Tennis fills in
 //     tournamentName, closing the OTHER field these picks were missing.
 //
+// 41. CONFIRMED FIX, direct report 2026-09-06: "Pete Alonso has always been
+//     an issue and never gets found," plus separate real reports for
+//     Luguentz Dort, Bennedict Mathurin, and a WNBA player who genuinely
+//     played but still couldn't be found. Root cause was the honest
+//     limitation Fixes #4 and the NBA/WNBA/NHL branch above used to
+//     document: MLB's roster-by-date endpoint doesn't reliably reconstruct
+//     history (confirmed directly -- Alonso missing from the Mets' own
+//     2025-06-08 roster-by-date fetch despite being right there in the
+//     real box score for that exact game), and ESPN's NBA/WNBA/NHL roster
+//     endpoint has NO date parameter at all, always current-only. Same fix
+//     already proven and shipped for the standalone validate-mlb/nba/wnba-
+//     player-txt functions, ported here: every sport's prop-player lookup
+//     now reads real box scores (one per GAME, not per team) instead of
+//     any kind of roster snapshot. A box score lists the full active
+//     game-day roster including players who didn't play, so this can only
+//     ever miss a player who genuinely wasn't with that team that day --
+//     confirmed directly against the real cases above, all three now
+//     resolve correctly. The "this sport's roster lookup only reflects
+//     today's current roster" caveat that used to appear on unmatched
+//     picks is gone -- it no longer applies to any sport this file handles.
+//
 // Run it once per date you want to catch up: POST /schedule-sync-backfill?date=2026-06-01
 // Optionally add &sport=MLB to run just one sport at a time, or &skipProps=true
 // to only touch game_start_time/home_away and never prop_team/event_name.
@@ -2314,14 +2335,24 @@ Deno.serve(async (req) => {
 
         if (sportNormName === 'mlb') {
           try {
-            // Widened from a single schedule/roster fetch for targetDate to
-            // one per distinct real event_date among today's candidates
-            // (see distinctEventDates above) -- an MLB prop entered today
-            // for a game 1-2 days out needs that day's own schedule AND
-            // its own roster snapshot (per-date, not today's active
-            // roster -- same reasoning as Fix #4 above, just applied per
-            // distinct date instead of a single shared one).
-            const teamGamePairs: { teamId: number; teamName: string; startTime: string; rosterDate: string }[] = [];
+            // Widened from a single schedule fetch for targetDate to one
+            // per distinct real event_date among today's candidates (see
+            // distinctEventDates above) -- an MLB prop entered today for a
+            // game 1-2 days out needs that day's own schedule.
+            //
+            // SUPERSEDED 2026-09-06 (see Fix #41 at the top of this file):
+            // this used to fetch each team's roster with a `date` param,
+            // on the assumption (Fix #4 above) that MLB's Stats API
+            // reconstructs an accurate historical roster from it. Confirmed
+            // directly this isn't
+            // reliable: Pete Alonso is missing from the Mets' own
+            // 2025-06-08 roster-by-date fetch despite being right there in
+            // the real box score for that exact game, with real recorded
+            // at-bats. Box scores are ground truth instead -- fetched ONE
+            // PER GAME (not per team, so half as many requests), and can
+            // only ever miss a player who genuinely wasn't on that game's
+            // active roster that day.
+            const mlbGameEntries: { gamePk: string; startTime: string; awayTeamName: string; homeTeamName: string }[] = [];
             let anyScheduleOk = false;
             let lastScheduleStatus = 0;
             for (const ed of distinctEventDates) {
@@ -2334,23 +2365,27 @@ Deno.serve(async (req) => {
                 const away = g.teams && g.teams.away && g.teams.away.team;
                 const home = g.teams && g.teams.home && g.teams.home.team;
                 const startTime = g.gameDate;
-                if (!startTime) continue;
-                if (away) teamGamePairs.push({ teamId: away.id, teamName: away.name, startTime, rosterDate: ed });
-                if (home) teamGamePairs.push({ teamId: home.id, teamName: home.name, startTime, rosterDate: ed });
+                if (!startTime || !g.gamePk || !away || !home) continue;
+                mlbGameEntries.push({ gamePk: String(g.gamePk), startTime, awayTeamName: away.name, homeTeamName: home.name });
               }
             }
             if (anyScheduleOk) {
-              const rosterResults = await Promise.allSettled(
-                teamGamePairs.map(t => fetch(`https://statsapi.mlb.com/api/v1/teams/${t.teamId}/roster?rosterType=active&date=${t.rosterDate}`).then(r => r.ok ? r.json() : null))
+              const boxResults = await Promise.allSettled(
+                mlbGameEntries.map(g => fetch(`https://statsapi.mlb.com/api/v1/game/${g.gamePk}/boxscore`).then(r => r.ok ? r.json() : null))
               );
-              for (let i = 0; i < teamGamePairs.length; i++) {
-                const result = rosterResults[i];
-                const t = teamGamePairs[i];
+              for (let i = 0; i < mlbGameEntries.length; i++) {
+                const result = boxResults[i];
+                const g = mlbGameEntries[i];
                 if (result.status !== 'fulfilled' || !result.value) continue;
-                const roster = result.value.roster || [];
-                for (const r of roster) {
-                  const name = r.person && r.person.fullName;
-                  if (name) { registerPlayerName(propLookup, name, { team: t.teamName, startTime: t.startTime }); propDisplayNames.push(name); }
+                const box = result.value;
+                for (const side of ['home', 'away'] as const) {
+                  const team = box.teams && box.teams[side];
+                  const teamName = side === 'home' ? g.homeTeamName : g.awayTeamName;
+                  if (!team || !team.players) continue;
+                  for (const pid of Object.keys(team.players)) {
+                    const name = team.players[pid].person && team.players[pid].person.fullName;
+                    if (name) { registerPlayerName(propLookup, name, { team: teamName, startTime: g.startTime }); propDisplayNames.push(name); }
+                  }
                 }
               }
               propLookupStatus = propLookup.size > 0 ? 'built' : 'built_but_empty';
@@ -2366,25 +2401,23 @@ Deno.serve(async (req) => {
           // permanently marked every NHL prop schedule_sync_status =
           // 'not_supported' with a "no player roster data source available"
           // note -- not a real limitation, just never built. ESPN exposes
-          // the exact same team-roster endpoint for NHL as it does for NBA/
-          // WNBA (already used elsewhere in this file for NHL's own
-          // scoreboard via ESPN_SPORT_MAP's 'hockey/nhl' entry), so this
-          // reuses the identical NBA/WNBA roster-lookup logic below,
-          // unchanged, just adding the NHL sport path.
+          // the exact same box score endpoint for NHL as it does for NBA/
+          // WNBA, so this reuses the identical NBA/WNBA box-score-lookup
+          // logic below, unchanged, just adding the NHL sport path.
           //
-          // CONFIRMED REAL LIMITATION, direct report 2026-08-30: this
-          // fetch has NO date parameter -- it always returns whatever
-          // ESPN currently has as TODAY's roster, never the roster as of
-          // the pick's own (possibly much older) event_date. Confirmed
-          // live: Bennedict Mathurin (a real Indiana Pacer, playing in the
-          // actual 2025-06-05 NBA Finals) is missing from today's current
-          // Pacers roster fetch. Tried a season-scoped variant
-          // (.../roster?season=2025) live too -- it returns HTTP 200 with
-          // a genuinely empty athletes array, not real historical data, so
-          // there's no working fix available today. Any prop pick more
-          // than roughly a season old can fail this check even with a
-          // perfectly correct name -- see the staleRosterCaveat text below
-          // for the honest message this now surfaces on the pick itself.
+          // SUPERSEDED 2026-09-06 (see Fix #41 at the top of this file):
+          // this used to fetch each team's CURRENT roster (ESPN's roster
+          // endpoint has no date parameter at all) -- confirmed directly
+          // this misses any player
+          // who's since moved teams: Luguentz Dort and Bennedict Mathurin
+          // (both real, correctly-spelled starters in the actual 2025 NBA
+          // Finals) are missing from the Thunder's/Pacers' CURRENT roster
+          // fetch, despite both being right there in the real Finals box
+          // score with real recorded minutes. Box scores are ground truth
+          // instead -- fetched ONE PER GAME (not per team), and list the
+          // FULL active game-day roster including players who didn't even
+          // play, so this can only ever miss a player genuinely not with
+          // that team that day.
           const espnRosterSportPath = sportNormName === 'wnba' ? 'basketball/wnba' : sportNormName === 'nhl' ? 'hockey/nhl' : 'basketball/nba';
           const teamsToday = new Map<string, { teamName: string; startTime: string }>();
           for (const g of games) {
@@ -2396,65 +2429,50 @@ Deno.serve(async (req) => {
             }
           }
           if (teamsToday.size) {
-            // Direct follow-up, teamsToday confirmed NON-empty (a real
-            // Edmonton Oilers team object showed up in the raw diagnostic
-            // from Fix under investigation above) yet this still ended up
-            // 'built_but_empty' -- meaning the actual failure is one step
-            // later, in the roster FETCH itself (bad HTTP status, or an
-            // ok response with an empty/differently-shaped athletes list),
-            // not in reading the game data. rosterDebugInfo below captures
-            // exactly what each team's fetch actually returned, surfaced
-            // directly in the note on the next run instead of guessing
-            // again.
-            const rosterUrls = [...teamsToday.keys()].map(id => `https://site.api.espn.com/apis/site/v2/sports/${espnRosterSportPath}/teams/${id}/roster`);
-            const rosterResponses = await Promise.allSettled(rosterUrls.map(u => espnFetch(u)));
+            // rosterDebugInfo below captures exactly what each game's box
+            // score fetch actually returned, surfaced directly in the note
+            // on the next run instead of guessing again -- same diagnostic
+            // discipline as this file's prior roster-fetch version.
+            const summaryResults = await Promise.allSettled(
+              games.map((g: any) => espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnRosterSportPath}/summary?event=${g.id}`))
+            );
             const rosterDebugInfo: string[] = [];
-            let i = 0;
-            for (const id of teamsToday.keys()) {
-              const t = teamsToday.get(id)!;
-              const res = rosterResponses[i];
-              const url = rosterUrls[i];
-              i++;
+            let boxscoresOk = 0;
+            for (let i = 0; i < games.length; i++) {
+              const g = games[i];
+              const res = summaryResults[i];
               if (res.status !== 'fulfilled') {
-                rosterDebugInfo.push(`${t.teamName} (${url}): fetch rejected -- ${String(res.reason)}`);
+                rosterDebugInfo.push(`event ${g.id}: fetch rejected -- ${String(res.reason)}`);
                 continue;
               }
               const response = res.value;
               if (!response.ok) {
-                rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status}`);
+                rosterDebugInfo.push(`event ${g.id}: HTTP ${response.status}`);
                 continue;
               }
               let json: any = null;
-              try { json = await response.json(); } catch (e) { rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status} but body wasn't valid JSON -- ${String(e)}`); continue; }
-              const rawAthletes = json.athletes || [];
-              // CONFIRMED REAL BUG, direct report 2026-08-31: NHL rosters
-              // (Edmonton Oilers, Florida Panthers, 2025-06-06) both came
-              // back "HTTP 200, 5 athletes -- OK" -- logged as fine since
-              // the array was non-empty -- yet propLookup ended up
-              // completely empty regardless, contradicting the "OK"
-              // label. 5 is far too few for a real ~23-man NHL roster, and
-              // identical for two different teams, which points to
-              // ESPN's hockey/football-style roster shape: `athletes` here
-              // is an array of POSITION GROUPS (Forwards/Defensemen/
-              // Goalies/etc, roughly 5 of them), each holding real players
-              // in its own nested `items` array -- not a flat player list
-              // the way basketball's roster endpoint already proven
-              // elsewhere in this file returns. A group object has no
-              // fullName/displayName of its own, so every one silently
-              // produced no name and got skipped -- "5 athletes" was 5
-              // empty groups, not 5 (or 0) real players. Flattens whichever
-              // shape actually comes back: a group's own nested `items`
-              // when present, the entry itself otherwise (unchanged
-              // behavior for basketball, which never has `items`).
-              const athletes = rawAthletes.flatMap((a: any) => Array.isArray(a.items) ? a.items : [a]);
-              if (!athletes.length) {
-                rosterDebugInfo.push(`${t.teamName} (${url}): HTTP ${response.status}, but 0 athletes. Top-level response keys: ${Object.keys(json).join(', ')}`);
+              try { json = await response.json(); } catch (e) { rosterDebugInfo.push(`event ${g.id}: HTTP ${response.status} but body wasn't valid JSON -- ${String(e)}`); continue; }
+              const players = json.boxscore && json.boxscore.players;
+              if (!Array.isArray(players)) {
+                rosterDebugInfo.push(`event ${g.id}: HTTP ${response.status}, no boxscore.players array. Top-level keys: ${Object.keys(json).join(', ')}`);
                 continue;
               }
-              rosterDebugInfo.push(`${t.teamName}: HTTP ${response.status}, ${athletes.length} athletes -- OK`);
-              for (const a of athletes) {
-                const name = a.fullName || a.displayName;
-                if (name) { registerPlayerName(propLookup, name, { team: t.teamName, startTime: t.startTime }); propDisplayNames.push(name); }
+              boxscoresOk++;
+              for (const teamBlock of players) {
+                const teamId = teamBlock.team && teamBlock.team.id;
+                const t = teamId !== undefined && teamId !== null ? teamsToday.get(teamId) : undefined;
+                if (!t) continue;
+                // Every statistics GROUP flattened together -- basketball's
+                // box score has one group, hockey's has several (forwards/
+                // defenses/goalies) -- same "flatten whichever shape comes
+                // back" fix already proven for the old roster endpoint's
+                // own position-group shape, just applied to the box
+                // score's own statistics groups instead.
+                const athletes = (teamBlock.statistics || []).flatMap((sg: any) => sg.athletes || []);
+                for (const a of athletes) {
+                  const name = a.athlete && a.athlete.displayName;
+                  if (name) { registerPlayerName(propLookup, name, { team: t.teamName, startTime: t.startTime }); propDisplayNames.push(name); }
+                }
               }
             }
             propLookupStatus = propLookup.size > 0 ? 'built' : 'built_but_empty';
@@ -2462,7 +2480,7 @@ Deno.serve(async (req) => {
             // string equality further down, e.g. === 'built_but_empty') --
             // appending debug text there would break that comparison and
             // silently route into the wrong, less specific note branch.
-            if (!propLookup.size) rosterFetchDebug = rosterDebugInfo.join(' ;; ');
+            if (!propLookup.size) rosterFetchDebug = rosterDebugInfo.length ? rosterDebugInfo.join(' ;; ') : `${boxscoresOk} of ${games.length} box score(s) fetched OK, but zero players registered`;
           } else {
             propLookupStatus = 'built_but_empty';
           }
@@ -2569,26 +2587,15 @@ Deno.serve(async (req) => {
               continue;
             }
             const propSuggestion = suggestClosestPlayer(pick.prop_player, propDisplayNames);
-            // CONFIRMED REAL LIMITATION, direct report 2026-08-30: "Pete
-            // Alonso"/"Bennedict Mathurin" both flagged not-found despite
-            // being genuinely active, correctly-spelled players on the
-            // real date. Confirmed live: MLB's roster-by-date endpoint
-            // (which this file DOES pass the pick's own event_date to)
-            // simply doesn't reliably return an accurate historical
-            // snapshot that far back. Worse for NBA/WNBA/NHL -- their
-            // roster fetch (below, espnRosterSportPath) has NO date
-            // parameter at all, always returns TODAY's current roster;
-            // tested a season-scoped variant live, it returns HTTP 200
-            // with an empty roster, so there's no working historical
-            // alternative to fall back to. Any prop pick more than
-            // roughly a season old can fail this check even when the
-            // name is 100% correct -- this caveat says so plainly instead
-            // of implying a spelling problem every time.
-            const isDateSensitiveRosterSport = sportNormName === 'nba' || sportNormName === 'wnba' || sportNormName === 'nhl';
-            const staleRosterCaveat = isDateSensitiveRosterSport
-              ? ` This sport's roster lookup only reflects TODAY's current roster, not ${pick.event_date || targetDate}'s -- if this pick is more than about a season old, a real, correctly-spelled player can still fail this check (confirmed limitation, no working historical roster source found).`
-              : '';
-            const note = `"${pick.prop_player}" was not found on any ${ourSport.name} active roster playing on ${pick.event_date || targetDate} -- may be a name spelling issue, or the player may not be active/on this team.${propSuggestion ? ` Closest name on today's rosters: "${propSuggestion}".` : ''}${staleRosterCaveat}`;
+            // Fix #41, 2026-09-06: the caveat that used to live here ("this
+            // sport's roster lookup only reflects TODAY's current roster")
+            // no longer applies -- both the MLB and NBA/WNBA/NHL branches
+            // above now build propLookup from real box scores for the
+            // pick's own date, not a roster snapshot of any kind, so a
+            // player genuinely missing here really did not appear in any
+            // game that day (or the name doesn't match) rather than being
+            // a known, accepted historical-lookup gap.
+            const note = `"${pick.prop_player}" was not found in any real ${ourSport.name} box score for a game played on ${pick.event_date || targetDate} -- may be a name spelling issue, or the player may genuinely not have appeared in a game that day.${propSuggestion ? ` Closest name found: "${propSuggestion}".` : ''}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
             sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
             continue;
