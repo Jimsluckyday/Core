@@ -23076,7 +23076,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // here is exactly the give-away, worth surfacing once rather than
       // silently hiding forever.
       banner.style.display = 'block';
-      banner.innerHTML = `<div style="background:var(--stamp-amber);color:#000;font-size:11px;padding:6px 12px;">Futures-bet tracking isn't set up yet (${escapeHtml(e.message)}) -- run the is_futures migration in Supabase, see the setup notes.</div>`;
+      banner.innerHTML = `<div style="background:#f2e7c9;color:#5c3d05;border-left:4px solid var(--stamp-amber);border-radius:0 3px 3px 0;font-size:11px;padding:6px 12px;">Futures-bet tracking isn't set up yet (${escapeHtml(e.message)}) -- run the is_futures migration in Supabase, see the setup notes.</div>`;
       return;
     }
     if (!rows.length) {
@@ -23109,7 +23109,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       </div>` : '';
     banner.style.display = 'block';
     banner.innerHTML = `
-      <div style="background:var(--stamp-amber);color:#000;font-size:12px;padding:6px 12px;">
+      <div style="background:#f2e7c9;color:#5c3d05;border-left:4px solid var(--stamp-amber);border-radius:0 3px 3px 0;font-size:12px;padding:6px 12px;">
         <span style="cursor:pointer;font-weight:bold;" id="futuresBannerToggle">&#9888; ${rows.length} long-term futures bet${rows.length === 1 ? '' : 's'} still open -- oldest placed ${escapeHtml(oldest.event_date)} (${daysAgo} day${daysAgo === 1 ? '' : 's'} ago) ${futuresBannerExpanded ? '&#9650;' : '&#9660;'}</span>
         <button id="futuresBannerGoBtn" style="margin-left:10px;font-size:11px;padding:1px 8px;">Review in Grading Exceptions</button>
         ${listHtml}
@@ -23159,7 +23159,16 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 444; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 445; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v445, direct follow-up 2026-09-06: extended v444's pale-gold alert
+  // style to the two Futures-bet banners (refreshFuturesBanner's "N long-
+  // term futures bets still open" banner and its "tracking isn't set up
+  // yet" error state) -- direct request to match, since these had used
+  // the old solid-amber/black-text combo the whole time and the project
+  // owner wants consistency now that a better option exists. Deliberately
+  // did NOT touch tournamentStagingBanner (line ~405) -- different
+  // feature, not mentioned, already uses its own separate dark-brown-on-
+  // amber text color (#3a2a00) that wasn't part of this request.
   // v444, direct follow-up 2026-09-06: v443's color:#000-on-amber fix was
   // technically higher-contrast (5:1) but still didn't read well in
   // practice -- direct feedback: "not too hard on the eyes at quick
