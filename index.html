@@ -903,6 +903,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button type="button" id="propStatQuickAddSaveBtn" class="small">Add &amp; select</button>
               <button type="button" id="propStatQuickAddCancelBtn" class="ghost small">Cancel</button>
             </div>
+            <div class="checkbox-row" style="margin-top:6px;">
+              <input type="checkbox" id="propStatQuickAddAnySport" />
+              <label for="propStatQuickAddAnySport" style="font-weight:normal;">Available for every sport <span style="color:var(--ink-soft);">(check this for a stat like "Shots on Goal" that genuinely applies beyond just this one sport -- leave unchecked for something sport-specific like "Outs")</span></label>
+            </div>
           </div>
         </div>
         <div class="field">
@@ -5186,9 +5190,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
     const sportSel = $('propStatSport');
     const keepSport = sportSel.value;
-    sportSel.innerHTML = sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')
-      || '<option value="">No sports yet — add one above</option>';
-    if (keepSport && sports.some(s => String(s.id) === String(keepSport))) sportSel.value = keepSport;
+    // "Any sport" (empty value) is always offered, alongside every real
+    // sport -- a stat added under it shows up for every sport's dropdown
+    // (see populatePropStatDropdown), for stats like "Shots on Goal" that
+    // genuinely aren't tied to one sport, instead of needing to be rebuilt
+    // separately the first time each new sport happens to need it.
+    sportSel.innerHTML = '<option value="">Any sport</option>' +
+      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    if (sports.some(s => String(s.id) === String(keepSport))) sportSel.value = keepSport;
 
     renderPropStatList();
     populatePropStatDropdown();
@@ -5219,7 +5228,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const query = searchInput.value.trim().toLowerCase();
     const filtered = query
       ? propStats.filter(p => {
-          const sportName = p.sports ? p.sports.name : '';
+          const sportName = p.sports ? p.sports.name : 'Any sport';
           return p.name.toLowerCase().includes(query) || sportName.toLowerCase().includes(query);
         })
       : propStats;
@@ -5231,7 +5240,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
     const bySport = {};
     filtered.forEach(p => {
-      const sportName = p.sports ? p.sports.name : 'Unknown sport';
+      const sportName = p.sports ? p.sports.name : 'Any sport';
       (bySport[sportName] = bySport[sportName] || []).push(p);
     });
 
@@ -5303,12 +5312,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
   }
 
   $('addPropStatBtn').addEventListener('click', async () => {
-    const sport_id = $('propStatSport').value;
+    // Empty value here means "Any sport" (see refreshPropStats) -- a real,
+    // valid choice, not a missing one, so this is never treated as an
+    // error the way it used to be.
+    const sport_id = $('propStatSport').value || null;
     const name = $('newPropStatName').value.trim();
-    if (!sport_id) { showMsg($('propStatMsg'), 'Add a sport first.', 'error'); return; }
     if (!name) { showMsg($('propStatMsg'), 'Enter a stat name.', 'error'); return; }
-    const alreadyExists = propStats.some(p => String(p.sport_id) === String(sport_id) && p.name.toLowerCase() === name.toLowerCase());
-    if (alreadyExists) { showMsg($('propStatMsg'), 'That stat is already added for this sport.', 'error'); return; }
+    // An "any sport" stat with this name counts as already existing no
+    // matter which specific sport is selected here too -- same name, two
+    // separate rows (one shared, one sport-specific) would just be
+    // confusing duplicates, not two genuinely different stats.
+    const alreadyExists = propStats.some(p => (p.sport_id === null || String(p.sport_id) === String(sport_id)) && p.name.toLowerCase() === name.toLowerCase());
+    if (alreadyExists) { showMsg($('propStatMsg'), 'That stat is already available for this sport.', 'error'); return; }
     try {
       await rest('prop_stats', { method: 'POST', body: JSON.stringify([{ name, sport_id }]) });
       $('newPropStatName').value = '';
@@ -5787,10 +5802,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const sportId = $('pickSport').value;
     const keep = forceValue !== undefined ? forceValue : sel.value;
 
+    // Direct request 2026-09-06: a stat tagged "any sport" (sport_id null)
+    // shows up here regardless of which sport is picked above, alongside
+    // that sport's own specific stats -- so a genuinely cross-sport stat
+    // (e.g. "Shots on Goal") only ever needs adding once, instead of being
+    // rebuilt from scratch the first time each new sport happens to need
+    // it. See addPropStatBtn/propStatQuickAddSaveBtn for where these get
+    // created.
     let matching = propStats;
-    if (sportId) matching = matching.filter(p => String(p.sport_id) === String(sportId));
+    if (sportId) matching = matching.filter(p => p.sport_id === null || String(p.sport_id) === String(sportId));
 
-    let options = matching.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
+    let options = matching.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}${p.sport_id === null ? ' (any sport)' : ''}</option>`).join('');
     // If the currently-set value isn't in the filtered list (editing an
     // older pick, or the sport just changed), keep it available as its own
     // option so existing data is never silently changed.
@@ -5809,11 +5831,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       try {
         $('propStatQuickAdd').style.display = 'block';
         $('propStatQuickAddInput').value = '';
+        $('propStatQuickAddAnySport').checked = false;
         $('propStat').value = ''; // don't leave the sentinel selected while the mini-form is open
         const currentSport = sports.find(s => String(s.id) === String($('pickSport').value));
         $('propStatQuickAddSportNote').textContent = currentSport
-          ? `Will be added under: ${currentSport.name} (matching the sport already selected above for this pick).`
-          : 'Pick a sport above first, so this new stat gets tagged correctly.';
+          ? `Will be added under: ${currentSport.name} (matching the sport already selected above for this pick), unless you check "Available for every sport" below.`
+          : 'Pick a sport above first, so this new stat gets tagged correctly -- or check "Available for every sport" below.';
       } catch (e) {
         console.error('Quick-add prop stat form setup failed:', e);
         $('propStatQuickAddSportNote').textContent = 'Pick a sport above first, so this new stat gets tagged correctly.';
@@ -5827,10 +5850,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
   $('propStatQuickAddSaveBtn').addEventListener('click', async () => {
     const name = $('propStatQuickAddInput').value.trim();
-    const sport_id = $('pickSport').value;
+    const anySport = $('propStatQuickAddAnySport').checked;
+    const sport_id = anySport ? null : $('pickSport').value;
     if (!name) { alert('Enter a stat name.'); return; }
-    if (!sport_id) { alert('Pick a sport first, above.'); return; }
-    const alreadyExists = propStats.some(p => String(p.sport_id) === String(sport_id) && p.name.toLowerCase() === name.toLowerCase());
+    if (!anySport && !sport_id) { alert('Pick a sport first, above (or check "Available for every sport").'); return; }
+    // Same "an any-sport stat with this name already covers this" rule as
+    // the Setup tab's own Add Stat button, so quick-adding here can't
+    // create a redundant sport-specific duplicate of an existing shared
+    // stat.
+    const alreadyExists = propStats.some(p => (p.sport_id === null || String(p.sport_id) === String(sport_id)) && p.name.toLowerCase() === name.toLowerCase());
     if (alreadyExists) {
       // Already exists for this sport -- just select it rather than error
       // out, since the person's actual intent (use this stat) is still
@@ -23159,7 +23187,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 445; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 446; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v446, direct request 2026-09-06: "Should Soccer not offer the full
+  // list of player prop stats... instead of me having to build out say
+  // shots on goal for each individual sport?" prop_stats was always
+  // strictly one-sport-per-row (sport_id NOT NULL), so a genuinely
+  // cross-sport stat like "Shots on Goal" had no way to be shared -- it
+  // silently needed rebuilding from scratch the first time each new sport
+  // happened to need it, which read as "the dropdown is broken/empty" the
+  // first time (this exact report: Soccer's Player Prop stat dropdown had
+  // nothing in it, correctly, since no Soccer stat had ever been added).
+  // Direct decision from a set of options: keep sport-specific stats
+  // scoped (so e.g. MLB's "Outs" doesn't clutter every other sport's
+  // list), but let a stat be tagged sport_id = NULL to mean "any sport" --
+  // it now shows in every sport's dropdown, labeled "(any sport)".
+  // REQUIRES a one-time Supabase migration (prop_stats.sport_id must
+  // become nullable) -- see setup notes / chat for the exact SQL.
+  // Both places a stat can be added -- Setup's own Add Stat button, and
+  // the inline "+ Add a new stat..." quick-add during Add Pick -- now
+  // offer this: Setup gets an explicit "Any sport" option in its Sport
+  // dropdown, and quick-add gets an "Available for every sport" checkbox.
+  // Both also now treat an existing any-sport stat with a matching name as
+  // already covering the current sport, rather than letting a redundant
+  // sport-specific duplicate of an already-shared stat get created.
   // v445, direct follow-up 2026-09-06: extended v444's pale-gold alert
   // style to the two Futures-bet banners (refreshFuturesBanner's "N long-
   // term futures bets still open" banner and its "tracking isn't set up
