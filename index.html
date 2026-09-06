@@ -5324,6 +5324,35 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // confusing duplicates, not two genuinely different stats.
     const alreadyExists = propStats.some(p => (p.sport_id === null || String(p.sport_id) === String(sport_id)) && p.name.toLowerCase() === name.toLowerCase());
     if (alreadyExists) { showMsg($('propStatMsg'), 'That stat is already available for this sport.', 'error'); return; }
+    // Same fix as propStatQuickAddSaveBtn's own copy of this check (direct
+    // report 2026-09-06) -- picking "Any sport" here for a name that
+    // already exists under one specific sport elsewhere would otherwise
+    // silently create a second, disconnected row instead of unifying them.
+    // Safe to promote the existing row in place: picks store prop_stat as
+    // plain text, never a foreign key to prop_stats.id, so this can never
+    // affect any pick already entered.
+    if (sport_id === null) {
+      const sameNameElsewhere = propStats.filter(p => p.name.toLowerCase() === name.toLowerCase());
+      if (sameNameElsewhere.length === 1) {
+        const existing = sameNameElsewhere[0];
+        const existingSportName = existing.sports ? existing.sports.name : 'a specific sport';
+        if (!confirm(`"${existing.name}" already exists for ${existingSportName}. Make it available for every sport instead of creating a separate one?`)) return;
+        try {
+          await rest(`prop_stats?id=eq.${existing.id}`, { method: 'PATCH', body: JSON.stringify({ sport_id: null }) });
+          $('newPropStatName').value = '';
+          showMsg($('propStatMsg'), `"${escapeHtml(existing.name)}" is now available for every sport.`, 'ok');
+          $('propStatListPanel').style.display = 'block';
+          $('togglePropStatListBtn').textContent = 'Hide stats list';
+          await refreshPropStats();
+        } catch (e) {
+          showMsg($('propStatMsg'), e.message, 'error');
+        }
+        return;
+      } else if (sameNameElsewhere.length > 1) {
+        showMsg($('propStatMsg'), `"${name}" already exists under more than one sport -- consolidate those first so this doesn't leave duplicates behind.`, 'error');
+        return;
+      }
+    }
     try {
       await rest('prop_stats', { method: 'POST', body: JSON.stringify([{ name, sport_id }]) });
       $('newPropStatName').value = '';
@@ -5869,6 +5898,43 @@ These are almost always the same day, so "Date entered" only fills in a starting
       updateGolfPropSelectionField();
       $('propStatQuickAdd').style.display = 'none';
       return;
+    }
+    // CONFIRMED REAL GAP, direct report 2026-09-06: "if I already have
+    // this for Hockey will it overwrite this and cause an issue?" -- the
+    // check above only catches a name collision against THIS sport or an
+    // existing any-sport row; it does NOT catch marking a stat as any-sport
+    // when a DIFFERENT specific sport already has that exact name (e.g.
+    // Hockey already has "Shots on Goal", now adding it as any-sport from
+    // a Soccer pick). Left unhandled, that would silently create a SECOND,
+    // disconnected "Shots on Goal" row instead of unifying them. Since
+    // picks store prop_stat as plain text (not a foreign key to
+    // prop_stats.id), promoting an existing row's sport_id to null is
+    // completely safe -- it can never affect any pick already entered,
+    // only which sports' dropdowns offer it going forward.
+    if (anySport) {
+      const sameNameElsewhere = propStats.filter(p => p.name.toLowerCase() === name.toLowerCase());
+      if (sameNameElsewhere.length === 1) {
+        const existing = sameNameElsewhere[0];
+        const existingSportName = existing.sports ? existing.sports.name : 'a specific sport';
+        if (confirm(`"${existing.name}" already exists for ${existingSportName}. Make it available for every sport instead of creating a separate one?`)) {
+          try {
+            await rest(`prop_stats?id=eq.${existing.id}`, { method: 'PATCH', body: JSON.stringify({ sport_id: null }) });
+            await refreshPropStats();
+            $('propStat').value = existing.name;
+            updateGolfPropSelectionField();
+            $('propStatQuickAdd').style.display = 'none';
+          } catch (e) {
+            alert('Could not update stat: ' + e.message);
+          }
+          return;
+        }
+        // User said no -- fall through and let the code below add this as
+        // its own genuinely separate any-sport row, since they explicitly
+        // declined merging with the existing one.
+      } else if (sameNameElsewhere.length > 1) {
+        alert(`"${name}" already exists under more than one sport. Consolidate those manually in Setup -> Prop stats first, so making this any-sport doesn't leave duplicates behind.`);
+        return;
+      }
     }
     try {
       await rest('prop_stats', { method: 'POST', body: JSON.stringify([{ name, sport_id }]) });
@@ -23187,7 +23253,19 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 446; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 447; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v447, direct follow-up 2026-09-06: "if I already have this for Hockey
+  // will it overwrite this and cause an issue?" -- caught a real gap in
+  // v446 before it shipped a real incident: marking a stat "any sport"
+  // when a same-named stat already existed for one OTHER specific sport
+  // was not covered by v446's dedupe check, and would have silently
+  // created a second, disconnected row with the same name instead of
+  // unifying them. Both add-a-stat entry points now detect this and offer
+  // to PROMOTE the existing sport-specific row to any-sport instead
+  // (safe to do -- picks store prop_stat as plain text, never a foreign
+  // key, so this can't affect any pick already entered) -- or, if the
+  // same name already exists under more than one sport, refuses and asks
+  // for a manual consolidation first rather than guessing which to keep.
   // v446, direct request 2026-09-06: "Should Soccer not offer the full
   // list of player prop stats... instead of me having to build out say
   // shots on goal for each individual sport?" prop_stats was always
