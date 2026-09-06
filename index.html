@@ -15046,7 +15046,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <td>${r.win_pct !== null ? r.win_pct + '%' : '—'}</td>
       <td><span style="color:${streakColor};font-weight:bold;">${streakLabel(streak)}</span></td>
       <td>${r.value !== null ? `${r.value >= 0 ? '+' : '−'}$${Math.abs(r.value).toFixed(2)}` : '—'}
-          <span style="color:var(--ink-soft);font-size:10px;" title="${r.valuedCount}/${r.total_picks} picks fed this dollar total (a loss/push counts without needing real odds; a pending pick or an unpriced win doesn't). ${r.oddsPresentCount}/${r.total_picks} picks actually have a real price on file, regardless of result."> (${r.valuedCount}/${r.total_picks} counted &middot; ${r.oddsPresentCount}/${r.total_picks} have odds)</span></td>
+          <span style="color:var(--ink-soft);font-size:10px;"> (${r.oddsPresentCount}/${r.total_picks} have odds${r.pending ? ` &middot; ${r.pending} pending` : ''})</span></td>
       <td>${r.unit_value !== null ? `${r.unit_value >= 0 ? '+' : '−'}$${Math.abs(r.unit_value).toFixed(2)}` : '—'}
           <span style="color:var(--ink-soft);font-size:10px;"> (${r.unitSizedCount}/${r.total_picks} sized${r.parlayCappedCount ? `, ${r.parlayCappedCount} parlay${r.parlayCappedCount === 1 ? '' : 's'} capped` : ''})</span></td>
       <td><button type="button" class="analysis-btn" data-capper-id="${r.capper_id}" data-capper-name="${escapeHtml(r.capper_name)}">Analysis &rarr;</button></td>
@@ -23381,7 +23381,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 452; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 453; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
