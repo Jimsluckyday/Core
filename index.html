@@ -15047,7 +15047,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <td>${r.wins}</td>
       <td>${r.losses}</td>
       <td>${r.pushes}</td>
-      <td>${r.win_pct !== null ? r.win_pct + '%' : '—'}</td>
+      <td>${r.win_pct !== null ? r.win_pct + '%' : '—'}${r.heavyParlayReuse ? ` <span style="cursor:help;color:var(--gold-dark, #8a6d1a);font-weight:bold;" title="Win % discounted -- ${r.parlayPickCount} parlay picks were built from only ${r.uniqueLegs} distinct underlying leg picks (each real pick reused ~${r.reuseFactor.toFixed(1)}x on average across different parlay combos), so they don't count as that many independent decided picks. Straight (non-parlay) picks and the dollar value above are unaffected.">&#9888;&#xFE0E;</span>` : ''}</td>
       <td><span style="color:${streakColor};font-weight:bold;">${streakLabel(streak)}</span></td>
       <td>${r.value !== null ? `${r.value >= 0 ? '+' : '−'}$${Math.abs(r.value).toFixed(2)}` : '—'}
           <span style="color:var(--ink-soft);font-size:10px;"> (${r.oddsPresentCount}/${r.total_picks} have odds${r.pending ? ` &middot; ${r.pending} pending` : ''})</span></td>
@@ -15158,18 +15158,48 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' · ');
 
-    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,grading_multiplier,raw_unit_size,event_date,created_at,cappers(name),bet_types(name)&is_parlay_leg=eq.false';
+    let query = 'picks?select=id,capper_id,result,opening_odds,closing_odds,grading_multiplier,raw_unit_size,event_date,created_at,cappers(name),bet_types(name)&is_parlay_leg=eq.false';
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
     query += '&order=id.asc';
 
     const picks = await restAllPages(query);
+
+    // CONFIRMED REQUEST 2026-09-06: "if he puts Yankees on 4 parlays and
+    // wins 3... he's getting credit toward his ROI for multiple duplicate
+    // picks and juicing his numbers." Real, verified against Cody Covers
+    // Spreads' own data -- several legs (Baltimore, Toronto, Texas, LA
+    // Dodgers) each turned up in 3-4 of his OWN separate parlays the same
+    // week. The dollar total is untouched by this (each parlay really was
+    // a separate bet with a real payout), but win % is a different
+    // question -- it's meant as a signal of how much genuine, independent
+    // opinion sits behind a capper's record, and reusing the same handful
+    // of leg picks across many parlay combinations inflates the apparent
+    // sample size without adding any new opinions. Fetches every leg of
+    // every Parlay wrapper pick already in `picks` so each capper's real
+    // "how many distinct games did this actually come from" can be
+    // measured, separate from "how many parlay slips did this turn into."
+    const parlayTypeName = 'parlay';
+    const parlayPickIds = picks
+      .filter(p => normalizeForMatch((p.bet_types && p.bet_types.name) || '') === parlayTypeName)
+      .map(p => p.id);
+    const legsByParlayId = {};
+    if (parlayPickIds.length) {
+      for (let i = 0; i < parlayPickIds.length; i += 200) {
+        const chunk = parlayPickIds.slice(i, i + 200);
+        const legRows = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&parlay_pick_id=in.(${chunk.join(',')})`);
+        for (const r of legRows) {
+          (legsByParlayId[r.parlay_pick_id] || (legsByParlayId[r.parlay_pick_id] = [])).push(r.leg_pick_id);
+        }
+      }
+    }
+
     const byCapper = {};
     for (const p of picks) {
       const id = p.capper_id;
       if (!byCapper[id]) {
-        byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, valueSum: 0, valuedCount: 0, oddsPresentCount: 0, unitValueSum: 0, unitValuedCount: 0, unitSizedCount: 0, parlayCappedCount: 0, history: [] };
+        byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, valueSum: 0, valuedCount: 0, oddsPresentCount: 0, unitValueSum: 0, unitValuedCount: 0, unitSizedCount: 0, parlayCappedCount: 0, parlayWins: 0, parlayLosses: 0, parlayLegSlots: 0, parlayUniqueLegs: new Set(), history: [] };
       }
       const b = byCapper[id];
       b.total_picks++;
@@ -15204,6 +15234,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         wasCapped = true;
       }
       if (wasCapped) b.parlayCappedCount++;
+      if (isParlay) {
+        const legs = legsByParlayId[p.id] || [];
+        b.parlayLegSlots += legs.length;
+        legs.forEach(legId => b.parlayUniqueLegs.add(legId));
+        if (p.result === 'win') b.parlayWins++;
+        else if (p.result === 'loss') b.parlayLosses++;
+      }
       const val = calcProfit(oddsUsed, p.result, p.grading_multiplier ?? 1);
       if (val !== null) { b.valueSum += val; b.valuedCount++; }
 
@@ -15245,13 +15282,44 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const unitVal = val !== null ? val * unitMultiplier : null;
       if (unitVal !== null) { b.unitValueSum += unitVal; b.unitValuedCount++; }
     }
-    const rows = Object.values(byCapper).map(b => ({
-      ...b,
-      win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null,
-      value: b.valuedCount > 0 ? b.valueSum : null,
-      unit_value: b.unitValuedCount > 0 ? b.unitValueSum : null,
-      streak: computeStreak(b.history)
-    }));
+    const rows = Object.values(byCapper).map(b => {
+      // CONFIRMED REQUEST 2026-09-06 (see the parlay_legs fetch above for
+      // the full reasoning): reuseFactor is "on average, how many different
+      // parlays did each of this capper's real underlying leg picks end up
+      // in." 1.0 means no reuse at all (every leg appears in exactly one
+      // parlay -- fully independent). Only kicks in above 1.3x on purpose,
+      // so an ordinary capper who happens to reuse one leg once out of 15
+      // isn't flagged over noise -- this is meant to catch the real
+      // pattern (Cody Covers Spreads: dozens of parlays a night built from
+      // a much smaller pool of actual opinions), not any overlap at all.
+      const uniqueLegs = b.parlayUniqueLegs.size;
+      const reuseFactor = uniqueLegs > 0 ? b.parlayLegSlots / uniqueLegs : 1;
+      const heavyParlayReuse = reuseFactor >= 1.3;
+      // Straight (non-parlay) wins/losses count exactly as before, full
+      // weight. Parlay wins/losses are divided by the reuse factor -- e.g.
+      // a capper whose parlays reuse each real pick 2x on average has each
+      // of their parlay wins/losses count as half a decided pick toward
+      // win %, so recombining the same 3 opinions into 6 parlay slips
+      // doesn't look like 6x the independent evidence. This ONLY touches
+      // win % -- the dollar total above is untouched, since each parlay
+      // really was a separate bet with a real payout.
+      const straightWins = b.wins - b.parlayWins;
+      const straightLosses = b.losses - b.parlayLosses;
+      const weightedParlayWins = heavyParlayReuse ? b.parlayWins / reuseFactor : b.parlayWins;
+      const weightedParlayLosses = heavyParlayReuse ? b.parlayLosses / reuseFactor : b.parlayLosses;
+      const weightedDecided = straightWins + straightLosses + weightedParlayWins + weightedParlayLosses;
+      return {
+        ...b,
+        win_pct: weightedDecided > 0 ? Math.round((1000 * (straightWins + weightedParlayWins)) / weightedDecided) / 10 : null,
+        heavyParlayReuse,
+        reuseFactor,
+        parlayPickCount: b.parlayWins + b.parlayLosses,
+        uniqueLegs,
+        value: b.valuedCount > 0 ? b.valueSum : null,
+        unit_value: b.unitValuedCount > 0 ? b.unitValueSum : null,
+        streak: computeStreak(b.history)
+      };
+    });
 
     const qualifying = rows.filter(r => (r.wins + r.losses) >= minPicks && r.win_pct !== null);
     // Same win %, then wins, then losses tiebreaker as the Capper
@@ -23385,7 +23453,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 454; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 455; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
