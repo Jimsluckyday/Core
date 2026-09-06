@@ -15048,7 +15048,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <td>${r.value !== null ? `${r.value >= 0 ? '+' : '−'}$${Math.abs(r.value).toFixed(2)}` : '—'}
           <span style="color:var(--ink-soft);font-size:10px;"> (${r.valuedCount}/${r.total_picks} w/ odds)</span></td>
       <td>${r.unit_value !== null ? `${r.unit_value >= 0 ? '+' : '−'}$${Math.abs(r.unit_value).toFixed(2)}` : '—'}
-          <span style="color:var(--ink-soft);font-size:10px;"> (${r.unitSizedCount}/${r.total_picks} sized)</span></td>
+          <span style="color:var(--ink-soft);font-size:10px;"> (${r.unitSizedCount}/${r.total_picks} sized${r.parlayCappedCount ? `, ${r.parlayCappedCount} parlay${r.parlayCappedCount === 1 ? '' : 's'} capped` : ''})</span></td>
       <td><button type="button" class="analysis-btn" data-capper-id="${r.capper_id}" data-capper-name="${escapeHtml(r.capper_name)}">Analysis &rarr;</button></td>
     </tr>`;
     }).join('');
@@ -15088,7 +15088,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   ${topBottomTableHtml('Bottom 5', bottomRows)}
   ${csvExportPopoutScript('top-bottom-cappers')}
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
-    Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show. "Value @ $100" treats every pick as the same size; "Unit-Adjusted Value" weights each pick's profit by that pick's own recorded unit size, so a capper who correctly saves bigger sizing for their best picks shows it here even when their flat win rate doesn't — a capper with no numeric unit size recorded defaults to 1 for that pick (shown in the "X/Y sized" count), never guessed at a specific weight.
+    Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show. "Value @ $100" treats every pick as the same size; "Unit-Adjusted Value" weights each pick's profit by that pick's own recorded unit size, so a capper who correctly saves bigger sizing for their best picks shows it here even when their flat win rate doesn't — a capper with no numeric unit size recorded defaults to 1 for that pick (shown in the "X/Y sized" count), never guessed at a specific weight. Both value columns cap any single Parlay win's counted payout at +1000 odds — a real hit still counts as a full, large win, it just can't single-handedly make a lottery-ticket-parlay capper look historically great off one outcome ("X parlays capped" shows how often that actually applied).
   </div>
 <script>
 (function() {
@@ -15154,7 +15154,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
     const filterSummary = summaryParts.join(' · ');
 
-    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,grading_multiplier,raw_unit_size,event_date,created_at,cappers(name)&is_parlay_leg=eq.false';
+    let query = 'picks?select=capper_id,result,opening_odds,closing_odds,grading_multiplier,raw_unit_size,event_date,created_at,cappers(name),bet_types(name)&is_parlay_leg=eq.false';
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
     if (from) query += `&event_date=gte.${from}`;
     if (to) query += `&event_date=lte.${to}`;
@@ -15165,7 +15165,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     for (const p of picks) {
       const id = p.capper_id;
       if (!byCapper[id]) {
-        byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, valueSum: 0, valuedCount: 0, unitValueSum: 0, unitValuedCount: 0, unitSizedCount: 0, history: [] };
+        byCapper[id] = { capper_id: id, capper_name: p.cappers ? p.cappers.name : '—', total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0, valueSum: 0, valuedCount: 0, unitValueSum: 0, unitValuedCount: 0, unitSizedCount: 0, parlayCappedCount: 0, history: [] };
       }
       const b = byCapper[id];
       b.total_picks++;
@@ -15175,7 +15175,31 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       else b.pending++;
       b.history.push({ result: p.result, event_date: p.event_date, created_at: p.created_at });
 
-      const oddsUsed = p.opening_odds ?? p.closing_odds ?? null;
+      // Direct request 2026-09-06: "over value parlay's... lottery ones...
+      // a single win doesn't boost their ROI to unrealistic proportions."
+      // A parlay's own combined odds (only ever stored on the wrapper row,
+      // never on its legs -- see linkLegToParlay's own comment) compound
+      // across every leg, easily reaching +1000/+2000/+5000+ on a several-
+      // leg combo -- one single win at those odds can be worth 10-50x a
+      // normal single-game win in raw dollars, which would otherwise
+      // completely dominate a capper's total value/ROI off ONE lucky
+      // outcome, not a repeated demonstration of anything. Caps the ODDS
+      // actually fed into calcProfit for a Parlay wrapper pick specifically
+      // -- straight bets are untouched, since a single game essentially
+      // never reaches these odds on its own. MAX_PARLAY_PAYOUT_ODDS is a
+      // deliberately round, adjustable ceiling (a real hit still counts as
+      // a full, capped-but-large win, never zeroed out) -- change this one
+      // constant if it turns out too generous or too strict once weighed
+      // against real capper data.
+      const MAX_PARLAY_PAYOUT_ODDS = 1000;
+      const isParlay = normalizeForMatch((p.bet_types && p.bet_types.name) || '') === 'parlay';
+      let oddsUsed = p.opening_odds ?? p.closing_odds ?? null;
+      let wasCapped = false;
+      if (isParlay && oddsUsed !== null && oddsUsed > MAX_PARLAY_PAYOUT_ODDS) {
+        oddsUsed = MAX_PARLAY_PAYOUT_ODDS;
+        wasCapped = true;
+      }
+      if (wasCapped) b.parlayCappedCount++;
       const val = calcProfit(oddsUsed, p.result, p.grading_multiplier ?? 1);
       if (val !== null) { b.valueSum += val; b.valuedCount++; }
 
@@ -23339,7 +23363,23 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 449; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 450; // bump this, and the matching row in Supabase, whenever this file is updated
+  // v450, direct follow-up 2026-09-06: "don't over value parlay's...
+  // lottery ones... a single win doesn't boost their ROI to unrealistic
+  // proportions." A parlay's combined odds (only ever stored on the
+  // wrapper row) compound across every leg, easily reaching +1000s on a
+  // several-leg combo -- one win at those odds could be worth 10-50x a
+  // normal single-game win, letting one lucky outcome dominate a heavy-
+  // parlay capper's whole record. Caps the odds actually fed into
+  // calcProfit at +1000 for Parlay wrapper picks specifically (both Value
+  // @ $100 and the new Unit-Adjusted Value) -- straight bets are
+  // untouched, since a single game essentially never reaches these odds
+  // on its own. A capped win still counts as a full, large win, just not
+  // an unbounded one; "X parlays capped" in the Unit-Adjusted Value
+  // column's own disclosure shows exactly how often this applied for each
+  // capper. +1000 is a deliberately round, easily-adjustable constant
+  // (MAX_PARLAY_PAYOUT_ODDS) -- revisit it once weighed against real
+  // capper data if it looks too generous or too strict.
   // v449, direct request 2026-09-06: flat $100/pick (the existing "Value
   // @ $100" column, Top & Bottom Cappers) treats a capper's 5-unit best
   // bet the same as their 1-unit throwaway -- hiding exactly the signal a
