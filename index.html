@@ -4688,6 +4688,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['CONFIRMED REAL BUG, direct report 2026-08-26: every Player Prop row used to compute a BLANK Selection (Team 1/2 are correctly left empty for props -- the player\'s identity belongs in "Prop Player" instead), and a blank Selection gets the whole row REJECTED on upload, no matter how complete everything else is. Selection is now computed differently for Player Prop rows specifically, based on Prop Stat and Line -- leave Team 1/Team 2 blank for props exactly as before, this is handled automatically:', false, 10],
         ['-- A real stat-line prop with a number (Strikeouts, Points, HR, Rebounds, etc.): fill in Line, and Selection becomes "Over" or "Under" automatically from its sign -- NEGATIVE = Over, positive/unsigned = Under (this project\'s standard convention).', false, 10],
         ['-- Golf "Tournament Winner" or "Round Winner" (outright, no opponent at all): Selection is automatically the fixed text "To Win". Leave Team 1/Team 2 AND Line both blank -- just Prop Player + Prop Stat = "Round Winner" is a complete, correct row.', false, 10],
+        ['-- A plain yes/no player prop, e.g. hockey "Anytime Goal" (does this player score at any point, not a number): Selection is automatically the fixed text "Yes". Leave Team 1/Team 2 AND Line both blank, same as Tournament Winner above.', false, 10],
         ['-- Anything else with NO Line at all (Golf "Round Matchup"/"Tournament Matchup", a UFC/MMA method-of-victory prop like "Decision" or "KO/TKO", or any other prop that isn\'t a number): Selection is read directly from "Team 1 / Player" -- yes, that reads oddly against the column name (Prop Player already holds who you\'re backing); just type the answer there. Example -- "Joshua Van to win by points": Prop Player = "Joshua Van", Prop Stat = whatever you\'ve registered for method-of-victory props, Team 1 / Player = "Decision", Line blank.', false, 10],
         ['Prop Stat now has its own dropdown (pulled from Setup, same soft-warning style as Team 1/2) -- for the golf outright stats above ("Round Winner"/"Tournament Winner"), the exact spelling matters since Selection\'s formula and the real grading automation both key off it literally. "Round 4 Winner" or similar variants will NOT be recognized as "Round Winner" -- use the dropdown to get the exact registered name.', false, 10],
         ['', false, 10],
@@ -5042,11 +5043,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // now also covers "Method of Victory"-style props (Team 1 / Player
         // holds the answer, e.g. "Decision") without ever needing another
         // hardcoded stat name added here again.
+        // "Anytime Goal" added direct request 2026-09-07: same fixed-
+        // answer, no-line shape as Tournament Winner/Round Winner just
+        // above (see YES_NO_PROP_STATS' own comment in the main script) --
+        // just "Yes" instead of "To Win", since these props are only ever
+        // sold backing the player TO do the thing. Add more stat names
+        // here the same way as other sports' equivalents come up.
         ws.getCell(row, 20).value = { formula:
           `IF(${betTypeAddr}<>"Player Prop",` +
           `IF(${team1Addr}="","",IF(${team2Addr}="",${team1Addr},${team1Addr}&"/"&${team2Addr})),` +
           `IF(OR(${propStatAddr}="Tournament Winner",${propStatAddr}="Round Winner"),"To Win",` +
-          `IF(${lineAddr}="",${team1Addr},IF(${lineAddr}<0,"Over","Under"))))` };
+          `IF(${propStatAddr}="Anytime Goal","Yes",` +
+          `IF(${lineAddr}="",${team1Addr},IF(${lineAddr}<0,"Over","Under")))))` };
 
         ws.getCell(row, 21).value = { formula: `IF(${capperAddr}="","",IF(COUNTIF(Cappers!$A$2:$A$${CAPPERS_LAST},${capperAddr})>0,"OK","NEW? add in Setup"))` };
         ws.getCell(row, 22).value = { formula: `IF(${sportAddr}="","",IF(COUNTIF(Sports!$A$2:$A$${SPORTS_LAST},${sportAddr})>0,"OK","NEW? add in Setup"))` };
@@ -6252,6 +6260,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const n = normalizeForMatch(statValue);
     return n === 'tournamentwinner' || n === 'roundwinner';
   }
+  // CONFIRMED REAL GAP, direct report 2026-09-07: a hockey "Anytime Goal"
+  // player prop (Connor McDavid) forced through the generic Player Prop
+  // branch, which requires a real numeric line and computes Over/Under
+  // from its sign -- there's no meaningful "line" for a plain yes/no bet
+  // ("does this player score at any point in the game"), so it ended up
+  // with a literal "0" typed into Line/Selection just to satisfy the
+  // form, which then broke Missing Data's Line check (flagged it as
+  // missing even though a real line was never supposed to exist here) and
+  // read wrong everywhere else. Same shape as Golf's Tournament Winner
+  // (isGolfOutrightStat above) -- no opponent, no line, one fixed answer
+  // -- just not golf-specific, so kept as its own list rather than folded
+  // into the golf-named one. "Yes" is the fixed answer because these
+  // props are only ever sold as backing the player TO score -- there's no
+  // real "No, they won't score" market a capper would actually call.
+  // Add more stat names here the same way, one at a time, as other sports'
+  // equivalents come up (e.g. an NFL "Anytime Touchdown Scorer").
+  const YES_NO_PROP_STATS = ['anytime goal'];
+  function isYesNoPropStat(statValue) {
+    return YES_NO_PROP_STATS.includes(normalizeForMatch(statValue));
+  }
   function updateGolfPropSelectionField() {
     const bt = currentBetType();
     const usesProp = bt ? bt.uses_prop_fields : false;
@@ -6264,7 +6292,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       $('pickSelection').placeholder = 'e.g. Justin Thomas';
       $('lineField').style.display = 'none';
       $('pickLine').value = '';
-    } else if (isGolfOutrightStat(statValue)) {
+    } else if (isGolfOutrightStat(statValue) || isYesNoPropStat(statValue)) {
       $('selectionField').style.display = 'none';
       $('lineField').style.display = 'none';
       $('pickLine').value = '';
@@ -6869,6 +6897,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // Tournament Winner: no opponent, no line -- fixed label, nothing
       // for the user to type.
       selection = 'To Win';
+      line = null;
+    } else if (isProp && isYesNoPropStat($('propStat').value)) {
+      // Anytime Goal (and any future equivalent, see YES_NO_PROP_STATS'
+      // own comment): a plain yes/no bet, no opponent, no line -- fixed
+      // label, nothing for the user to type, same shape as Tournament
+      // Winner just above.
+      selection = 'Yes';
       line = null;
     } else if (isProp) {
       // The sign of the line IS the over/under call — no separate field.
@@ -7860,6 +7895,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
   function betTypeUsesLine(betTypeName, usesPropFields, propStat) {
     const n = (betTypeName || '').toLowerCase();
     if (usesPropFields && GOLF_NO_LINE_PROP_STATS.includes((propStat || '').toLowerCase().trim())) return false;
+    // Same "no real line exists for this stat" carve-out as Golf, just for
+    // a plain yes/no player prop (Anytime Goal, etc.) -- see
+    // YES_NO_PROP_STATS' own comment. Without this, Missing Data's Line
+    // check flagged these as missing a field that was never supposed to
+    // exist in the first place.
+    if (usesPropFields && isYesNoPropStat(propStat)) return false;
     return !!usesPropFields || n.includes('spread') || n.includes('total');
   }
   // Direct feedback: a Parlay spans multiple games (no single home/away
@@ -22256,7 +22297,15 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // Over/Under when there's an actual numeric Line to read the sign of.
     let propSelection = row.selection;
     let propLineOverride = null;
-    if (isPropBet && propStatRaw && !isGolfMatchupStat(propStatRaw) && !isGolfOutrightStat(propStatRaw)) {
+    // Anytime Goal (and any future equivalent -- see YES_NO_PROP_STATS'
+    // own comment): same "fixed answer, no line" shape as Golf's outright
+    // stats, just not golf-specific. Selection is always the literal "Yes"
+    // regardless of whatever text happened to be in the pasted row --
+    // these props are only ever sold backing the player TO do the thing.
+    if (isPropBet && propStatRaw && isYesNoPropStat(propStatRaw)) {
+      propSelection = 'Yes';
+      propLineOverride = null;
+    } else if (isPropBet && propStatRaw && !isGolfMatchupStat(propStatRaw) && !isGolfOutrightStat(propStatRaw)) {
       const lineNum = row.line !== undefined && row.line !== '' ? Number(row.line) : NaN;
       if (!isNaN(lineNum)) {
         propSelection = lineNum < 0 ? 'Over' : 'Under';
@@ -23469,7 +23518,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 456; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 457; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
