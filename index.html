@@ -16925,9 +16925,25 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const summaryHtml = `<div style="background:${needsAttention ? 'var(--stamp-red)' : 'var(--stamp-green)'};color:var(--paper);font-size:14px;font-weight:bold;padding:12px;border-radius:3px;margin-bottom:12px;">
         <strong>${totalFoundCount}</strong> confirmed in the database${totalMissingCount > 0 ? `, <strong>${totalMissingCount}</strong> genuinely missing (safe to re-import, see below)` : ''}${parlayReviewNeeded.length > 0 ? `, <strong>${parlayReviewNeeded.length}</strong> parlay${parlayReviewNeeded.length === 1 ? '' : 's'} need${parlayReviewNeeded.length === 1 ? 's' : ''} a manual look -- NOT safe to re-import as-is` : ''}${!needsAttention ? ' -- everything checkable from this file is accounted for' : ''}
       </div>`;
+    // CONFIRMED REQUEST 2026-09-07: "it says 1 row couldn't be checked but
+    // it didn't tell me what row so how would I know what this missed?"
+    // validateBulkRow already carries sourceRowNumber and the row's own raw
+    // fields (added 2026-08-28 for this exact "find it in the file"
+    // purpose -- see that comment on validateBulkRow's return) but this
+    // list was only ever printing the error text, dropping both. Now shows
+    // the real spreadsheet row number (1 = header, same as opening the
+    // file in Excel) plus whatever WAS filled in on that row, so a "missing
+    // selection" row can actually be found and fixed instead of requiring
+    // a manual re-scan of the whole paste.
     const unresolvableHtml = unresolvable.length
       ? `<div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${unresolvable.length} row${unresolvable.length === 1 ? '' : 's'} couldn't be checked at all (capper/sport/bet type not recognized, or missing a date/selection) -- these need fixing before they can be compared against anything:
-          <ul style="margin:4px 0 0 18px;">${unresolvable.map(v => `<li>${escapeHtml(v.errors.join('; '))}</li>`).join('')}</ul>
+          <ul style="margin:4px 0 0 18px;">${unresolvable.map(v => {
+            const rawSummary = Object.entries(v.raw || {})
+              .filter(([k, val]) => k !== '_rowNumber' && String(val || '').trim())
+              .map(([k, val]) => `${k}: ${val}`)
+              .join(', ');
+            return `<li><strong>Row ${v.sourceRowNumber || '?'}</strong> &mdash; ${escapeHtml(v.errors.join('; '))}${rawSummary ? `<br><span style="color:var(--ink-soft);">${escapeHtml(rawSummary)}</span>` : ''}</li>`;
+          }).join('')}</ul>
         </div>`
       : '';
 
@@ -23453,7 +23469,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 455; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 456; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
