@@ -584,15 +584,29 @@ Deno.serve(async (req) => {
       return sum;
     }
 
-    // Moneyline First 5/First 7 -- same idea as full-game Moneyline, just
-    // scoped to the first N innings using first5_home/away or
-    // first7_home/away (added to the score object below) instead of the
+    // Reads the right pre-computed firstN_home/away field off the score
+    // object for whichever N this pick's bet type asks for. Widened
+    // 2026-09-07, direct request, to add 3 alongside the existing 5/7 --
+    // "Moneyline First 3" and "Over/Under First 3" are real, currently-
+    // used bet types (confirmed against real picks this same session)
+    // that failed identically to how First 5/First 7 would have before
+    // those were built. sumFirstNInnings() (used where first3/first5/
+    // first7 actually get computed, below) already took N as a plain
+    // argument, so 3 was free to add there -- only this lookup and the
+    // score object's own field list needed a third case.
+    function firstNScores(score: any, n: 3 | 5 | 7): { homeVal: number | null; awayVal: number | null } {
+      if (n === 3) return { homeVal: score.first3_home, awayVal: score.first3_away };
+      if (n === 5) return { homeVal: score.first5_home, awayVal: score.first5_away };
+      return { homeVal: score.first7_home, awayVal: score.first7_away };
+    }
+
+    // Moneyline First 3/First 5/First 7 -- same idea as full-game
+    // Moneyline, just scoped to the first N innings instead of the
     // full-game score_home/score_away. A tie through N innings is graded
     // push, the standard sportsbook convention for this bet type (unlike a
     // full-game Moneyline, which essentially never ties in baseball).
-    function gradeMoneylineFirstN(score: any, isHome: boolean, n: 5 | 7): 'win' | 'loss' | 'push' | null {
-      const homeVal = n === 5 ? score.first5_home : score.first7_home;
-      const awayVal = n === 5 ? score.first5_away : score.first7_away;
+    function gradeMoneylineFirstN(score: any, isHome: boolean, n: 3 | 5 | 7): 'win' | 'loss' | 'push' | null {
+      const { homeVal, awayVal } = firstNScores(score, n);
       if (homeVal === null || awayVal === null) return null;
       const ownScore = isHome ? homeVal : awayVal;
       const oppScore = isHome ? awayVal : homeVal;
@@ -601,12 +615,11 @@ Deno.serve(async (req) => {
       return 'push';
     }
 
-    // Over/Under First 5/First 7 -- same math as full-game gradeTotal(),
-    // just against the combined score through N innings instead of the
-    // final combined score.
-    function gradeTotalFirstN(score: any, n: 5 | 7, line: number): 'win' | 'loss' | 'push' | null {
-      const homeVal = n === 5 ? score.first5_home : score.first7_home;
-      const awayVal = n === 5 ? score.first5_away : score.first7_away;
+    // Over/Under First 3/First 5/First 7 -- same math as full-game
+    // gradeTotal(), just against the combined score through N innings
+    // instead of the final combined score.
+    function gradeTotalFirstN(score: any, n: 3 | 5 | 7, line: number): 'win' | 'loss' | 'push' | null {
+      const { homeVal, awayVal } = firstNScores(score, n);
       if (homeVal === null || awayVal === null) return null;
       const combined = homeVal + awayVal;
       const threshold = Math.abs(line);
@@ -1990,8 +2003,9 @@ Deno.serve(async (req) => {
             const firstPeriod = (c.linescores && c.linescores[0] && c.linescores[0].displayValue !== undefined
               && c.linescores[0].displayValue !== null && c.linescores[0].displayValue !== '')
               ? Number(c.linescores[0].displayValue) : null;
-            // Same defensive pattern extended through innings 5 and 7, for
-            // Moneyline/Total First 5/First 7 grading below.
+            // Same defensive pattern extended through innings 3, 5, and 7,
+            // for Moneyline/Total First 3/First 5/First 7 grading below.
+            const first3 = sumFirstNInnings(c.linescores, 3);
             const first5 = sumFirstNInnings(c.linescores, 5);
             const first7 = sumFirstNInnings(c.linescores, 7);
             // NBA 1st Half -- periods 1+2 summed, same reasoning/helper as
@@ -2002,7 +2016,7 @@ Deno.serve(async (req) => {
             return {
               is_home: c.homeAway === 'home', substringSafeNames, exactOnlyNames,
               score: c.score !== undefined ? Number(c.score) : null,
-              firstPeriod, first5, first7, first2
+              firstPeriod, first3, first5, first7, first2
             };
           }
 
@@ -2033,6 +2047,7 @@ Deno.serve(async (req) => {
             winner_away: awayV.score > homeV.score ? 1 : 0,
             event_status: completed ? 'STATUS_FINAL' : 'NOT_FINAL',
             first_inning_home: homeV.firstPeriod, first_inning_away: awayV.firstPeriod,
+            first3_home: homeV.first3, first3_away: awayV.first3,
             first5_home: homeV.first5, first5_away: awayV.first5,
             first7_home: homeV.first7, first7_away: awayV.first7,
             first_half_home: homeV.first2, first_half_away: awayV.first2
@@ -2218,19 +2233,30 @@ Deno.serve(async (req) => {
           // single-team matching Team Total already uses) already exists,
           // it just never got its own flag wired up.
           const isTeamTotalFirst5 = betTypeNorm === 'teamtotalfirst5';
+          // ADDED 2026-09-07, direct request: "Moneyline First 3" and
+          // "Over/Under First 3" are real, currently-used bet types
+          // (confirmed against real picks this same session) that failed
+          // every run with "not supported by this grader" -- same shape as
+          // First5/First7 just below, now that first3_home/away exists on
+          // the score object (see variantsFor/sumFirstNInnings above).
+          const isMoneylineFirst3 = betTypeNorm === 'moneylinefirst3';
+          const isTotalFirst3 = betTypeNorm === 'overunderfirst3';
           const isMoneylineFirst5 = betTypeNorm === 'moneylinefirst5';
           const isTotalFirst5 = betTypeNorm === 'overunderfirst5';
           const isTotalFirst7 = betTypeNorm === 'overunderfirst7';
           // Full-game Total/Over-Under only -- explicitly EXCLUDES the
-          // First5/First7 variants above. CONFIRMED this was a real latent
-          // bug before this fix: normalize() strips spaces, so "Over/Under
-          // First 5" also starts with "overunder" and was silently falling
-          // into this same full-game bucket, getting graded with the FULL
-          // GAME combined score instead of just the first 5 innings --
-          // same class of wrong-silent-grade risk already caught and fixed
-          // once for No Run First Inning.
+          // First3/First5/First7 variants above. CONFIRMED this was a real
+          // latent bug before this fix: normalize() strips spaces, so
+          // "Over/Under First 5" (and now First 3) also starts with
+          // "overunder" and was silently falling into this same full-game
+          // bucket, getting graded with the FULL GAME combined score
+          // instead of just the first N innings -- same class of wrong-
+          // silent-grade risk already caught and fixed once for No Run
+          // First Inning. First 3 deliberately added to this exclusion
+          // list up front, not after the fact, to avoid repeating that
+          // exact bug a third time.
           const isTotalType = (betTypeNorm === 'total' || betTypeNorm.startsWith('overunder'))
-            && !isTotalFirst5 && !isTotalFirst7;
+            && !isTotalFirst3 && !isTotalFirst5 && !isTotalFirst7;
           const isNRFI = betTypeNorm === 'norunfirstinning';
           const isYRFI = betTypeNorm === 'yesrunfirstinning';
           const isBothTeamsToScoreFirst5 = betTypeNorm === 'bothteamstoscorefirst5';
@@ -2270,7 +2296,7 @@ Deno.serve(async (req) => {
           // entry.endRound (comp.status.period) rather than any score.
           const isTotalRounds = betTypeNorm === 'totalrounds';
           const supported = isMoneyline || isSpread || isTotalType || isNRFI || isYRFI
-            || isTeamTotal || isTeamTotalFirst5 || isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7
+            || isTeamTotal || isTeamTotalFirst5 || isMoneylineFirst3 || isMoneylineFirst5 || isTotalFirst3 || isTotalFirst5 || isTotalFirst7
             || isBothTeamsToScoreFirst5 || isBothTeamsToScoreFirst7
             || isMoneyline1stInning || isSpread1stQuarter || isSpread1stHalf || isMoneyline1stHalf
             || isMoneyline1stQuarter
@@ -2525,7 +2551,9 @@ Deno.serve(async (req) => {
             const ownVal = matchedIsHome ? game.score.first5_home : game.score.first5_away;
             grade = ownVal !== null ? gradeTeamTotal(ownVal, Number(pick.line)) : null;
           }
+          else if (isMoneylineFirst3) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 3);
           else if (isMoneylineFirst5) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 5);
+          else if (isTotalFirst3) grade = gradeTotalFirstN(game.score, 3, Number(pick.line));
           else if (isTotalFirst5) grade = gradeTotalFirstN(game.score, 5, Number(pick.line));
           else if (isTotalFirst7) grade = gradeTotalFirstN(game.score, 7, Number(pick.line));
           else if (isBothTeamsToScoreFirst5) grade = gradeBothTeamsToScoreFirstN(game.score, 5);
