@@ -97,11 +97,12 @@
 // CFL game. Every CFL pick needs manual grading until ESPN fixes this or
 // another source is found.
 //
-// ADDED: Player Prop grading for MLB + WNBA, folded directly into this
-// same function/button rather than a new separate tool -- direct request:
-// "that's extra work to have to run 2 buttons and wait for results as
-// well as it's possible someone forgets or the button itself breaks and
-// no one notices." One run now covers games AND player props together.
+// ADDED: Player Prop grading for MLB + WNBA (+ NBA, + NHL as of 2026-09-07
+// -- see PLAYER_PROP_SPORTS), folded directly into this same function/
+// button rather than a new separate tool -- direct request: "that's extra
+// work to have to run 2 buttons and wait for results as well as it's
+// possible someone forgets or the button itself breaks and no one
+// notices." One run now covers games AND player props together.
 // Confirmed directly against ESPN's own box score data (the summary?event=
 // endpoint, same one used for linescores above) that real per-player stats
 // are available for both sports -- Hits/HR/RBI/Strikeouts/Earned Runs for
@@ -671,7 +672,16 @@ Deno.serve(async (req) => {
     // single stat group with no pitching/batting-style split (same as
     // WNBA), so NBA_STAT_SPECS below is a straight copy of WNBA_STAT_SPECS
     // and needs no new matching logic at all.
-    const PLAYER_PROP_SPORTS = ['mlb', 'wnba', 'nba'];
+    // ADDED 2026-09-07, direct request: "once NHL season comes in again we
+    // need to build it... the standing rule will always be to build
+    // everything now and not wait." Confirmed directly against a real NHL
+    // box score (2025-06-09, Oilers @ Panthers, Stanley Cup Final Game 3)
+    // that ESPN's data has everything needed (goals/assists/shotsTotal/
+    // hits in a "forwards"+"defenses" split, saves/goalsAgainst in a
+    // separate "goalies" group) -- this was purely a "never built" gap,
+    // not a data-availability one, same as NBA was before it got added
+    // above.
+    const PLAYER_PROP_SPORTS = ['mlb', 'wnba', 'nba', 'nhl'];
 
     // Which raw ESPN box-score stat group + key to read for each prop
     // stat, in the order to try them. "strikeouts" tries pitching first
@@ -682,7 +692,7 @@ Deno.serve(async (req) => {
     // Outs); hrrbi and the WNBA combo stats (PRA/PR/PA/RA) are summed from
     // two or three already-available keys, handled specially below rather
     // than needing their own derive function.
-    type StatSpec = { key: string; group: 'batting' | 'pitching'; derive?: 'outs' | 'attempted' };
+    type StatSpec = { key: string; group: 'batting' | 'pitching' | 'skater' | 'goalie'; derive?: 'outs' | 'attempted' };
     const MLB_STAT_SPECS: Record<string, StatSpec[]> = {
       hits: [{ key: 'hits', group: 'batting' }],
       homeruns: [{ key: 'homeRuns', group: 'batting' }],
@@ -825,6 +835,37 @@ Deno.serve(async (req) => {
     // Identical box-score schema to WNBA (confirmed directly, see
     // PLAYER_PROP_SPORTS comment above) -- same spec, same keys.
     const NBA_STAT_SPECS: Record<string, StatSpec[]> = WNBA_STAT_SPECS;
+
+    // ADDED 2026-09-07 (see PLAYER_PROP_SPORTS comment above for how this
+    // was confirmed against a real box score). NHL's box score splits
+    // skaters into "forwards" and "defenses" groups (both mapped to the
+    // 'skater' label below -- a player's exact position doesn't matter for
+    // any of these stats, so there's no reason to force a capper to know
+    // which group their pick is in) plus a separate "goalies" group for
+    // saves/goalsAgainst. There is no direct "points" key in ESPN's own
+    // data -- it's derived as goals+assists, same "sum two already-
+    // available keys" pattern as MLB's hrrbi/hrhits above (see the
+    // 'points' special case in gradePlayerProp below). "Anytime Goal" is
+    // graded as goals >= 1 (a yes/no bet, no threshold at all -- see
+    // YES_NO_PROP_STATS in the main admin.html script for why Selection is
+    // always "Yes" for this stat, and the dedicated grading branch below
+    // for why it skips the normal Over/Under threshold logic entirely).
+    const NHL_STAT_SPECS: Record<string, StatSpec[]> = {
+      goals: [{ key: 'goals', group: 'skater' }],
+      anytimegoal: [{ key: 'goals', group: 'skater' }],
+      assists: [{ key: 'assists', group: 'skater' }],
+      points: [{ key: '', group: 'skater' }],
+      shotsongoal: [{ key: 'shotsTotal', group: 'skater' }],
+      shots: [{ key: 'shotsTotal', group: 'skater' }],
+      sog: [{ key: 'shotsTotal', group: 'skater' }],
+      hits: [{ key: 'hits', group: 'skater' }],
+      blockedshots: [{ key: 'blockedShots', group: 'skater' }],
+      blocks: [{ key: 'blockedShots', group: 'skater' }],
+      penaltyminutes: [{ key: 'penaltyMinutes', group: 'skater' }],
+      pim: [{ key: 'penaltyMinutes', group: 'skater' }],
+      saves: [{ key: 'saves', group: 'goalie' }],
+      goalsagainst: [{ key: 'goalsAgainst', group: 'goalie' }],
+    };
 
     // Compound "made-attempted" fields (e.g. "3-8") -- caller wants the
     // made count, always the first number. Plain numeric fields pass
@@ -1003,7 +1044,7 @@ Deno.serve(async (req) => {
     }
 
     async function gradePlayerProp(
-      pick: any, sportNorm: 'mlb' | 'wnba' | 'nba', espnPath: string, games: any[], boxCache: Record<string, any>
+      pick: any, sportNorm: 'mlb' | 'wnba' | 'nba' | 'nhl', espnPath: string, games: any[], boxCache: Record<string, any>
     ): Promise<{ grade: 'win' | 'loss' | 'push' | null; note: string | null; notFinal?: boolean; unsupported?: boolean; matchedName?: string; matchedTeamName?: string | null }> {
       const statNorm = normalize(pick.prop_stat || '');
       const playerNorm = normalize(pick.prop_player || '');
@@ -1128,8 +1169,8 @@ Deno.serve(async (req) => {
         return { grade: won ? 'win' : 'loss', note: null, matchedName: match.displayName, matchedTeamName: match.teamName };
       }
 
-      const STAT_SPECS_BY_SPORT: Record<'mlb' | 'wnba' | 'nba', Record<string, StatSpec[]>> = {
-        mlb: MLB_STAT_SPECS, wnba: WNBA_STAT_SPECS, nba: NBA_STAT_SPECS
+      const STAT_SPECS_BY_SPORT: Record<'mlb' | 'wnba' | 'nba' | 'nhl', Record<string, StatSpec[]>> = {
+        mlb: MLB_STAT_SPECS, wnba: WNBA_STAT_SPECS, nba: NBA_STAT_SPECS, nhl: NHL_STAT_SPECS
       };
       const specs = STAT_SPECS_BY_SPORT[sportNorm][statNorm];
       if (!specs) return { grade: null, unsupported: true, note: `Stat "${pick.prop_stat}" is not supported by this grader yet -- needs manual grading.` };
@@ -1141,7 +1182,7 @@ Deno.serve(async (req) => {
       let foundInAnyGame = false;
       let foundInNotFinalGame = false;
       let foundInVoidedGame = false;
-      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching'; displayName: string; gameId: string; startTime: string; teamName: string | null }[] = [];
+      const allMatches: { stats: string[]; keys: string[]; group: 'batting' | 'pitching' | 'skater' | 'goalie'; displayName: string; gameId: string; startTime: string; teamName: string | null }[] = [];
       for (const g of games) {
         const completed = !!(g.status && g.status.type && g.status.type.completed);
         // Same postponed/canceled distinction as the team-game grading
@@ -1177,9 +1218,21 @@ Deno.serve(async (req) => {
                   else foundInNotFinalGame = true;
                   return;
                 }
+                // NHL's box score groups are, in order: 0=forwards,
+                // 1=defenses, 2=skaters (a combined-group placeholder that
+                // was confirmed EMPTY on a real game -- never populated,
+                // so it's harmless that it falls through to 'skater' below
+                // too, it just never matches any athlete), 3=goalies.
+                // Forwards and defenses share the exact same stat keys
+                // (goals/assists/shotsTotal/hits/etc.), so both map to the
+                // same 'skater' label -- a capper's prop pick has no
+                // reason to know or care which one a player is.
                 allMatches.push({
                   stats: a.stats, keys: sg.keys, displayName: rawDisplayName,
-                  group: (sportNorm === 'mlb' && sgIdx === 1) ? 'pitching' : 'batting',
+                  group: (sportNorm === 'mlb' && sgIdx === 1) ? 'pitching'
+                    : (sportNorm === 'nhl' && sgIdx === 3) ? 'goalie'
+                    : (sportNorm === 'nhl') ? 'skater'
+                    : 'batting',
                   gameId: g.id, startTime: g.date,
                   // Direct request 2026-08-31: same real, verified box-
                   // score team identity reused for roster tracking as the
@@ -1265,6 +1318,13 @@ Deno.serve(async (req) => {
           else if (statNorm === 'pointsrebounds' || statNorm === 'ptsreb') value = (p !== null && r !== null) ? p + r : null;
           else if (statNorm === 'pointsassists' || statNorm === 'ptsassists') value = (p !== null && a !== null) ? p + a : null;
           else value = (r !== null && a !== null) ? r + a : null;
+        } else if (statNorm === 'points' && sportNorm === 'nhl') {
+          // No direct "points" key in ESPN's NHL box score -- same "sum
+          // two already-available keys" pattern as MLB's hrrbi above.
+          const gIdx = row.keys.indexOf('goals'), aIdx = row.keys.indexOf('assists');
+          const goalsVal = gIdx >= 0 ? espnStatToNumber(row.stats[gIdx]) : null;
+          const assistsVal = aIdx >= 0 ? espnStatToNumber(row.stats[aIdx]) : null;
+          value = (goalsVal !== null && assistsVal !== null) ? goalsVal + assistsVal : null;
         } else {
           const idx = row.keys.indexOf(spec.key);
           value = idx >= 0 ? espnStatToNumber(row.stats[idx]) : null;
@@ -1274,6 +1334,19 @@ Deno.serve(async (req) => {
 
       if (value === null) {
         return { grade: null, note: `Found "${pick.prop_player}" but couldn't read a real value for "${pick.prop_stat}" from the box score -- needs manual review.` };
+      }
+
+      // ADDED 2026-09-07: Anytime Goal is a plain yes/no bet (see
+      // YES_NO_PROP_STATS in the main admin.html script) -- there's no
+      // line, no Over/Under call, just "did this player score at least
+      // once." Graded directly off the goals value fetched above instead
+      // of falling through to the generic Over/Under threshold logic just
+      // below, which assumes a real numeric line and an Over/Under
+      // Selection that this bet type deliberately never has.
+      if (statNorm === 'anytimegoal') {
+        const matchedName = allMatches[0] ? allMatches[0].displayName : pick.prop_player;
+        const matchedTeamName = allMatches[0] ? allMatches[0].teamName : null;
+        return { grade: value >= 1 ? 'win' : 'loss', note: null, matchedName, matchedTeamName };
       }
 
       // CONFIRMED REAL BUG, direct report 2026-08-30 (same fix as the Total
@@ -2222,7 +2295,7 @@ Deno.serve(async (req) => {
 
           if (isPlayerProp) {
             const propLabel = `${pick.prop_player || '?'} ${pick.prop_stat || '?'}`;
-            const result = await gradePlayerProp(pick, sportNormForProps as 'mlb' | 'wnba' | 'nba', espnPath, games, boxscoreCache);
+            const result = await gradePlayerProp(pick, sportNormForProps as 'mlb' | 'wnba' | 'nba' | 'nhl', espnPath, games, boxscoreCache);
             if (result.notFinal) {
               sportResult.not_final_yet.push({ id: pick.id, selection: propLabel, reason: result.note });
               continue;
