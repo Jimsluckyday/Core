@@ -14126,20 +14126,28 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // Performance by Bet Type -- lets the user sort by capper, by tier, or
   // filter down to just the rows they care about instead of scanning the
   // static tables. Same Straight/Parlay split as the totals table above.
+  function potdPerfNamedLabel(rawUnitSize) {
+    const trimmed = (rawUnitSize || '').trim();
+    if (!trimmed) return null;
+    const normalized = normalizeUnitSize(trimmed);
+    if (!normalized) return null;
+    return /^-?\d+(\.\d+)?$/.test(normalized) ? null : normalized;
+  }
   function potdPerfRowsByCapper(picks) {
     const byKey = new Map();
     picks.forEach(p => {
       const tier = Number(p.pick_tier) || 0;
       const capperName = p.cappers ? p.cappers.name : '—';
-      const key = capperName + ' ' + tier;
-      if (!byKey.has(key)) byKey.set(key, { capper_name: capperName, tier, picks: [] });
+      const label = potdPerfNamedLabel(p.raw_unit_size);
+      const key = capperName + ' ' + tier + ' ' + (label || '');
+      if (!byKey.has(key)) byKey.set(key, { capper_name: capperName, tier, label, picks: [] });
       byKey.get(key).picks.push(p);
     });
     const rows = [];
     byKey.forEach(bucket => {
       const { straight, parlay } = potdPerfSplitStraightParlay(bucket.picks);
-      if (straight.length) rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, type: 'Straight', ...potdPerfComputeRecord(straight) });
-      if (parlay.length) rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, type: 'Parlay', ...potdPerfComputeRecord(parlay) });
+      if (straight.length) rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, label: bucket.label, type: 'Straight', ...potdPerfComputeRecord(straight) });
+      if (parlay.length) rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, label: bucket.label, type: 'Parlay', ...potdPerfComputeRecord(parlay) });
     });
     return rows;
   }
@@ -14148,13 +14156,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     if (!rows.length) {
       return `<p class="stub-title" style="margin-bottom:8px;">${title}</p><div class="empty-state" style="margin-bottom:20px;">No picks match these filters.</div>`;
     }
-    const sorted = [...rows].sort((a, b) => a.capper_name.localeCompare(b.capper_name) || a.tier - b.tier || a.type.localeCompare(b.type));
+    const sorted = [...rows].sort((a, b) => a.capper_name.localeCompare(b.capper_name) || a.tier - b.tier || (a.label || '').localeCompare(b.label || '') || a.type.localeCompare(b.type));
 
     function row(r) {
       const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
       return `<tr>
         <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
         <td data-value="${r.tier}">${escapeHtml(tierLabel(r.tier))}</td>
+        <td data-value="${escapeHtml((r.label || '').toLowerCase())}">${r.label ? escapeHtml(r.label) : '—'}</td>
         <td data-value="${escapeHtml(r.type)}">${escapeHtml(r.type)}</td>
         <td data-value="${r.total_picks}">${r.total_picks}</td>
         <td data-value="${r.wins}">${r.wins}</td>
@@ -14164,7 +14173,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       </tr>`;
     }
 
-    const cols = [{ label: 'Capper', type: 'str' }, { label: 'Tier', type: 'num' }, { label: 'Type', type: 'str' }, { label: 'Total picks', type: 'num' },
+    const cols = [{ label: 'Capper', type: 'str' }, { label: 'Tier', type: 'num' }, { label: 'Label', type: 'str' }, { label: 'Type', type: 'str' }, { label: 'Total picks', type: 'num' },
       { label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' }];
 
     const body = sorted.map(row).join('');
@@ -14193,7 +14202,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     picks.forEach(p => {
       const tier = Number(p.pick_tier) || 0;
       const capperName = p.cappers ? p.cappers.name : '—';
-      const key = capperName + ' ' + tier;
+      const key = capperName + ' ' + tier;
       if (!byKey.has(key)) byKey.set(key, { capper_name: capperName, tier, picks: [] });
       byKey.get(key).picks.push(p);
     });
@@ -23598,7 +23607,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 459; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 460; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
