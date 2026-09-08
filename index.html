@@ -13999,7 +13999,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const from = $('potdFrom').value;
     const to = $('potdTo').value;
 
-    let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
+    let baseQuery = 'picks?select=capper_id,pick_tier,raw_unit_size,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
     if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
     if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
     if (from) baseQuery += `&event_date=gte.${from}`;
@@ -16224,21 +16224,30 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   ${isSingleCapper ? `<div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;">
     <button type="button" id="jumpToPicksBtn" style="font-size:11px;font-family:inherit;padding:6px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;">View individual picks &rarr;</button>
     <button type="button" id="jumpToTierPerfBtn" style="font-size:11px;font-family:inherit;padding:6px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;">Pick Tier Performance &rarr;</button>
+    <button type="button" id="jumpToScorecardBtn" style="font-size:11px;font-family:inherit;padding:6px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;">Capper Scorecard Summary &rarr;</button>
   </div>
   <!-- CONFIRMED REQUEST 2026-09-07: "took me to his overall record but
        not his individual picks or his tier performance... without having
-       to exit go back and then use a different tool." These two call back
+       to exit go back and then use a different tool." These call back
        into the MAIN tab (window.opener) with the exact same capper/sport/
        date-range this analysis was already run with -- see
        openPicksForCapperValues/openTierPerfForCapperValues's own comment
        for why a VALUES-based call (not the usual DOM-dropdown-reading
-       helpers) was needed for a pop-out window specifically. -->
+       helpers) was needed for a pop-out window specifically. Scorecard
+       Summary added 2026-09-07 per direct follow-up request: "that report
+       has always been too messy to use for data analysis" re: the plain
+       All Picks edit-style listing -- Scorecard Summary is the same
+       underlying picks but scored/read-only, which is what's actually
+       wanted for reviewing a capper's record. -->
   <script>
     document.getElementById('jumpToPicksBtn').addEventListener('click', () => {
       window.opener.openPicksForCapperValues(${JSON.stringify(capperId || '')}, ${JSON.stringify(sportFilter || '')}, ${JSON.stringify(from || '')}, ${JSON.stringify(to || '')});
     });
     document.getElementById('jumpToTierPerfBtn').addEventListener('click', () => {
       window.opener.openTierPerfForCapperValues(${JSON.stringify(capperId || '')}, ${JSON.stringify(sportFilter || '')}, ${JSON.stringify(from || '')}, ${JSON.stringify(to || '')});
+    });
+    document.getElementById('jumpToScorecardBtn').addEventListener('click', () => {
+      window.opener.viewScorecardSummaryForValues(${JSON.stringify(capperId || '')}, ${JSON.stringify(sportFilter || '')}, ${JSON.stringify(from || '')}, ${JSON.stringify(to || '')});
     });
   <\/script>` : ''}
 
@@ -16379,7 +16388,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const summaryParts = [capperName, sportName];
     summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
 
-    let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
+    let baseQuery = 'picks?select=capper_id,pick_tier,raw_unit_size,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
     if (capperId) baseQuery += `&capper_id=eq.${capperId}`;
     if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
     if (from) baseQuery += `&event_date=gte.${from}`;
@@ -16571,6 +16580,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
   $('viewScorecardCapperAnalysisBtn').addEventListener('click', () =>
     viewScorecardSummaryForFilters('capperAnalysisCapper', 'capperAnalysisSport', 'capperAnalysisFrom', 'capperAnalysisTo'));
+
+  // Values-based sibling of viewScorecardSummaryForFilters -- same reasoning
+  // as openPicksForCapperValues/openTierPerfForCapperValues (see their
+  // comment): a pop-out window has no access to the main tab's own DOM
+  // dropdowns, so it has to hand over the capper/sport/date-range directly.
+  async function viewScorecardSummaryForValues(capperId, sportFilter, from, to) {
+    if (!capperId) { alert('Choose a capper first — this scorecard summary is built for one capper at a time.'); return; }
+    const capperName = (cappers.find(c => String(c.id) === String(capperId)) || {}).name || '';
+    const sportName = sportFilter ? ((sports.find(s => String(s.id) === String(sportFilter)) || {}).name || '') : 'All sports';
+    const summaryParts = [capperName, sportName];
+    summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
+
+    try {
+      const allRows = await computeCapperScorecardRows(sportFilter, from, to);
+      const rows = attachGroupScores(allRows, capperId);
+      openCapperScorecardSummaryTab(rows, summaryParts.join(' · '));
+    } catch (e) {
+      alert('Could not build scorecard summary: ' + e.message);
+    }
+  }
+  window.viewScorecardSummaryForValues = viewScorecardSummaryForValues;
 
   // Callback entry point for the Top/Bottom Cappers pop-out tab's "Analysis"
   // button — same underlying report as runCapperAnalysis, but driven by
@@ -23607,7 +23637,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 460; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 461; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
