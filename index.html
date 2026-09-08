@@ -16038,7 +16038,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       </table>`;
   }
 
-  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper, legRows, legLinks) {
+  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper, legRows, legLinks, capperId, sportFilter, from, to) {
     const overall = totalAndUnique(picks);
 
     // A capper who calls one straight bet and one 10-leg parlay has made two
@@ -16212,6 +16212,26 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 </head><body>
   <h1>Capper Analysis <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
+  ${isSingleCapper ? `<div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;">
+    <button type="button" id="jumpToPicksBtn" style="font-size:11px;font-family:inherit;padding:6px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;">View individual picks &rarr;</button>
+    <button type="button" id="jumpToTierPerfBtn" style="font-size:11px;font-family:inherit;padding:6px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;">Pick Tier Performance &rarr;</button>
+  </div>
+  <!-- CONFIRMED REQUEST 2026-09-07: "took me to his overall record but
+       not his individual picks or his tier performance... without having
+       to exit go back and then use a different tool." These two call back
+       into the MAIN tab (window.opener) with the exact same capper/sport/
+       date-range this analysis was already run with -- see
+       openPicksForCapperValues/openTierPerfForCapperValues's own comment
+       for why a VALUES-based call (not the usual DOM-dropdown-reading
+       helpers) was needed for a pop-out window specifically. -->
+  <script>
+    document.getElementById('jumpToPicksBtn').addEventListener('click', () => {
+      window.opener.openPicksForCapperValues(${JSON.stringify(capperId || '')}, ${JSON.stringify(sportFilter || '')}, ${JSON.stringify(from || '')}, ${JSON.stringify(to || '')});
+    });
+    document.getElementById('jumpToTierPerfBtn').addEventListener('click', () => {
+      window.opener.openTierPerfForCapperValues(${JSON.stringify(capperId || '')}, ${JSON.stringify(sportFilter || '')}, ${JSON.stringify(from || '')}, ${JSON.stringify(to || '')});
+    });
+  </script>` : ''}
 
   ${overallSection}
   ${sportSectionHtml}
@@ -16258,7 +16278,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           legLinks = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&leg_pick_id=in.(${legRows.map(l => l.id).join(',')})`);
         }
       }
-      openCapperAnalysisTab(picks, filterSummary, !!capperFilter, legRows, legLinks);
+      openCapperAnalysisTab(picks, filterSummary, !!capperFilter, legRows, legLinks, capperFilter, sportFilter, from, to);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -16306,6 +16326,66 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
   $('viewPicksCapperAnalysisBtn').addEventListener('click', () =>
     viewPicksForCapperFilters('capperAnalysisCapper', 'capperAnalysisSport', 'capperAnalysisFrom', 'capperAnalysisTo'));
+
+  // CONFIRMED REQUEST 2026-09-07: "it took me to his overall record but
+  // not his individual picks or his tier performance... without having
+  // to exit go back and then use a different tool." viewPicksForCapperFilters
+  // above (and fetchPotdPerfPicks for Tier Performance) both read their
+  // filters from THIS main tab's own dropdowns -- fine when starting from
+  // here, useless from inside the Capper Analysis POP-OUT (a separate
+  // window), which has no access to those dropdowns and may be showing a
+  // completely different capper than whatever's currently selected on
+  // this tab. These two take the actual VALUES directly instead (only
+  // ids/dates, safe to embed in an onclick attribute with no escaping
+  // concerns) and resolve the display names themselves from the already-
+  // loaded cappers/sports arrays, so the pop-out never needs to duplicate
+  // or guess at a capper/sport NAME -- only pass through the id it
+  // already has. Exposed on window so the pop-out can reach them via
+  // window.opener, same pattern as runCapperAnalysisFor below.
+  async function openPicksForCapperValues(capperId, sportFilter, from, to) {
+    const capperName = capperId ? ((cappers.find(c => String(c.id) === String(capperId)) || {}).name || '') : 'All cappers';
+    const sportName = sportFilter ? ((sports.find(s => String(s.id) === String(sportFilter)) || {}).name || '') : 'All sports';
+    const summaryParts = [capperName, sportName];
+    summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
+
+    let query = 'picks?select=id,selection,line,opening_odds,closing_odds,odds_unavailable,home_away,event_name,event_date,date_entered,game_start_time,schedule_sync_status,schedule_sync_note,grading_status,grading_note,result,is_published,pick_tier,raw_unit_size,line_flagged_for_review,line_flag_note,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,source_image,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields)&is_parlay_leg=eq.false&order=event_date.desc,created_at.desc';
+    if (capperId) query += `&capper_id=eq.${capperId}`;
+    if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
+    if (from) query += `&event_date=gte.${from}`;
+    if (to) query += `&event_date=lte.${to}`;
+
+    try {
+      const picks = await restAllPages(query);
+      if (!picks.length) { alert('No picks match these filters.'); return; }
+      openAllPicksTab(picks, summaryParts.join(' · '), query);
+    } catch (e) {
+      alert('Could not load picks: ' + e.message);
+    }
+  }
+  window.openPicksForCapperValues = openPicksForCapperValues;
+
+  async function openTierPerfForCapperValues(capperId, sportFilter, from, to) {
+    const capperName = capperId ? ((cappers.find(c => String(c.id) === String(capperId)) || {}).name || '') : 'All cappers';
+    const sportName = sportFilter ? ((sports.find(s => String(s.id) === String(sportFilter)) || {}).name || '') : 'All sports';
+    const summaryParts = [capperName, sportName];
+    summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
+
+    let baseQuery = 'picks?select=capper_id,pick_tier,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
+    if (capperId) baseQuery += `&capper_id=eq.${capperId}`;
+    if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
+    if (from) baseQuery += `&event_date=gte.${from}`;
+    if (to) baseQuery += `&event_date=lte.${to}`;
+
+    try {
+      const picks = await restAllPages(baseQuery + '&is_parlay_leg=eq.false');
+      const legPicks = await restAllPages(baseQuery + '&is_parlay_leg=eq.true');
+      if (!picks.length && !legPicks.length) { alert('No picks match these filters.'); return; }
+      openPotdPerfTab(picks, legPicks, summaryParts.join(' · '));
+    } catch (e) {
+      alert('Could not load tier performance: ' + e.message);
+    }
+  }
+  window.openTierPerfForCapperValues = openTierPerfForCapperValues;
 
   // Direct request 2026-08-31: "I would prefer a summary not an editable
   // source... the day, the picks, the result and maybe his score from his
@@ -16513,7 +16593,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       if (legRows.length) {
         legLinks = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&leg_pick_id=in.(${legRows.map(l => l.id).join(',')})`);
       }
-      openCapperAnalysisTab(picks, filterSummary, true, legRows, legLinks);
+      openCapperAnalysisTab(picks, filterSummary, true, legRows, legLinks, capperId, sportFilter, from, to);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -23518,7 +23598,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 457; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 458; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
