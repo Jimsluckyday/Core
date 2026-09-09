@@ -245,6 +245,20 @@
     font-size: 17px;
     margin-left: 8px;
   }
+  /* CONFIRMED REAL GAP, direct report 2026-09-09: a real published
+     Over/Under pick reached this page with no line number at all -- just
+     the matchup and odds, giving a viewer no way to judge whether that's
+     a bet they'd want. Root cause (fixed in index.html's betTypeUsesLine)
+     let it slip past the admin-side Missing Data check unflagged. This is
+     the customer-facing safety net for that same case -- if it ever
+     happens again, show a visible warning instead of silently omitting
+     the line, so nobody mistakes an incomplete pick for a real one. */
+  .line-missing-warning {
+    display: inline-block; margin-left: 8px; font-family: 'Inter', sans-serif;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    color: var(--loss); border: 1px solid var(--loss); border-radius: 2px; padding: 3px 7px;
+    vertical-align: middle;
+  }
   .selection .odds {
     font-family: 'Space Mono', monospace;
     color: var(--cream-dim);
@@ -721,7 +735,7 @@
         const links = await rest(`parlay_legs?select=parlay_pick_id,leg_pick_id&parlay_pick_id=in.(${parlayPicks.map(p => p.id).join(',')})`);
         const legIds = [...new Set(links.map(l => l.leg_pick_id))];
         if (legIds.length) {
-          const legPicks = await rest(`picks?select=id,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result&id=in.(${legIds.join(',')})`);
+          const legPicks = await rest(`picks?select=id,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result,bet_types(name)&id=in.(${legIds.join(',')})`);
           const legById = {};
           legPicks.forEach(lp => { legById[lp.id] = lp; });
           links.forEach(l => {
@@ -786,6 +800,8 @@
         const betTypeNameForCard = p.bet_types ? p.bet_types.name : '';
         const isParlayCard = betTypeNameForCard.trim().toLowerCase() === 'parlay';
         const cardStake = stakeForBetType(betTypeNameForCard);
+        const missingLineHtml = (betTypeNeedsLine(betTypeNameForCard) && (p.line === null || p.line === undefined))
+          ? `<span class="line-missing-warning">&#9888; Line unavailable</span>` : '';
         // Direct request 2026-08-23: show the full payout (stake back +
         // profit), not just the profit -- a casual bettor doesn't
         // necessarily know "$100 wins $79" means $179 back total, not $79.
@@ -816,12 +832,14 @@
                 : ((leg.closing_odds !== null && leg.closing_odds !== undefined) ? leg.closing_odds : null);
               const legOddsHtml = legOddsVal !== null ? `<span class="leg-odds">${legOddsVal > 0 ? '+' : ''}${legOddsVal}</span>` : '';
               const legLineHtml = (leg.line !== null && leg.line !== undefined) ? `<span class="leg-line">${leg.line > 0 ? '+' : ''}${leg.line}</span>` : '';
+              const legMissingLineHtml = (betTypeNeedsLine(leg.bet_types ? leg.bet_types.name : '') && (leg.line === null || leg.line === undefined))
+                ? `<span class="line-missing-warning">&#9888; Line unavailable</span>` : '';
               const legPropHtml = (leg.prop_player || leg.prop_stat)
                 ? `<span class="leg-prop">${escapeHtml(leg.prop_player || '')}${leg.prop_team ? ` (${escapeHtml(leg.prop_team)})` : ''} ${escapeHtml(leg.prop_stat || '')}</span>`
                 : '';
               return `
               <div class="parlay-leg">
-                <div class="parlay-leg-text">${escapeHtml(leg.selection)}${legLineHtml}${legOddsHtml}${legPropHtml}</div>
+                <div class="parlay-leg-text">${escapeHtml(leg.selection)}${legLineHtml}${legOddsHtml}${legPropHtml}${legMissingLineHtml}</div>
                 ${resultStampHtml(leg.result, true)}
               </div>`;
             }).join('')}
@@ -838,7 +856,7 @@
             ${cornerBadge}
           </div>
           <div>
-            <div class="selection">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? `<span class="line">${p.line > 0 ? '+' : ''}${p.line}</span>` : ''}${oddsHtml}</div>
+            <div class="selection">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? `<span class="line">${p.line > 0 ? '+' : ''}${p.line}</span>` : ''}${oddsHtml}${missingLineHtml}</div>
             ${propBit}
           </div>
           ${legsHtml}
@@ -905,6 +923,16 @@
   const PLAIN_BET_TYPES = ['moneyline', 'spread', 'total', 'parlay'];
   function isPlainBetType(betTypeName) {
     return PLAIN_BET_TYPES.includes((betTypeName || '').trim().toLowerCase());
+  }
+
+  // Same "does this bet type need a real line to be meaningful" check as
+  // index.html's betTypeUsesLine (kept in sync by name, not by shared
+  // code, since this file has no import mechanism) -- Spread and any
+  // Over/Under-style market (Over/Under, Total, and their 1st Half/First 5
+  // etc. variants) always need one; Moneyline and Player Props don't.
+  function betTypeNeedsLine(betTypeName) {
+    const n = (betTypeName || '').toLowerCase();
+    return /over\/under/i.test(n) || n.includes('spread') || n.includes('total');
   }
 
   // Standard American-odds profit on a flat stake (see stakeForBetType

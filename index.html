@@ -7897,6 +7897,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // check flagged these as missing a field that was never supposed to
     // exist in the first place.
     if (usesPropFields && isYesNoPropStat(propStat)) return false;
+    // CONFIRMED REAL BUG, direct report 2026-09-09: a real, published
+    // "Over/Under" pick (St. Louis Cardinals/Toronto Blue Jays, 2025-06-11)
+    // reached the customer-facing site with NO line number at all -- just
+    // the matchup and odds, giving a paying customer no way to judge
+    // whether that's a bet they'd actually want. Root cause: this is the
+    // single shared helper behind Missing Data's Line check, the Data
+    // Review Queue, and All Picks' own Missing column, but it only ever
+    // matched "spread" or "total" in the bet type name -- the real bet
+    // type here is literally named "Over/Under", which contains neither
+    // substring, so it silently never got flagged. isOverUnderStyleBetType
+    // (used elsewhere in this same file) already correctly recognizes
+    // "Over/Under" by name via the exact regex added below -- this was the
+    // one place that check never made it to.
+    if (/over\/under/i.test(n)) return true;
     return !!usesPropFields || n.includes('spread') || n.includes('total');
   }
   // Direct feedback: a Parlay spans multiple games (no single home/away
@@ -23707,7 +23721,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 463; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 464; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
