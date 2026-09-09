@@ -758,6 +758,13 @@
         const oddsVal = (p.opening_odds !== null && p.opening_odds !== undefined) ? p.opening_odds
           : ((p.closing_odds !== null && p.closing_odds !== undefined) ? p.closing_odds : null);
         const oddsHtml = oddsVal !== null ? `<span class="odds">${oddsVal > 0 ? '+' : ''}${oddsVal}</span>` : '';
+        // Same "crystal clear, no silent gaps" pass as the Line warning
+        // above, direct request 2026-09-09. Only on the top-level card,
+        // never on a leg -- a leg's own opening/closing odds are ALWAYS
+        // null by design (only the parent parlay carries the real combined
+        // price, same reasoning as admin.html's missingFieldsSummary), so
+        // a leg missing odds is normal, not a gap to warn about.
+        const missingOddsHtml = (oddsVal === null) ? `<span class="line-missing-warning">&#9888; Odds unavailable</span>` : '';
         // CONFIRMED REAL BUG, direct report -- critical for trust: this
         // used to show the Hot Pick badge ONLY while a pick was still
         // pending, then silently REPLACE it with the win/loss stamp the
@@ -856,7 +863,7 @@
             ${cornerBadge}
           </div>
           <div>
-            <div class="selection">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? `<span class="line">${p.line > 0 ? '+' : ''}${p.line}</span>` : ''}${oddsHtml}${missingLineHtml}</div>
+            <div class="selection">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? `<span class="line">${p.line > 0 ? '+' : ''}${p.line}</span>` : ''}${oddsHtml}${missingLineHtml}${missingOddsHtml}</div>
             ${propBit}
           </div>
           ${legsHtml}
