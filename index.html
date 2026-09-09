@@ -16428,23 +16428,62 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // of this math -- confluence still needs EVERY capper's picks on the
   // same game to compute correctly, so this fetches the whole filtered
   // pool and only DISPLAYS the one capper's own rows.
+  // REBUILT 2026-09-09, direct report: the eye skips over a pick's actual
+  // call when the bet-type tag/word sits BEFORE the pick instead of after
+  // it -- "a capper who tells me a pick doesn't say Moneyline Toronto Blue
+  // Jays, they say Toronto Blue Jays Moneyline," and that mismatch between
+  // how a person actually reads a pick and how the tool displayed it is
+  // exactly why the St. Louis Cardinals/Toronto Blue Jays pick's missing
+  // line went unnoticed by eye even before the tooling gap was found. This
+  // is now the single formatter behind the "Our call:" line on both the
+  // Scorecard Summary (below) and the customer site (published-picks.html,
+  // kept in sync by name/behavior -- see that file's own copy) -- three
+  // hard rules, direct from that same conversation:
+  // 1. Team/player/matchup ALWAYS comes first, the bet type describes it
+  //    after, matching how a person actually says a pick out loud.
+  // 2. Any bet with a real line spells out the human phrase ("Over 8.5")
+  //    AND the raw signed number as stored ("(-8.5)") side by side -- so a
+  //    reviewer sees both "what this means" and "what's literally on file"
+  //    at once, with no way for one to silently drift from the other.
+  // 3. Wherever a bare number would be genuinely ambiguous (Tennis games
+  //    vs. sets, above all), the unit is spelled out in the phrase itself,
+  //    never left implicit.
   function pickDisplayLabel(p) {
     const betTypeName = (p.bet_types && p.bet_types.name) || '';
     const btNorm = betTypeName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sportName = ((p.sports && p.sports.name) || '').toLowerCase();
+    const isTennis = sportName === 'tennis';
     const line = (p.line === null || p.line === undefined || p.line === '') ? null : Number(p.line);
+    const rawTag = line !== null ? ` (${line >= 0 ? '+' : ''}${line})` : '';
+
     if (p.prop_player) {
       const sel = (p.selection || '').trim();
       const selNorm = sel.toLowerCase();
       const isOverUnder = selNorm === 'over' || selNorm === 'under';
-      const tail = (isOverUnder && line !== null) ? `${sel} ${Math.abs(line)}` : sel;
+      const tail = (isOverUnder && line !== null) ? `${sel} ${Math.abs(line)}${rawTag}` : sel;
       return `${p.prop_player} — ${p.prop_stat || ''}${tail ? ' ' + tail : ''}`.replace(/\s+/g, ' ').trim();
     }
-    if (line === null || btNorm === 'moneyline') return p.selection || '';
-    if (btNorm.startsWith('spread')) return `${p.selection} ${line >= 0 ? '+' : ''}${line}`;
+    if (line === null) {
+      // Moneyline, and every no-line game/outright bet (NRFI/YRFI/Both
+      // Teams to Score, Draw No Bet, Golf Round/Tournament Matchup,
+      // Tournament/Round Winner) -- the bet type word is the ENTIRE
+      // signal for what was actually called here, so unlike a lined bet
+      // (where the number already says everything), this always needs it
+      // spelled out, team/matchup first.
+      return betTypeName ? `${p.selection} ${betTypeName}` : (p.selection || '');
+    }
+    if (btNorm.startsWith('spread')) {
+      const unit = isTennis ? ' games' : '';
+      return `${p.selection} ${line >= 0 ? '+' : ''}${line}${unit} Spread${rawTag}`;
+    }
     // Total-family (Total, Team Total, First5/First7, Total (Sets), Over/
     // Under variants, etc.) -- same negative=Over/positive=Under convention
-    // used everywhere else in this project.
-    return `${p.selection} ${line < 0 ? 'Over' : 'Under'} ${Math.abs(line)}`;
+    // used everywhere else in this project. Tennis specifically splits
+    // games (the default Total bet type) from sets (the separate "Total
+    // (Sets)" bet type) -- see grade_picks_espn_backfill's own isTotalSets
+    // comment for why those are two distinct bet types, never one flag.
+    const unit = isTennis ? (btNorm.includes('sets') ? ' sets' : ' games') : '';
+    return `${p.selection} ${line < 0 ? 'Over' : 'Under'} ${Math.abs(line)}${unit}${rawTag}`;
   }
 
   async function computeCapperScorecardRows(sportFilter, from, to) {
@@ -16526,12 +16565,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       ? (a.pick.created_at || '').localeCompare(b.pick.created_at || '')
       : (a.pick.event_date < b.pick.event_date ? -1 : 1));
     const bodyRows = sorted.map(r => {
-      const betTypeName = (r.pick.bet_types && r.pick.bet_types.name) || 'Unknown';
       const tier = Number(r.pick.pick_tier) || 0;
       return `<tr>
         <td>${escapeHtml(r.pick.event_date || '')}</td>
-        <td>${escapeHtml(pickDisplayLabel(r.pick))}</td>
-        <td>${escapeHtml(betTypeName)}</td>
+        <td class="our-call">${escapeHtml(pickDisplayLabel(r.pick))}</td>
         <td>${tier || '—'}</td>
         <td>${escapeHtml(r.pick.raw_unit_size || '—')}</td>
         <td><span class="stamp ${r.pick.result}">${escapeHtml(r.pick.result || '')}</span></td>
@@ -16555,14 +16592,23 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   .picks-table tfoot td { font-weight: bold; border-top: 1.5px solid #22281f; border-bottom: none; }
   .stamp { display: inline-block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 20px; color: #fff; }
   .stamp.win { background: #2d6a4f; } .stamp.loss { background: #8a2f3a; } .stamp.push { background: #6b6456; }
+  /* CONFIRMED REQUEST 2026-09-09: "the information is bleeding into each
+     other and easy for the human eye to skip over." The old separate
+     "Pick"/"Bet type" columns split a single call across two places --
+     pickDisplayLabel now folds both into one phrase (team/matchup first,
+     bet type described after, exactly how a person actually says a pick
+     out loud), so this column is the full, unambiguous call on its own --
+     bold and slightly larger so it reads as the one thing on this row
+     that actually needs a careful look, not just another data field. */
+  .our-call { font-weight: bold; font-size: 13.5px; }
 </style>
 </head><body>
   <h1>Capper Scorecard Summary <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   <div style="font-size:11px;color:#55584d;margin-bottom:14px;">${escapeHtml(filterSummary)}</div>
   <table class="picks-table">
-    <thead><tr><th>Date</th><th>Pick</th><th>Bet type</th><th>Tier</th><th>Unit size</th><th>Result</th><th>His score</th><th>Group score</th></tr></thead>
-    <tbody>${bodyRows || '<tr><td colspan="8">No graded picks match these filters.</td></tr>'}</tbody>
-    <tfoot><tr><td colspan="5">Totals</td><td>${recordText}</td><td></td><td></td></tr></tfoot>
+    <thead><tr><th>Date</th><th>Our call</th><th>Tier</th><th>Unit size</th><th>Result</th><th>His score</th><th>Group score</th></tr></thead>
+    <tbody>${bodyRows || '<tr><td colspan="7">No graded picks match these filters.</td></tr>'}</tbody>
+    <tfoot><tr><td colspan="4">Totals</td><td>${recordText}</td><td></td><td></td></tr></tfoot>
   </table>
   ${csvExportPopoutScript('capper-scorecard-summary')}
 </body></html>`);
@@ -23721,7 +23767,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 465; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 466; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this

@@ -232,6 +232,22 @@
   .day-summary .amt.loss { color: var(--loss); }
   .day-summary .coverage-note { font-size: 11px; }
 
+  /* CONFIRMED REQUEST 2026-09-09: "the information is bleeding into each
+     other and easy for the human eye to skip over... what I need is a
+     clear breakout on what we are calling." This eyebrow sits directly
+     above the pick's full call (team/matchup first, bet type or line
+     spelled out naturally after -- see ourCallText's own comment) so
+     there's no separate place to look, and no way to miss what's
+     actually being bet on. */
+  .our-call-label {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--gold);
+    margin-bottom: 2px;
+  }
   .selection {
     font-family: 'Anton', sans-serif;
     font-size: 21px;
@@ -735,7 +751,7 @@
         const links = await rest(`parlay_legs?select=parlay_pick_id,leg_pick_id&parlay_pick_id=in.(${parlayPicks.map(p => p.id).join(',')})`);
         const legIds = [...new Set(links.map(l => l.leg_pick_id))];
         if (legIds.length) {
-          const legPicks = await rest(`picks?select=id,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result,bet_types(name)&id=in.(${legIds.join(',')})`);
+          const legPicks = await rest(`picks?select=id,selection,line,prop_player,prop_stat,prop_team,opening_odds,closing_odds,result,bet_types(name),sports(name)&id=in.(${legIds.join(',')})`);
           const legById = {};
           legPicks.forEach(lp => { legById[lp.id] = lp; });
           links.forEach(l => {
@@ -748,13 +764,6 @@
       }
 
       const cardsHtml = picks.map((p, i) => {
-        // Team shown alongside the player name specifically so a casual
-        // fan who doesn't follow every roster isn't left guessing who a
-        // prop is even about -- reduces a real barrier to actually placing
-        // the bet, which is the whole point of publishing picks at all.
-        const propBit = (p.prop_player || p.prop_stat)
-          ? `<div class="prop-detail">${escapeHtml(p.prop_player || '')}${p.prop_team ? ` (${escapeHtml(p.prop_team)})` : ''} ${escapeHtml(p.prop_stat || '')}</div>`
-          : '';
         const oddsVal = (p.opening_odds !== null && p.opening_odds !== undefined) ? p.opening_odds
           : ((p.closing_odds !== null && p.closing_odds !== undefined) ? p.closing_odds : null);
         const oddsHtml = oddsVal !== null ? `<span class="odds">${oddsVal > 0 ? '+' : ''}${oddsVal}</span>` : '';
@@ -838,15 +847,11 @@
               const legOddsVal = (leg.opening_odds !== null && leg.opening_odds !== undefined) ? leg.opening_odds
                 : ((leg.closing_odds !== null && leg.closing_odds !== undefined) ? leg.closing_odds : null);
               const legOddsHtml = legOddsVal !== null ? `<span class="leg-odds">${legOddsVal > 0 ? '+' : ''}${legOddsVal}</span>` : '';
-              const legLineHtml = (leg.line !== null && leg.line !== undefined) ? `<span class="leg-line">${leg.line > 0 ? '+' : ''}${leg.line}</span>` : '';
               const legMissingLineHtml = (betTypeNeedsLine(leg.bet_types ? leg.bet_types.name : '') && (leg.line === null || leg.line === undefined))
                 ? `<span class="line-missing-warning">&#9888; Line unavailable</span>` : '';
-              const legPropHtml = (leg.prop_player || leg.prop_stat)
-                ? `<span class="leg-prop">${escapeHtml(leg.prop_player || '')}${leg.prop_team ? ` (${escapeHtml(leg.prop_team)})` : ''} ${escapeHtml(leg.prop_stat || '')}</span>`
-                : '';
               return `
               <div class="parlay-leg">
-                <div class="parlay-leg-text">${escapeHtml(leg.selection)}${legLineHtml}${legOddsHtml}${legPropHtml}${legMissingLineHtml}</div>
+                <div class="parlay-leg-text">${escapeHtml(ourCallText(leg))}${legOddsHtml}${legMissingLineHtml}</div>
                 ${resultStampHtml(leg.result, true)}
               </div>`;
             }).join('')}
@@ -863,8 +868,8 @@
             ${cornerBadge}
           </div>
           <div>
-            <div class="selection">${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? `<span class="line">${p.line > 0 ? '+' : ''}${p.line}</span>` : ''}${oddsHtml}${missingLineHtml}${missingOddsHtml}</div>
-            ${propBit}
+            <div class="our-call-label">Our call</div>
+            <div class="selection">${escapeHtml(ourCallText(p))}${oddsHtml}${missingLineHtml}${missingOddsHtml}</div>
           </div>
           ${legsHtml}
           ${winAmountHtml}
@@ -940,6 +945,42 @@
   function betTypeNeedsLine(betTypeName) {
     const n = (betTypeName || '').toLowerCase();
     return /over\/under/i.test(n) || n.includes('spread') || n.includes('total');
+  }
+
+  // Same formatter as index.html's pickDisplayLabel (kept in sync by name,
+  // not by shared code, since this file has no import mechanism) -- direct
+  // report 2026-09-09: a bet-type tag sitting apart from the pick made it
+  // easy to skim past what was actually being called, which is part of how
+  // a real customer-facing pick reached this page with no line at all
+  // (the other part was the admin-side detection bug, fixed separately).
+  // "Our call:" always leads with the team/matchup/player, describes the
+  // bet type or spells out the line naturally AFTER it -- how a person
+  // actually says a pick out loud -- and shows the raw signed line in
+  // parens for anyone cross-checking against the number on file. Tennis
+  // spells out games vs. sets explicitly since a bare number there is
+  // genuinely ambiguous.
+  function ourCallText(p) {
+    const betTypeName = (p.bet_types && p.bet_types.name) || '';
+    const btNorm = betTypeName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const isTennis = ((p.sports && p.sports.name) || '').toLowerCase() === 'tennis';
+    const line = (p.line === null || p.line === undefined || p.line === '') ? null : Number(p.line);
+    const rawTag = line !== null ? ` (${line >= 0 ? '+' : ''}${line})` : '';
+    if (p.prop_player) {
+      const sel = (p.selection || '').trim();
+      const selNorm = sel.toLowerCase();
+      const isOverUnder = selNorm === 'over' || selNorm === 'under';
+      const tail = (isOverUnder && line !== null) ? `${sel} ${Math.abs(line)}${rawTag}` : sel;
+      return `${p.prop_player}${p.prop_team ? ` (${p.prop_team})` : ''} — ${p.prop_stat || ''}${tail ? ' ' + tail : ''}`.replace(/\s+/g, ' ').trim();
+    }
+    if (line === null) {
+      return betTypeName ? `${p.selection} ${betTypeName}` : (p.selection || '');
+    }
+    if (btNorm.startsWith('spread')) {
+      const unit = isTennis ? ' games' : '';
+      return `${p.selection} ${line >= 0 ? '+' : ''}${line}${unit} Spread${rawTag}`;
+    }
+    const unit = isTennis ? (btNorm.includes('sets') ? ' sets' : ' games') : '';
+    return `${p.selection} ${line < 0 ? 'Over' : 'Under'} ${Math.abs(line)}${unit}${rawTag}`;
   }
 
   // Standard American-odds profit on a flat stake (see stakeForBetType
