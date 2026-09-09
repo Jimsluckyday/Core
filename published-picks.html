@@ -234,19 +234,28 @@
 
   /* CONFIRMED REQUEST 2026-09-09: "the information is bleeding into each
      other and easy for the human eye to skip over... what I need is a
-     clear breakout on what we are calling." This eyebrow sits directly
-     above the pick's full call (team/matchup first, bet type or line
-     spelled out naturally after -- see ourCallText's own comment) so
-     there's no separate place to look, and no way to miss what's
-     actually being bet on. */
+     clear breakout on what we are calling." A plain small bold eyebrow
+     (v466's first pass) still read as small next to the 21px team text --
+     direct follow-up: "it's there but was small and not bold... it should
+     be loud... the first thing someone notices on the site as that's what
+     they are coming to see." This site already has a visual language for
+     "this matters more than the muted outlined tags": .hot-badge and
+     .start-time-bar both use a solid gold fill with dark text rather than
+     just bold colored text -- this is that same treatment, sized bigger
+     than Hot Pick since this is the single most important thing on the
+     card, not just a notable flag on it. */
   .our-call-label {
+    display: inline-block;
     font-family: 'Inter', sans-serif;
-    font-weight: 700;
+    font-weight: 800;
     text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    color: var(--gold);
-    margin-bottom: 2px;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    background: var(--gold);
+    color: #1a1206;
+    padding: 5px 11px;
+    border-radius: 2px;
+    margin-bottom: 7px;
   }
   .selection {
     font-family: 'Anton', sans-serif;
