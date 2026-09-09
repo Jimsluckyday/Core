@@ -2350,11 +2350,33 @@ Deno.serve(async (req) => {
           // see the isMma && isTotalRounds branch below, which reads
           // entry.endRound (comp.status.period) rather than any score.
           const isTotalRounds = betTypeNorm === 'totalrounds';
+          // ADDED 2026-09-09, direct request: "almost like an exact score
+          // bet in football/hockey/baseball... could this pick this up
+          // and check the box score to validate it automatically?" A real,
+          // recurring pattern across cappers (e.g. "Andreeva 2-0" in
+          // Tennis) that doesn't fit Moneyline (any win counts, not a
+          // specific score) or Total (a numeric line). Deliberately one
+          // shared "Exact Score" bet type across every sport, same as
+          // Spread/Total/Moneyline already are -- the sport-specific
+          // interpretation lives here in the grading code, not as a
+          // separate bet type per sport. Selection is free text in the
+          // format "Team ownScore-oppScore" (e.g. "Chiefs 24-17"), parsed
+          // and graded below using the exact same final score_home/
+          // score_away this main loop already fetches for every other bet
+          // type -- only meaningful for point-scoring team sports here.
+          // Tennis's real question is sets won, not points, and is a
+          // completely separate loop/data source in this file (see
+          // tennisPicks above) that this branch never touches -- an
+          // "Exact Score" pick on a Tennis match correctly falls through
+          // to that loop's own "not supported yet" bucket and stays
+          // manually graded, same as before this was added.
+          const isExactScore = betTypeNorm === 'exactscore';
           const supported = isMoneyline || isSpread || isTotalType || isNRFI || isYRFI
             || isTeamTotal || isTeamTotalFirst5 || isMoneylineFirst3 || isMoneylineFirst5 || isTotalFirst3 || isTotalFirst5 || isTotalFirst7
             || isBothTeamsToScoreFirst5 || isBothTeamsToScoreFirst7
             || isMoneyline1stInning || isSpread1stQuarter || isSpread1stHalf || isMoneyline1stHalf
             || isMoneyline1stQuarter
+            || isExactScore
             || (isMma && isTotalRounds)
             || (isPlayerProp && propsSupportedForThisSport);
 
@@ -2489,6 +2511,53 @@ Deno.serve(async (req) => {
             sportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: entry.matchup, end_round: entry.endRound });
             await registerKnownPlayer(ourSport.id, entry.displayName);
             await registerKnownPlayer(ourSport.id, entry.opponentName);
+            continue;
+          }
+
+          // Exact Score -- own dedicated branch, same reasoning as MMA/
+          // Player Prop just above: the selection text here isn't a bare
+          // team name (it also carries the predicted score), so it can't
+          // go through the shared findMatchingGames(pick.selection) call
+          // every other bet type below uses directly. Parses "Team
+          // ownScore-oppScore" first, matches just the team portion, then
+          // reuses the exact same score_home/score_away this whole loop
+          // already fetches for Moneyline/Spread/Total.
+          if (isExactScore) {
+            const scoreMatch = pick.selection.match(/^(.+?)\s+(\d+)\s*-\s*(\d+)\s*$/);
+            if (!scoreMatch) {
+              const note = `"${pick.selection}" isn't in the expected "Team ownScore-oppScore" format (e.g. "Chiefs 24-17") -- needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
+              sportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
+              continue;
+            }
+            const [, exactTeamStr, ownStr, oppStr] = scoreMatch;
+            const predictedOwn = Number(ownStr);
+            const predictedOpp = Number(oppStr);
+            const exactMatches = findMatchingGames(exactTeamStr.trim());
+            if (exactMatches.length !== 1) {
+              const note = exactMatches.length === 0
+                ? `No matching ${ourSport.name} game found for "${exactTeamStr.trim()}" on ${targetDate}.`
+                : `${exactMatches.length} possible games matched "${exactTeamStr.trim()}" -- needs manual review.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const exactGame = exactMatches[0].game;
+            const exactIsHome = exactMatches[0].isHome;
+            if (!exactGame.score || exactGame.score.event_status !== 'STATUS_FINAL') {
+              if (isVoidGameStatus(exactGame.statusName)) {
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+                sportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: exactGame.matchup });
+                continue;
+              }
+              sportResult.not_final_yet.push({ id: pick.id, selection: pick.selection, matchup: exactGame.matchup, reason: `Matched to ${exactGame.matchup}, but ESPN has not marked this game final yet -- not a name-matching issue, check back later.` });
+              continue;
+            }
+            const actualOwn = exactIsHome ? exactGame.score.score_home : exactGame.score.score_away;
+            const actualOpp = exactIsHome ? exactGame.score.score_away : exactGame.score.score_home;
+            const exactGrade = (actualOwn === predictedOwn && actualOpp === predictedOpp) ? 'win' : 'loss';
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: exactGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+            sportResult.graded.push({ id: pick.id, selection: pick.selection, result: exactGrade, matchup: exactGame.matchup, actual_score: `${actualOwn}-${actualOpp}` });
             continue;
           }
 
