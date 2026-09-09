@@ -522,19 +522,45 @@ Deno.serve(async (req) => {
       return null;
     }
 
-    function gradeSpread(score: any, isHome: boolean, line: number): Grade {
+    // CONFIRMED CRITICAL BUG, direct report 2026-09-09: a real published
+    // Over/Under pick (St. Louis Cardinals/Toronto Blue Jays, 2025-06-11)
+    // reached the customer site with NO line at all, yet was already
+    // marked "Loss" -- graded despite having nothing to grade against.
+    // Root cause: every caller passed Number(pick.line), and Number(null)
+    // evaluates to 0 in JS, not NaN -- a genuinely missing line silently
+    // became a real threshold of zero. For a Total, isOver = (0 < 0) =
+    // false (defaults to "Under") and margin = 0 - combinedScore, negative
+    // for essentially every real game ever played -- so a Total missing
+    // its line was GUARANTEED to silently grade a loss, every time, with
+    // no error and no flag. A missing Spread line had the same shape but a
+    // less obviously-wrong result (silently became a disguised Moneyline
+    // grade). Every one of the functions below now returns null (the same
+    // "can't grade this" signal gradeMoneyline/gradeNoRunFirstInning
+    // already use for missing SCORE data) the instant the line itself is
+    // missing, BEFORE ever coercing it with Number() -- already-existing
+    // `if (!grade)` handling at each call site marks the pick needing
+    // manual review, so a genuinely missing line now correctly becomes
+    // "needs a human," never a confidently-wrong result. Same pattern the
+    // Tennis and MMA branches of this same file already used correctly
+    // (see their own `pick.line === null` guards) -- this brings the
+    // older MLB/NBA/NHL/WNBA game-grading path up to that same standard.
+    function gradeSpread(score: any, isHome: boolean, line: number | null): Grade | null {
+      if (line === null || line === undefined || Number.isNaN(Number(line))) return null;
+      const numLine = Number(line);
       const ownScore = isHome ? score.score_home : score.score_away;
       const oppScore = isHome ? score.score_away : score.score_home;
-      const adjusted = (ownScore - oppScore) + line;
-      return gradeMarginWithQuarterLine(adjusted, line);
+      const adjusted = (ownScore - oppScore) + numLine;
+      return gradeMarginWithQuarterLine(adjusted, numLine);
     }
 
-    function gradeTotal(score: any, line: number): Grade {
+    function gradeTotal(score: any, line: number | null): Grade | null {
+      if (line === null || line === undefined || Number.isNaN(Number(line))) return null;
+      const numLine = Number(line);
       const combined = score.score_home + score.score_away;
-      const threshold = Math.abs(line);
-      const isOver = line < 0;
+      const threshold = Math.abs(numLine);
+      const isOver = numLine < 0;
       const margin = isOver ? (combined - threshold) : (threshold - combined);
-      return gradeMarginWithQuarterLine(margin, line);
+      return gradeMarginWithQuarterLine(margin, numLine);
     }
 
     // Game-level -- doesn't matter which team, just whether EITHER team
@@ -562,11 +588,13 @@ Deno.serve(async (req) => {
     // convention is already what's being typed in) was previously routed
     // straight to unsupported_bet_type even though the exact same
     // final-score data already being fetched is all it needs.
-    function gradeTeamTotal(ownScore: number, line: number): Grade {
-      const threshold = Math.abs(line);
-      const isOver = line < 0;
+    function gradeTeamTotal(ownScore: number, line: number | null): Grade | null {
+      if (line === null || line === undefined || Number.isNaN(Number(line))) return null;
+      const numLine = Number(line);
+      const threshold = Math.abs(numLine);
+      const isOver = numLine < 0;
       const margin = isOver ? (ownScore - threshold) : (threshold - ownScore);
-      return gradeMarginWithQuarterLine(margin, line);
+      return gradeMarginWithQuarterLine(margin, numLine);
     }
 
     // Sums the first N linescore entries (innings) for one team -- null
@@ -618,12 +646,14 @@ Deno.serve(async (req) => {
     // Over/Under First 3/First 5/First 7 -- same math as full-game
     // gradeTotal(), just against the combined score through N innings
     // instead of the final combined score.
-    function gradeTotalFirstN(score: any, n: 3 | 5 | 7, line: number): 'win' | 'loss' | 'push' | null {
+    function gradeTotalFirstN(score: any, n: 3 | 5 | 7, line: number | null): 'win' | 'loss' | 'push' | null {
+      if (line === null || line === undefined || Number.isNaN(Number(line))) return null;
+      const numLine = Number(line);
       const { homeVal, awayVal } = firstNScores(score, n);
       if (homeVal === null || awayVal === null) return null;
       const combined = homeVal + awayVal;
-      const threshold = Math.abs(line);
-      const isOver = line < 0;
+      const threshold = Math.abs(numLine);
+      const isOver = numLine < 0;
       if (combined === threshold) return 'push';
       if (isOver) return combined > threshold ? 'win' : 'loss';
       return combined < threshold ? 'win' : 'loss';
@@ -664,11 +694,13 @@ Deno.serve(async (req) => {
       if (ownScore < oppScore) return 'loss';
       return 'push';
     }
-    function gradeSpreadPeriod(homeVal: number | null, awayVal: number | null, isHome: boolean, line: number): 'win' | 'loss' | 'push' | null {
+    function gradeSpreadPeriod(homeVal: number | null, awayVal: number | null, isHome: boolean, line: number | null): 'win' | 'loss' | 'push' | null {
+      if (line === null || line === undefined || Number.isNaN(Number(line))) return null;
+      const numLine = Number(line);
       if (homeVal === null || awayVal === null) return null;
       const ownScore = isHome ? homeVal : awayVal;
       const oppScore = isHome ? awayVal : homeVal;
-      const adjusted = (ownScore - oppScore) + line;
+      const adjusted = (ownScore - oppScore) + numLine;
       if (adjusted > 0) return 'win';
       if (adjusted < 0) return 'loss';
       return 'push';
@@ -1088,6 +1120,15 @@ Deno.serve(async (req) => {
           // line's own magnitude, not just this one case. Same bug existed
           // in the generic STAT_SPECS path below (points/rebounds/assists/
           // etc, MLB+NBA+WNBA) -- fixed there too, same commit.
+          // CONFIRMED SECOND CRITICAL BUG, direct report 2026-09-09: this
+          // same Number(pick.line) also silently became 0 (not NaN) for a
+          // pick with NO line recorded at all -- threshold=0, and any real
+          // positive stat value then falsely graded as an Over win. Guard
+          // added below, same "return null, needs manual grading" pattern
+          // Tennis/MMA already use elsewhere in this file.
+          if (pick.line === null || pick.line === undefined) {
+            return { grade: null, note: 'This pick has no line recorded -- cannot grade an Over/Under prop without one.', matchedTeamName: result.teamName };
+          }
           const line = Number(pick.line);
           const threshold = Math.abs(line);
           const isOver = normalize(pick.selection) === 'over';
@@ -1170,6 +1211,12 @@ Deno.serve(async (req) => {
             && Array.isArray(p.participants) && p.participants[0] && p.participants[0].athlete
             && String(p.participants[0].athlete.id) === match.athleteId)
           .reduce((sum: number, p: any) => sum + (Number(p.scoreValue) || 0), 0);
+        // CONFIRMED CRITICAL BUG, direct report 2026-09-09: same missing-
+        // line-becomes-0 footgun as the Total Bases branch above -- guard
+        // added for the identical reason.
+        if (pick.line === null || pick.line === undefined) {
+          return { grade: null, note: 'This pick has no line recorded -- cannot grade an Over/Under prop without one.', matchedName: match.displayName, matchedTeamName: match.teamName };
+        }
         const line = Number(pick.line);
         const threshold = Math.abs(line);
         const isOver = normalize(pick.selection) === 'over';
@@ -1372,6 +1419,14 @@ Deno.serve(async (req) => {
       // landed between 0 and the line's own magnitude. Affects every
       // prop stat routed through this generic path -- points/rebounds/
       // assists/etc across MLB, NBA, and WNBA, not just Total Bases.
+      // CONFIRMED SECOND CRITICAL BUG, direct report 2026-09-09: same
+      // missing-line-becomes-0 footgun as the Total Bases/1st Quarter
+      // Points branches above -- guard added for the identical reason.
+      if (pick.line === null || pick.line === undefined) {
+        const matchedName = allMatches[0] ? allMatches[0].displayName : pick.prop_player;
+        const matchedTeamName = allMatches[0] ? allMatches[0].teamName : null;
+        return { grade: null, note: 'This pick has no line recorded -- cannot grade an Over/Under prop without one.', matchedName, matchedTeamName };
+      }
       const line = Number(pick.line);
       const threshold = Math.abs(line);
       const isOver = normalize(pick.selection) === 'over';
@@ -2539,23 +2594,23 @@ Deno.serve(async (req) => {
 
           let grade: Grade | 'win' | 'loss' | 'push' | null = null;
           if (isMoneyline) grade = gradeMoneyline(game.score, matchedIsHome!, DRAW_LOSES_SPORTS.has(sportNormName));
-          else if (isSpread) grade = gradeSpread(game.score, matchedIsHome!, Number(pick.line));
-          else if (isTotalType) grade = gradeTotal(game.score, Number(pick.line));
+          else if (isSpread) grade = gradeSpread(game.score, matchedIsHome!, pick.line);
+          else if (isTotalType) grade = gradeTotal(game.score, pick.line);
           else if (isNRFI) grade = gradeNoRunFirstInning(game.score);
           else if (isYRFI) grade = gradeYesRunFirstInning(game.score);
           else if (isTeamTotal) {
             const ownScore = matchedIsHome ? game.score.score_home : game.score.score_away;
-            grade = gradeTeamTotal(ownScore, Number(pick.line));
+            grade = gradeTeamTotal(ownScore, pick.line);
           }
           else if (isTeamTotalFirst5) {
             const ownVal = matchedIsHome ? game.score.first5_home : game.score.first5_away;
-            grade = ownVal !== null ? gradeTeamTotal(ownVal, Number(pick.line)) : null;
+            grade = ownVal !== null ? gradeTeamTotal(ownVal, pick.line) : null;
           }
           else if (isMoneylineFirst3) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 3);
           else if (isMoneylineFirst5) grade = gradeMoneylineFirstN(game.score, matchedIsHome!, 5);
-          else if (isTotalFirst3) grade = gradeTotalFirstN(game.score, 3, Number(pick.line));
-          else if (isTotalFirst5) grade = gradeTotalFirstN(game.score, 5, Number(pick.line));
-          else if (isTotalFirst7) grade = gradeTotalFirstN(game.score, 7, Number(pick.line));
+          else if (isTotalFirst3) grade = gradeTotalFirstN(game.score, 3, pick.line);
+          else if (isTotalFirst5) grade = gradeTotalFirstN(game.score, 5, pick.line);
+          else if (isTotalFirst7) grade = gradeTotalFirstN(game.score, 7, pick.line);
           else if (isBothTeamsToScoreFirst5) grade = gradeBothTeamsToScoreFirstN(game.score, 5);
           else if (isBothTeamsToScoreFirst7) grade = gradeBothTeamsToScoreFirstN(game.score, 7);
           else if (isMoneyline1stInning || isSpread1stQuarter || isMoneyline1stQuarter) {
@@ -2564,14 +2619,24 @@ Deno.serve(async (req) => {
             // whatever this sport's linescores represent (1 inning for MLB,
             // 1 quarter for NBA/WNBA).
             grade = isSpread1stQuarter
-              ? gradeSpreadPeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!, Number(pick.line))
+              ? gradeSpreadPeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!, pick.line)
               : gradeMoneylinePeriod(game.score.first_inning_home, game.score.first_inning_away, matchedIsHome!);
           }
-          else if (isSpread1stHalf) grade = gradeSpreadPeriod(game.score.first_half_home, game.score.first_half_away, matchedIsHome!, Number(pick.line));
+          else if (isSpread1stHalf) grade = gradeSpreadPeriod(game.score.first_half_home, game.score.first_half_away, matchedIsHome!, pick.line);
           else if (isMoneyline1stHalf) grade = gradeMoneylinePeriod(game.score.first_half_home, game.score.first_half_away, matchedIsHome!);
 
           if (!grade) {
-            const note = (isNRFI || isYRFI)
+            // Distinguish "this pick has no line to grade against" from the
+            // rarer genuinely-incomplete-score case, so the Ambiguous queue
+            // tells a reviewer the real reason instead of a generic one --
+            // see gradeSpread/gradeTotal/etc.'s own comment for why this
+            // case exists at all.
+            const isLineBetType = isSpread || isTotalType || isTeamTotal || isTeamTotalFirst5
+              || isTotalFirst3 || isTotalFirst5 || isTotalFirst7 || isSpread1stQuarter || isSpread1stHalf;
+            const lineMissing = isLineBetType && (pick.line === null || pick.line === undefined);
+            const note = lineMissing
+              ? 'This pick has no line recorded -- cannot grade a Spread/Total-style bet without one. Add the real line, then re-run grading.'
+              : (isNRFI || isYRFI)
               ? '1st-inning score data looked incomplete or unclear -- needs manual review.'
               : (isMoneylineFirst5 || isTotalFirst5 || isTotalFirst7 || isTeamTotalFirst5 || isBothTeamsToScoreFirst5 || isBothTeamsToScoreFirst7)
               ? 'First 5/7 innings score data looked incomplete or unclear -- needs manual review.'
@@ -2584,7 +2649,7 @@ Deno.serve(async (req) => {
               method: 'PATCH',
               body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note })
             });
-            sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+            sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: lineMissing ? 'Missing line' : note });
             continue;
           }
 

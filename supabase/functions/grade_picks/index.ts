@@ -230,19 +230,44 @@ Deno.serve(async (req) => {
       return null;
     }
 
-    function gradeSpread(score: any, isHome: boolean, line: number): Grade {
+    // CONFIRMED CRITICAL BUG, direct report 2026-09-09: a real published
+    // Over/Under pick (St. Louis Cardinals/Toronto Blue Jays, 2025-06-11)
+    // reached the customer site with NO line at all, yet was already
+    // marked "Loss" -- meaning it was graded despite having nothing to
+    // grade against. Root cause: every caller passed Number(pick.line),
+    // and `Number(null)` evaluates to 0 in JS, not NaN -- so a genuinely
+    // missing line silently became a real threshold of zero. For a Total,
+    // that means `isOver = (0 < 0) = false` (defaults to "Under") and
+    // margin = 0 - combinedScore, which is negative for literally every
+    // real game ever played (a combined score of 0 is essentially
+    // impossible) -- so ANY Total pick missing its line was GUARANTEED to
+    // silently grade as a loss, every single time, with no error and no
+    // flag. A missing Spread line had the same shape but a less obviously-
+    // wrong result (it silently became a disguised Moneyline grade,
+    // "winning" or "losing" based on who won straight up with no real
+    // spread applied at all). Both functions now return null (the same
+    // "can't grade this" signal gradeMoneyline already uses) the instant
+    // the line itself is missing, BEFORE ever coercing it with Number() --
+    // the existing `if (!grade)` handling below already marks a pick
+    // needing manual review, so a genuinely missing line now correctly
+    // becomes "needs a human," never a confidently-wrong result.
+    function gradeSpread(score: any, isHome: boolean, line: number | null): Grade | null {
+      if (line === null || line === undefined || Number.isNaN(Number(line))) return null;
+      const numLine = Number(line);
       const ownScore = isHome ? score.score_home : score.score_away;
       const oppScore = isHome ? score.score_away : score.score_home;
-      const adjusted = (ownScore - oppScore) + line;
-      return gradeMarginWithQuarterLine(adjusted, line);
+      const adjusted = (ownScore - oppScore) + numLine;
+      return gradeMarginWithQuarterLine(adjusted, numLine);
     }
 
-    function gradeTotal(score: any, line: number): Grade {
+    function gradeTotal(score: any, line: number | null): Grade | null {
+      if (line === null || line === undefined || Number.isNaN(Number(line))) return null;
+      const numLine = Number(line);
       const combined = score.score_home + score.score_away;
-      const threshold = Math.abs(line);
-      const isOver = line < 0;
+      const threshold = Math.abs(numLine);
+      const isOver = numLine < 0;
       const margin = isOver ? (combined - threshold) : (threshold - combined);
-      return gradeMarginWithQuarterLine(margin, line);
+      return gradeMarginWithQuarterLine(margin, numLine);
     }
 
     const overall = {
@@ -452,15 +477,22 @@ Deno.serve(async (req) => {
 
           let grade: Grade | null = null;
           if (isMoneyline) grade = gradeMoneyline(game.score, matchedIsHome!);
-          else if (isSpread) grade = gradeSpread(game.score, matchedIsHome!, Number(pick.line));
-          else if (isTotal) grade = gradeTotal(game.score, Number(pick.line));
+          else if (isSpread) grade = gradeSpread(game.score, matchedIsHome!, pick.line);
+          else if (isTotal) grade = gradeTotal(game.score, pick.line);
 
           if (!grade) {
+            // Distinguish "this pick has no line to grade against" from the
+            // rarer genuinely-incomplete-score case, so the Ambiguous queue
+            // tells a reviewer the real reason instead of a generic one.
+            const lineMissing = (isSpread || isTotal) && (pick.line === null || pick.line === undefined);
+            const note = lineMissing
+              ? 'This pick has no line recorded -- cannot grade a Spread/Total without one. Add the real line, then re-run grading.'
+              : 'Final score data looked incomplete or unclear -- needs manual review.';
             await db(`picks?id=eq.${pick.id}`, {
               method: 'PATCH',
-              body: JSON.stringify({ grading_status: 'ambiguous', grading_note: 'Final score data looked incomplete or unclear -- needs manual review.' })
+              body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note })
             });
-            sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: 'Incomplete score data' });
+            sportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: lineMissing ? 'Missing line' : 'Incomplete score data' });
             continue;
           }
 
