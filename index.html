@@ -19272,6 +19272,54 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return (wins + k / 2) / (wins + losses + k); // returns a 0-1 fraction
   }
 
+  // CONFIRMED REQUEST 2026-09-09: "if he called 5 straight picks and 3
+  // parlays and lost all 3 parlays he's technically 5-3... a discounted
+  // pick is still a pick." The weighted wins/losses on a record accumulator
+  // (wins/losses, discounted at parlayLegWeight for a leg) are correct and
+  // stay untouched for the actual SCORING math -- a leg genuinely is
+  // weaker evidence of a capper's own accuracy than a standalone call, and
+  // should count for less toward his overall win % feeding scoring. But
+  // that same discounted number is wrong to show as if it were a plain
+  // record -- "26.5-16.5" reads as broken, not as "half-weighted." This
+  // helper produces the PLAIN, always-integer counts (straight and leg
+  // picks each count as a normal 1, no discount) purely for display,
+  // alongside the existing weighted number scoring still uses unchanged.
+  function bumpRecordAcc(acc, isLeg, result, weight) {
+    if (result === 'win') {
+      acc.wins += weight;
+      if (isLeg) acc.legWins++; else acc.straightWins++;
+    } else if (result === 'loss') {
+      acc.losses += weight;
+      if (isLeg) acc.legLosses++; else acc.straightLosses++;
+    }
+  }
+  function newRecordAcc() {
+    return { wins: 0, losses: 0, straightWins: 0, straightLosses: 0, legWins: 0, legLosses: 0 };
+  }
+  // Plain (unweighted) breakdown for display -- {total, straight, legs,
+  // hasLegs}. total is straight+leg counted evenly, matching what a human
+  // would count by hand; straight/legs are the same split shown
+  // underneath it, and hasLegs says whether that sub-breakdown is worth
+  // showing at all (an all-straight capper doesn't need a redundant
+  // "0-0 Parlays" line).
+  function recordBreakdown(acc) {
+    const sw = acc.straightWins || 0, sl = acc.straightLosses || 0;
+    const lw = acc.legWins || 0, ll = acc.legLosses || 0;
+    return {
+      total: `${sw + lw}-${sl + ll}`,
+      straight: `${sw}-${sl}`,
+      legs: `${lw}-${ll}`,
+      hasLegs: (lw + ll) > 0
+    };
+  }
+  // Renders the "5-0 Straight picks · 0-3 Parlays" callout that goes
+  // directly under a "5-3 record" line -- empty string when there's
+  // nothing to break out (no graded parlay legs in this record).
+  function recordBreakdownHtml(bdSplit) {
+    if (!bdSplit.hasLegs) return '';
+    return `<div style="font-size:10px;color:var(--ink-soft);font-weight:normal;">${bdSplit.straight} Straight picks &middot; ${bdSplit.legs} Parlays</div>`;
+  }
+
   // Like adjustedWinPct, but instead of blending toward a flat neutral 50%,
   // blends a NARROW record (this exact sport + bet type, e.g. "Tennis
   // Spreads") toward a smarter prior: this capper's BROADER bet-type rate
@@ -19690,28 +19738,39 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // stats/context it's explicitly given, no closure over module state.
 
   function buildBaseEntry(p, stats) {
-    const o = stats.overallByCapper[p.capper_id] || { wins: 0, losses: 0 };
-    const bt = stats.byCapperBetType[`${p.capper_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
-    const sbt = stats.byCapperSportBetType[`${p.capper_id}::${p.sport_id}::${p.bet_type_id}`] || { wins: 0, losses: 0 };
+    const o = stats.overallByCapper[p.capper_id] || newRecordAcc();
+    const bt = stats.byCapperBetType[`${p.capper_id}::${p.bet_type_id}`] || newRecordAcc();
+    const sbt = stats.byCapperSportBetType[`${p.capper_id}::${p.sport_id}::${p.bet_type_id}`] || newRecordAcc();
     const streak = stats.streakByCapper[p.capper_id] || { type: null, len: 0 };
     const overallAdj = adjustedWinPct(o.wins, o.losses);
     const broadBetTypeAdj = adjustedWinPct(bt.wins, bt.losses);
     const betTypeAdj = blendedWinPct(sbt.wins, sbt.losses, broadBetTypeAdj);
     const tier = Number(p.pick_tier) || 0;
-    const t = stats.byCapperTier[`${p.capper_id}::${tier}`] || { wins: 0, losses: 0 };
+    const t = stats.byCapperTier[`${p.capper_id}::${tier}`] || newRecordAcc();
     const tierAdjWinPct = adjustedWinPct(t.wins, t.losses);
-    const fmt = (n) => Math.round(n * 10) / 10;
+    // overallAdj/betTypeAdj/tierAdjWinPct above still use the WEIGHTED
+    // wins/losses (a leg counts at parlayLegWeight, unchanged) -- that's
+    // the actual scoring math and stays exactly as it was. The *Record
+    // strings below are the plain, always-integer breakdown for display
+    // only (see recordBreakdown's own comment) -- a real, un-discounted
+    // count of what actually happened, split out by Straight vs Parlay.
+    const overallBd = recordBreakdown(o);
+    const betTypeBd = recordBreakdown(sbt);
+    const tierBd = recordBreakdown(t);
     return {
       pick: p,
       isLeg: !!p.is_parlay_leg,
       isParlayCandidate: !!(p.bet_types && p.bet_types.name === 'Parlay'),
-      overallRecord: `${fmt(o.wins)}-${fmt(o.losses)}`,
+      overallRecord: overallBd.total,
+      overallRecordBreakdown: overallBd,
       overallAdj,
       overallAdjPct: Math.round(overallAdj * 1000) / 10,
-      betTypeRecord: `${fmt(sbt.wins)}-${fmt(sbt.losses)}`,
+      betTypeRecord: betTypeBd.total,
+      betTypeRecordBreakdown: betTypeBd,
       broadBetTypeAdjPct: Math.round(broadBetTypeAdj * 1000) / 10,
       betTypeAdjPct: Math.round(betTypeAdj * 1000) / 10,
-      tierRecord: `${fmt(t.wins)}-${fmt(t.losses)}`,
+      tierRecord: tierBd.total,
+      tierRecordBreakdown: tierBd,
       tierAdjWinPctPct: Math.round(tierAdjWinPct * 1000) / 10,
       tierSampleMet: (t.wins + t.losses) >= scoringConfig.tierCalibrationMinSample,
       streak,
@@ -20146,6 +20205,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <div class="pr-stat">
           <div class="pr-stat-label">Tier</div>
           <div class="pr-stat-value" style="color:${tierColor};">Tier ${p.pick_tier} <span style="font-weight:normal;color:var(--ink-soft);">(${s.tierRecord}, ${s.tierAdjWinPctPct}% adj)</span></div>
+          ${recordBreakdownHtml(s.tierRecordBreakdown)}
           <div class="pr-stat-sub">his own record specifically at this tier -- scales the nominal bonus</div>
           <div class="pr-stat-pts">${s.score.tierPts >= 0 ? '+' : ''}${s.score.tierPts}pt</div>
         </div>` : '';
@@ -20157,6 +20217,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <div class="pr-stat">
           <div class="pr-stat-label">Tier calibration</div>
           <div class="pr-stat-value" style="color:${calibColor};">${s.tierRecord} at this tier${sampleNote}</div>
+          ${recordBreakdownHtml(s.tierRecordBreakdown)}
           <div class="pr-stat-sub">vs. his own ${s.overallAdjPct}% overall -- rewards/penalizes how THIS tier compares to HIS baseline</div>
           <div class="pr-stat-pts">${s.score.tierCalibrationPts >= 0 ? '+' : ''}${s.score.tierCalibrationPts}pt</div>
         </div>` : '';
@@ -20211,12 +20272,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           <div class="pr-stat">
             <div class="pr-stat-label">This sport + bet type</div>
             <div class="pr-stat-value">${s.betTypeRecord} <span style="font-weight:normal;color:var(--ink-soft);">(${s.betTypeAdjPct}% blended)</span></div>
+            ${recordBreakdownHtml(s.betTypeRecordBreakdown)}
             <div class="pr-stat-sub">vs. ${s.broadBetTypeAdjPct}% all-sport ${escapeHtml(betTypeName)} rate</div>
             <div class="pr-stat-pts">${s.score.betTypePts >= 0 ? '+' : ''}${s.score.betTypePts}pt</div>
           </div>
           <div class="pr-stat">
             <div class="pr-stat-label">Overall</div>
             <div class="pr-stat-value">${s.overallRecord} <span style="font-weight:normal;color:var(--ink-soft);">(${s.overallAdjPct}% adj)</span></div>
+            ${recordBreakdownHtml(s.overallRecordBreakdown)}
             <div class="pr-stat-pts">${s.score.overallPts >= 0 ? '+' : ''}${s.score.overallPts}pt</div>
           </div>
           <div class="pr-stat"${isHotPick ? ' style="background:rgba(212,161,42,0.15);border-radius:3px;"' : ''}>
@@ -20311,8 +20374,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
               streak_pts: scoredEntry.score.streakPts,
               confluence_pts: scoredEntry.score.confluencePts,
               overall_record: scoredEntry.overallRecord,
+              overall_record_breakdown: scoredEntry.overallRecordBreakdown,
               overall_adj_pct: scoredEntry.overallAdjPct,
               bet_type_record: scoredEntry.betTypeRecord,
+              bet_type_record_breakdown: scoredEntry.betTypeRecordBreakdown,
               bet_type_adj_pct: scoredEntry.betTypeAdjPct,
               broad_bet_type_adj_pct: scoredEntry.broadBetTypeAdjPct,
               streak: scoredEntry.streak,
@@ -20494,30 +20559,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       if (to) gradedQuery += `&event_date=lt.${to}`;
       const gradedRaw = await restAllPages(gradedQuery);
 
-      const overallByCapper = {}; // capper_id -> { wins, losses, history:[] }
-      const byCapperBetType = {}; // "capperId::betTypeId" -> { wins, losses } (all sports combined)
-      const byCapperSportBetType = {}; // "capperId::sportId::betTypeId" -> { wins, losses } (this exact sport)
-      const byCapperTier = {}; // "capperId::tier" -> { wins, losses } (this capper's own record AT this tier)
+      const overallByCapper = {}; // capper_id -> { wins, losses, straightWins, straightLosses, legWins, legLosses, history:[] }
+      const byCapperBetType = {}; // "capperId::betTypeId" -> record acc (all sports combined)
+      const byCapperSportBetType = {}; // "capperId::sportId::betTypeId" -> record acc (this exact sport)
+      const byCapperTier = {}; // "capperId::tier" -> record acc (this capper's own record AT this tier)
       gradedRaw.forEach(p => {
         const isParlayUnit = !!(p.bet_types && p.bet_types.name === 'Parlay');
         const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
 
         const btKey = `${p.capper_id}::${p.bet_type_id}`;
-        if (!byCapperBetType[btKey]) byCapperBetType[btKey] = { wins: 0, losses: 0 };
-        if (p.result === 'win') byCapperBetType[btKey].wins += w;
-        else if (p.result === 'loss') byCapperBetType[btKey].losses += w;
+        if (!byCapperBetType[btKey]) byCapperBetType[btKey] = newRecordAcc();
+        bumpRecordAcc(byCapperBetType[btKey], p.is_parlay_leg, p.result, w);
 
         const sbtKey = `${p.capper_id}::${p.sport_id}::${p.bet_type_id}`;
-        if (!byCapperSportBetType[sbtKey]) byCapperSportBetType[sbtKey] = { wins: 0, losses: 0 };
-        if (p.result === 'win') byCapperSportBetType[sbtKey].wins += w;
-        else if (p.result === 'loss') byCapperSportBetType[sbtKey].losses += w;
+        if (!byCapperSportBetType[sbtKey]) byCapperSportBetType[sbtKey] = newRecordAcc();
+        bumpRecordAcc(byCapperSportBetType[sbtKey], p.is_parlay_leg, p.result, w);
 
         if (isParlayUnit) return; // never touches overall/streak/tier -- same correlated-outcome reasoning as its legs
 
-        if (!overallByCapper[p.capper_id]) overallByCapper[p.capper_id] = { wins: 0, losses: 0, history: [] };
+        if (!overallByCapper[p.capper_id]) overallByCapper[p.capper_id] = { ...newRecordAcc(), history: [] };
         const o = overallByCapper[p.capper_id];
-        if (p.result === 'win') o.wins += w;
-        else if (p.result === 'loss') o.losses += w;
+        bumpRecordAcc(o, p.is_parlay_leg, p.result, w);
         // Unweighted here -- streak is about win/loss SEQUENCE, not
         // magnitude, so a leg breaks or extends a streak the same as any
         // other graded pick would (he called the game either way).
@@ -20526,9 +20588,8 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         const tier = Number(p.pick_tier) || 0;
         if (tier !== 0) {
           const tKey = `${p.capper_id}::${tier}`;
-          if (!byCapperTier[tKey]) byCapperTier[tKey] = { wins: 0, losses: 0 };
-          if (p.result === 'win') byCapperTier[tKey].wins += w;
-          else if (p.result === 'loss') byCapperTier[tKey].losses += w;
+          if (!byCapperTier[tKey]) byCapperTier[tKey] = newRecordAcc();
+          bumpRecordAcc(byCapperTier[tKey], p.is_parlay_leg, p.result, w);
         }
       });
       const streakByCapper = {};
@@ -20782,8 +20843,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
               streak_pts: entry.score.streakPts,
               confluence_pts: entry.score.confluencePts,
               overall_record: entry.overallRecord,
+              overall_record_breakdown: entry.overallRecordBreakdown,
               overall_adj_pct: entry.overallAdjPct,
               bet_type_record: entry.betTypeRecord,
+              bet_type_record_breakdown: entry.betTypeRecordBreakdown,
               bet_type_adj_pct: entry.betTypeAdjPct,
               broad_bet_type_adj_pct: entry.broadBetTypeAdjPct,
               streak: entry.streak,
@@ -21555,29 +21618,25 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         const w = p.is_parlay_leg ? scoringConfig.parlayLegWeight : 1;
 
         const btKey = `${p.capper_id}::${p.bet_type_id}`;
-        if (!byCapperBetType[btKey]) byCapperBetType[btKey] = { wins: 0, losses: 0 };
-        if (p.result === 'win') byCapperBetType[btKey].wins += w;
-        else if (p.result === 'loss') byCapperBetType[btKey].losses += w;
+        if (!byCapperBetType[btKey]) byCapperBetType[btKey] = newRecordAcc();
+        bumpRecordAcc(byCapperBetType[btKey], p.is_parlay_leg, p.result, w);
 
         const sbtKey = `${p.capper_id}::${p.sport_id}::${p.bet_type_id}`;
-        if (!byCapperSportBetType[sbtKey]) byCapperSportBetType[sbtKey] = { wins: 0, losses: 0 };
-        if (p.result === 'win') byCapperSportBetType[sbtKey].wins += w;
-        else if (p.result === 'loss') byCapperSportBetType[sbtKey].losses += w;
+        if (!byCapperSportBetType[sbtKey]) byCapperSportBetType[sbtKey] = newRecordAcc();
+        bumpRecordAcc(byCapperSportBetType[sbtKey], p.is_parlay_leg, p.result, w);
 
         if (isParlayUnit) return;
 
-        if (!overallByCapper[p.capper_id]) overallByCapper[p.capper_id] = { wins: 0, losses: 0, history: [] };
+        if (!overallByCapper[p.capper_id]) overallByCapper[p.capper_id] = { ...newRecordAcc(), history: [] };
         const o = overallByCapper[p.capper_id];
-        if (p.result === 'win') o.wins += w;
-        else if (p.result === 'loss') o.losses += w;
+        bumpRecordAcc(o, p.is_parlay_leg, p.result, w);
         o.history.push({ result: p.result, event_date: p.event_date, created_at: p.created_at });
 
         const tier = Number(p.pick_tier) || 0;
         if (tier !== 0) {
           const tKey = `${p.capper_id}::${tier}`;
-          if (!byCapperTier[tKey]) byCapperTier[tKey] = { wins: 0, losses: 0 };
-          if (p.result === 'win') byCapperTier[tKey].wins += w;
-          else if (p.result === 'loss') byCapperTier[tKey].losses += w;
+          if (!byCapperTier[tKey]) byCapperTier[tKey] = newRecordAcc();
+          bumpRecordAcc(byCapperTier[tKey], p.is_parlay_leg, p.result, w);
         }
       });
       const streakByCapper = {};
@@ -21730,8 +21789,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       ...entry,
       _snapshotSource: source,
       overallRecord: bd.overall_record ?? entry.overallRecord,
+      overallRecordBreakdown: bd.overall_record_breakdown ?? entry.overallRecordBreakdown,
       overallAdjPct: bd.overall_adj_pct ?? entry.overallAdjPct,
       betTypeRecord: bd.bet_type_record ?? entry.betTypeRecord,
+      betTypeRecordBreakdown: bd.bet_type_record_breakdown ?? entry.betTypeRecordBreakdown,
       betTypeAdjPct: bd.bet_type_adj_pct ?? entry.betTypeAdjPct,
       broadBetTypeAdjPct: bd.broad_bet_type_adj_pct ?? entry.broadBetTypeAdjPct,
       streak: bd.streak ?? entry.streak,
@@ -23637,7 +23698,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 461; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 462; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
