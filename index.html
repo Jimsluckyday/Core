@@ -13051,6 +13051,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td data-value="${rankVal}">${rank || '—'}</td>
         <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
         <td data-value="${r.total_picks}">${r.total_picks}</td>
+        <td data-value="${r.wins}" style="font-weight:bold;font-variant-numeric:tabular-nums;">${r.wins}-${r.losses}-${r.pushes}</td>
         <td data-value="${r.parlay_count || 0}">${straightCount}/${r.parlay_count || 0}</td>
         <td data-value="${r.wins}">${r.wins}</td>
         <td data-value="${r.losses}">${r.losses}</td>
@@ -13068,7 +13069,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const body = qualified.map((r, i) => row(r, i + 1)).join('') + unqualified.map(r => row(r, null)).join('');
     const cols = [
       { label: 'Rank', type: 'num' }, { label: 'Capper', type: 'str' },
-      { label: 'Total picks', type: 'num' }, { label: 'Straight/Parlay', type: 'num' },
+      { label: 'Total picks', type: 'num' }, { label: 'Overall record', type: 'num' }, { label: 'Straight/Parlay', type: 'num' },
       { label: 'Wins', type: 'num' },
       { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' },
       { label: 'Pending', type: 'num' }, { label: 'Win %', type: 'num' },
@@ -13088,7 +13089,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <tbody>${body}</tbody>
       </table>
       <div style="font-size:10px;color:var(--ink-soft);margin-top:8px;">
-        Ranked by win % first, then by more wins, then by fewer losses to break a tie — cappers below the rank line either have fewer than ${minPicks} graded picks or are at 0%, both too small/extreme a sample to rank meaningfully, and are listed by volume just for reference. Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. Straight/Parlay shows how many of Total picks were the capper's own standalone bets vs. whole combined parlays (e.g. "9/1") — individual parlay legs are never counted separately here. Wins/Losses/Pushes stay combined across both — a parlay counts as one win, loss, or push against its own overall result, same as any straight bet. Click the arrow on any column to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the report.
+        Ranked by win % first, then by more wins, then by fewer losses to break a tie — cappers below the rank line either have fewer than ${minPicks} graded picks or are at 0%, both too small/extreme a sample to rank meaningfully, and are listed by volume just for reference. Overall record is the same Wins-Losses-Pushes numbers shown as one plain "W-L-P" figure (e.g. "8-1-1") right next to Total picks, so the overall record reads at a glance without being misread as the Straight/Parlay breakdown beside it. Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. Straight/Parlay shows how many of Total picks were the capper's own standalone bets vs. whole combined parlays (e.g. "9/1") — individual parlay legs are never counted separately here. Wins/Losses/Pushes stay combined across both — a parlay counts as one win, loss, or push against its own overall result, same as any straight bet. Click the arrow on any column to sort or check/uncheck values to filter — works just like a spreadsheet, no need to re-run the report.
       </div>`;
   }
 
@@ -23882,7 +23883,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 475; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 476; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
