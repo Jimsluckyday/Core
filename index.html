@@ -4738,6 +4738,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ['Home/Away -- "home" or "away" if this bet type needs it, otherwise leave blank.', false, 10],
         ['Notes -- anything else worth keeping about this pick.', false, 10],
         ['Date Entered / Date / Selection (computed, near the right) -- the real values Bulk Import reads. Don\'t type in any of them; Date Entered is built from "Date entry", Date defaults to Date Entered unless "Event Date" overrides it, and Selection is built from Team 1 + Team 2 for everything except Player Props, which have their own rules -- see PLAYER PROPS above.', false, 10],
+        ['Source Image (far right column) -- optional pointer back to the real downloaded screenshot, format "YYYY-MM-DD/N" (e.g. "2025-06-29/1" = the 1st image downloaded that day). Matches the file at downloaded_images\\Month\\Year\\YYYY-MM-DD\\N.jpg -- the date is written into the value itself, so this stays resolvable even if the pick\'s own event date is later corrected. Leave blank if you\'re not tracking a screenshot for this pick.', false, 10],
       ];
       instructionLines.forEach(([text, bold, size], i) => {
         const c = wsI.getCell(i + 1, 1);
@@ -4859,7 +4860,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
         // with the typed block above -- every formula/validation in this
         // file is anchored to a FIXED column number, and inserting a
         // column in the middle would shift all of them.
-        'Prop Stat Check'];
+        'Prop Stat Check',
+        // Direct report 2026-09-10: "don't see a place to put image #" --
+        // source_image became a real Bulk Import input column in v472 (the
+        // CSV/paste parser already turns any header into row.<header>, so
+        // a "Source Image" header here becomes row.source_image once
+        // saved as CSV, exactly what validateBulkRow reads), but this
+        // downloadable template was never actually updated with a column
+        // for it -- the gap this fixes. Appended at the very end (column
+        // 29) rather than grouped near Notes, same fixed-column-number
+        // reasoning as Doubleheader Game # and Prop Stat Check above.
+        'Source Image'];
       HEADERS.forEach((h, i) => {
         const c = ws.getCell(1, i + 1);
         c.value = h;
@@ -4868,7 +4879,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
         c.border = TEMPLATE_BORDER;
       });
-      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 16, 14, 16, 8, 8, 16, 8, 16, 10, 24, 13, 12, 20, 14, 12, 14, 14, 14, 16, 14, 14];
+      const WIDTHS = [16, 18, 20, 10, 16, 20, 20, 16, 14, 16, 8, 8, 16, 8, 16, 10, 24, 13, 12, 20, 14, 12, 14, 14, 14, 16, 14, 14, 20];
       WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
       // Example illustrates the posted-date fill-down AND a real two-sided
@@ -4901,6 +4912,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
       ws.getCell(2, 19).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
       ws.getCell(2, 18).border = TEMPLATE_BORDER;
       ws.getCell(2, 19).border = TEMPLATE_BORDER;
+      // Source Image example -- shows the real "YYYY-MM-DD/N" format
+      // (self-contained pointer into downloaded_images\Month\Year\
+      // YYYY-MM-DD\N.jpg) directly in the template, not just described in
+      // the Column Guide text.
+      ws.getCell(2, 29).value = '2025-06-01/1';
+      ws.getCell(2, 29).font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+      ws.getCell(2, 29).border = TEMPLATE_BORDER;
 
       // CONFIRMED REAL BUG, direct report 2026-08-25: "the drop downs are
       // gone from most of the fields." Root cause: this M/D/YYYY format
@@ -5142,6 +5160,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ws.getCell(row, 28).font = TEMPLATE_CHECK_FONT;
         ws.getCell(row, 28).border = TEMPLATE_BORDER;
         ws.getCell(row, 28).alignment = { horizontal: 'center' };
+        // Source Image (column 29) -- plain typed text, same styling as
+        // any other free-text input column (Notes) -- no dropdown/check
+        // needed since it's just a self-contained "YYYY-MM-DD/N" pointer
+        // into the real downloaded-screenshot archive (see
+        // project_core_betting_infra memory), not something validated
+        // against a registered list.
+        ws.getCell(row, 29).font = TEMPLATE_INPUT_FONT;
+        ws.getCell(row, 29).border = TEMPLATE_BORDER;
         // Soft (warning, not blocking) team-name check -- Team 1/2 and
         // Prop Team are also where a player/fighter/tennis name gets
         // typed for non-team bets, so rejecting anything off the list
@@ -23856,7 +23882,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 474; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 475; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
