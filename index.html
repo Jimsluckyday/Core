@@ -19022,6 +19022,22 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return cells;
   }
 
+  // Complement to splitCsvLine -- reassembles cells back into one line,
+  // quoting only the cells that actually need it (contain the delimiter,
+  // a quote, or a newline), same minimal-quoting convention any real CSV
+  // writer uses. Added 2026-09-10 for the "Apply fix" team/capper/sport/
+  // bet-type correction buttons -- see applyFieldFixInTextarea's own
+  // comment for why editing the raw pasted text (not just the in-memory
+  // preview) is the only fix that actually survives a re-parse.
+  function joinCsvLine(cells, delimiter) {
+    return cells.map(c => {
+      const s = c == null ? '' : String(c);
+      return (s.includes(delimiter) || s.includes('"') || s.includes('\n'))
+        ? `"${s.replace(/"/g, '""')}"`
+        : s;
+    }).join(delimiter);
+  }
+
   function parseCorrectionsCsv(text) {
     const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
     if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
@@ -23066,21 +23082,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const cappersMap = new Map(), sportsMap = new Map(), betTypesMap = new Map(), teamsMap = new Map();
     for (const v of validated) {
       const m = v.missing || {};
+      // rowNumbers collected on every candidate (Direct request 2026-09-10)
+      // so the new "Apply fix" button knows exactly which physical lines
+      // of the pasted text to edit -- see applyFieldFixInTextarea.
       if (m.capper) {
         const key = m.capper.toLowerCase();
-        if (!cappersMap.has(key)) cappersMap.set(key, { name: m.capper, count: 0 });
+        if (!cappersMap.has(key)) cappersMap.set(key, { name: m.capper, count: 0, rowNumbers: [] });
         cappersMap.get(key).count++;
+        if (v.sourceRowNumber) cappersMap.get(key).rowNumbers.push(v.sourceRowNumber);
       }
       if (m.sport) {
         const key = m.sport.toLowerCase();
-        if (!sportsMap.has(key)) sportsMap.set(key, { name: m.sport, count: 0 });
+        if (!sportsMap.has(key)) sportsMap.set(key, { name: m.sport, count: 0, rowNumbers: [] });
         sportsMap.get(key).count++;
+        if (v.sourceRowNumber) sportsMap.get(key).rowNumbers.push(v.sourceRowNumber);
       }
       if (m.bet_type) {
         const key = m.bet_type.toLowerCase();
-        if (!betTypesMap.has(key)) betTypesMap.set(key, { name: m.bet_type, count: 0, hasLine: false, hasPropStat: false, hasTwoTeams: false });
+        if (!betTypesMap.has(key)) betTypesMap.set(key, { name: m.bet_type, count: 0, hasLine: false, hasPropStat: false, hasTwoTeams: false, rowNumbers: [] });
         const entry = betTypesMap.get(key);
         entry.count++;
+        if (v.sourceRowNumber) entry.rowNumbers.push(v.sourceRowNumber);
         if ((v.raw.line || '').trim()) entry.hasLine = true;
         if ((v.raw.prop_stat || v.raw.stat || '').trim()) entry.hasPropStat = true;
         if ((v.raw.selection || '').includes('/')) entry.hasTwoTeams = true;
@@ -23088,8 +23110,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       for (const tc of (v.teamNameChecks || [])) {
         if (tc.ambiguous) continue;
         const key = tc.sportId + '||' + tc.rawName.toLowerCase();
-        if (!teamsMap.has(key)) teamsMap.set(key, { name: tc.rawName, sportId: tc.sportId, sportName: tc.sportName, suggestion: tc.suggestion, count: 0 });
+        if (!teamsMap.has(key)) teamsMap.set(key, { name: tc.rawName, sportId: tc.sportId, sportName: tc.sportName, suggestion: tc.suggestion, count: 0, rowNumbers: [] });
         teamsMap.get(key).count++;
+        if (v.sourceRowNumber) teamsMap.get(key).rowNumbers.push(v.sourceRowNumber);
       }
     }
     return {
@@ -23112,7 +23135,16 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const total = candidates.cappers.length + candidates.sports.length + candidates.betTypes.length + candidates.teams.length;
     if (!total) return '';
     const suggestionNote = (name) => name
-      ? `<div style="color:var(--stamp-amber);font-weight:bold;">&#9888; Did you mean "${escapeHtml(name)}"? Double check before adding -- if this is a typo, fix your pasted data and click Parse &amp; preview again instead.</div>` : '';
+      ? `<div style="color:var(--stamp-amber);font-weight:bold;">&#9888; Did you mean "${escapeHtml(name)}"?</div>` : '';
+    // Direct request 2026-09-10: "is it possible we have a button to
+    // update it for us instead of typing it out... like a phone
+    // autocorrect." Only rendered when a suggestion exists -- see
+    // applyFieldFixInTextarea for what actually happens on click (edits
+    // the raw pasted text at the exact rows this candidate came from,
+    // then re-parses, same as "Add as new" already does).
+    const applyFixBtn = (fieldKey, name, suggestion, rowNumbers) => suggestion
+      ? `<button class="applyFieldFixBtn" data-field="${fieldKey}" data-old="${escapeHtml(name)}" data-new="${escapeHtml(suggestion)}" data-rows="${escapeHtml(JSON.stringify(rowNumbers || []))}">Fix to "${escapeHtml(suggestion)}"</button>`
+      : '';
     const rows = [];
     candidates.cappers.forEach(c => rows.push(`
       <tr>
@@ -23120,7 +23152,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td>${escapeHtml(c.name)}</td>
         <td>${c.count}</td>
         <td style="font-size:11px;">${suggestionNote(c.suggestion)}</td>
-        <td><button class="addNewItemBtn" data-kind="capper" data-name="${escapeHtml(c.name)}" ${c.suggestion ? `data-suggestion="${escapeHtml(c.suggestion)}"` : ''}>Add as new</button></td>
+        <td>
+          ${applyFixBtn('capper', c.name, c.suggestion, c.rowNumbers)}
+          <button class="addNewItemBtn" data-kind="capper" data-name="${escapeHtml(c.name)}" ${c.suggestion ? `data-suggestion="${escapeHtml(c.suggestion)}"` : ''}>Add as new</button>
+        </td>
       </tr>`));
     candidates.sports.forEach(s => rows.push(`
       <tr>
@@ -23128,7 +23163,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td>${escapeHtml(s.name)}</td>
         <td>${s.count}</td>
         <td style="font-size:11px;">${suggestionNote(s.suggestion)}</td>
-        <td><button class="addNewItemBtn" data-kind="sport" data-name="${escapeHtml(s.name)}" ${s.suggestion ? `data-suggestion="${escapeHtml(s.suggestion)}"` : ''}>Add as new</button></td>
+        <td>
+          ${applyFixBtn('sport', s.name, s.suggestion, s.rowNumbers)}
+          <button class="addNewItemBtn" data-kind="sport" data-name="${escapeHtml(s.name)}" ${s.suggestion ? `data-suggestion="${escapeHtml(s.suggestion)}"` : ''}>Add as new</button>
+        </td>
       </tr>`));
     candidates.betTypes.forEach(b => rows.push(`
       <tr>
@@ -23142,7 +23180,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_matchup_fields" ${b.hasTwoTeams ? 'checked' : ''}/> Two-team matchup</label>
           <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="is_futures" ${b.isLikelyFutures ? 'checked' : ''}/> Long-term futures <span style="color:var(--ink-soft);">(resolves whenever the event concludes, not a date)</span></label>
         </td>
-        <td><button class="addNewItemBtn" data-kind="bet_type" data-name="${escapeHtml(b.name)}" ${b.suggestion ? `data-suggestion="${escapeHtml(b.suggestion)}"` : ''}>Add as new</button></td>
+        <td>
+          ${applyFixBtn('bet_type', b.name, b.suggestion, b.rowNumbers)}
+          <button class="addNewItemBtn" data-kind="bet_type" data-name="${escapeHtml(b.name)}" ${b.suggestion ? `data-suggestion="${escapeHtml(b.suggestion)}"` : ''}>Add as new</button>
+        </td>
       </tr>`));
     candidates.teams.forEach(t => rows.push(`
       <tr>
@@ -23150,7 +23191,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td>${escapeHtml(t.name)} <span style="color:var(--ink-soft);">(${escapeHtml(t.sportName)})</span></td>
         <td>${t.count}</td>
         <td style="font-size:11px;">${suggestionNote(t.suggestion)}</td>
-        <td><button class="addNewItemBtn" data-kind="team" data-name="${escapeHtml(t.name)}" data-sport-id="${t.sportId}" ${t.suggestion ? `data-suggestion="${escapeHtml(t.suggestion)}"` : ''}>Add as new</button></td>
+        <td>
+          ${applyFixBtn('selection', t.name, t.suggestion, t.rowNumbers)}
+          <button class="addNewItemBtn" data-kind="team" data-name="${escapeHtml(t.name)}" data-sport-id="${t.sportId}" ${t.suggestion ? `data-suggestion="${escapeHtml(t.suggestion)}"` : ''}>Add as new</button>
+        </td>
       </tr>`));
     return `
       <div style="margin-bottom:14px;border:2px solid var(--stamp-amber);border-radius:4px;padding:10px;">
@@ -23160,7 +23204,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           <tbody>${rows.join('')}</tbody>
         </table>
         <div style="font-size:10px;color:var(--ink-soft);margin-top:6px;">
-          Rows using one of these are held back below until you either add it here or fix a typo in your pasted data and click "Parse &amp; preview" again. Clicking "Add as new" creates it for real immediately and re-checks every row in this paste against it -- no need to re-paste.
+          Rows using one of these are held back below until you resolve it one of two ways: if a "Did you mean" suggestion is shown, click <strong>"Fix to..."</strong> to correct every affected row to that spelling automatically (no retyping, no re-paste) -- or, if this is genuinely a new item, click <strong>"Add as new"</strong> to register it for real. Either one re-checks every row in this paste immediately.
         </div>
       </div>`;
   }
@@ -23410,6 +23454,40 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           alert('Could not add: ' + e.message);
           btn.disabled = false;
           btn.textContent = 'Add as new';
+        }
+      });
+    });
+
+    // Direct request 2026-09-10: "is it possible we have a button to
+    // update it for us instead of typing it out... like a phone
+    // autocorrect... writing down 2-4 hundred individual picks by hand"
+    // -- applies a "did you mean X?" suggestion directly to every row it
+    // affects, editing the raw pasted text (see applyFieldFixInTextarea
+    // for why that, not just the in-memory preview, is what actually
+    // survives), then re-parses exactly like "Add as new" already does.
+    wrap.querySelectorAll('.applyFieldFixBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const field = btn.getAttribute('data-field');
+        const oldValue = btn.getAttribute('data-old');
+        const newValue = btn.getAttribute('data-new');
+        let rowNumbers = [];
+        try { rowNumbers = JSON.parse(btn.getAttribute('data-rows') || '[]'); } catch (_e) { rowNumbers = []; }
+        if (!rowNumbers.length) { alert('Could not find the original row(s) for this fix -- try Parse & preview again first.'); return; }
+        btn.disabled = true;
+        btn.textContent = 'Fixing...';
+        try {
+          const ok = applyFieldFixInTextarea(field, oldValue, newValue, rowNumbers);
+          if (!ok) {
+            alert('Could not apply this fix -- the pasted data may have changed since Parse & preview last ran. Try Parse & preview again first.');
+            btn.disabled = false;
+            btn.textContent = `Fix to "${newValue}"`;
+            return;
+          }
+          await runBulkImportParse();
+        } catch (e) {
+          alert('Could not apply this fix: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = `Fix to "${newValue}"`;
         }
       });
     });
@@ -23793,6 +23871,65 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // once a missing capper/sport/bet type/team has just been created --
   // without that, every new item would need a manual re-click of Parse
   // (or worse, a full re-paste) to actually take effect.
+  // Direct request 2026-09-10: "is it possible we have a button to update
+  // it for us instead of typing it out... like a phone autocorrect."
+  // Before this, the ONLY action on a "did you mean X?" suggestion was
+  // "Add as new" -- which, for an actual typo, does the wrong thing
+  // entirely (creates a second, separate, misspelled Capper/Sport/Bet
+  // Type/Team record instead of fixing the mistake). This is the real
+  // fix: apply the suggested spelling directly, everywhere it appears in
+  // this paste, then re-parse.
+  //
+  // Edits the TEXTAREA's raw text, not just the in-memory validated rows
+  // -- deliberately, not incidentally. runBulkImportParse() always re-
+  // reads $('bulkImportText').value from scratch (see its own first
+  // line), so an in-memory-only fix would silently vanish the moment
+  // anything else re-parses (including "Add as new", which already calls
+  // runBulkImportParse() itself) -- editing the textarea is the only fix
+  // that actually survives.
+  //
+  // rowNumbers come from each candidate's sourceRowNumber (parseBulkImportText
+  // stamps this onto every row from its real position in the pasted text
+  // BEFORE any filtering happens), so this can go straight to the exact
+  // physical lines that need fixing without re-scanning or fuzzy-matching
+  // the whole paste.
+  //
+  // fieldKey is 'capper' | 'sport' | 'bet_type' | 'selection' -- the first
+  // three are a straight cell replacement. 'selection' is different: it
+  // can be a single team name OR a two-sided "TeamA/TeamB" string, so only
+  // the SIDE that matches oldValue gets replaced, leaving the other side
+  // (a real, correct team name) untouched.
+  function applyFieldFixInTextarea(fieldKey, oldValue, newValue, rowNumbers) {
+    const textarea = $('bulkImportText');
+    const lines = textarea.value.split('\n');
+    if (!lines.length) return false;
+    const delim = lines[0].includes('\t') ? '\t' : ',';
+    const headers = splitCsvLine(lines[0], delim).map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+    const colIndex = headers.indexOf(fieldKey);
+    if (colIndex === -1) return false; // column genuinely isn't in this paste -- nothing to edit
+
+    let touched = false;
+    rowNumbers.forEach(rowNum => {
+      const lineIdx = rowNum - 1; // rowNumber is 1-indexed against the raw text, same as opening it in Excel
+      if (!lines[lineIdx]) return;
+      const cells = splitCsvLine(lines[lineIdx], delim);
+      if (cells.length <= colIndex) return;
+      let cellVal = cells[colIndex];
+      if (fieldKey === 'selection' && cellVal.includes('/')) {
+        const sides = cellVal.split('/').map(s => s.trim());
+        cellVal = sides.map(s => normalizeForMatch(s) === normalizeForMatch(oldValue) ? newValue : s).join('/');
+      } else {
+        cellVal = newValue;
+      }
+      cells[colIndex] = cellVal;
+      lines[lineIdx] = joinCsvLine(cells, delim);
+      touched = true;
+    });
+
+    if (touched) textarea.value = lines.join('\n');
+    return touched;
+  }
+
   async function runBulkImportParse() {
     const text = $('bulkImportText').value;
     const { rows } = parseBulkImportText(text);
@@ -23958,7 +24095,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 478; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 479; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
