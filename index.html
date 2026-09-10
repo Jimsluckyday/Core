@@ -7906,7 +7906,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // pick has no line and never will, that's not a data gap).
   function sportUsesEventName(sportName) {
     const n = (sportName || '').toLowerCase();
-    return n.includes('tennis') || n.includes('golf') || n.includes('mma');
+    return n.includes('tennis') || n.includes('golf') || n.includes('mma') || n.includes('pfl');
   }
   // Golf-specific exception, direct report 2026-08-20: a Round Matchup,
   // Tournament Matchup, or Tournament Winner backing (e.g. "Rory McIlroy
@@ -7986,9 +7986,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // other individual/combat sports (e.g. wrestling, darts) can be added
   // here the same way as they actually come up, one at a time, rather than
   // trying to enumerate every possible case now.
+  // CONFIRMED REAL GAP, direct report 2026-09-10: real PFL fights were all
+  // showing up needing Home/Away -- PFL is its own registered sport here
+  // (separate from a generic "MMA" entry), and this check only ever
+  // matched the literal substring "mma". The grading Edge Function
+  // (grade_picks_espn_backfill's MMA_LIKE_SPORTS) already correctly
+  // treated 'pfl' as MMA-shaped -- this admin-side check just never got
+  // the same update when that was added.
   function sportUsesHomeAway(sportName) {
     const n = (sportName || '').toLowerCase();
-    return !n.includes('tennis') && !n.includes('golf') && !n.includes('mma') && !n.includes('boxing');
+    return !n.includes('tennis') && !n.includes('golf') && !n.includes('mma') && !n.includes('pfl') && !n.includes('boxing');
   }
 
   // Drives the All Picks pop-out's "Missing" column -- a single glance at
@@ -23849,7 +23856,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 473; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 474; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
