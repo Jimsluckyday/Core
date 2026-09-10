@@ -126,7 +126,7 @@
 //    Soccer isn't one competition the way MLB/NBA are, so it never fit
 //    the single-endpoint ESPN_SPORT_MAP structure -- ESPN instead exposes
 //    dozens of separate competition endpoints (leagues, continental cups,
-//    international tournaments). Now fetches a curated list of 23 of
+//    international tournaments). Now fetches a curated list of 24 of
 //    them (SOCCER_COMPETITION_SLUGS below) in parallel and merges their
 //    games into one combined pool for the day, then runs the exact same
 //    matching logic already proven for every other sport. Every slug on
@@ -1099,6 +1099,14 @@ const SOCCER_COMPETITION_SLUGS = [
   // competition (Champions League, Europa League, Euro Championship) but
   // never included the Nations League itself.
   'uefa.nations',
+  // CONFIRMED FIX, direct report 2026-09-10: two real 2025-06-15 FIFA Club
+  // World Cup picks (Botafogo/Seattle Sounders FC, Paris Saint-Germain/
+  // Atletico Madrid) would have come back "no matching game found" --
+  // confirmed live against ESPN's real slug (fifa.cwc returns the actual
+  // tournament, e.g. "BOT @ PAL" and "CHE @ SLB" on 2025-06-28) before
+  // adding it here, same verify-before-shipping discipline as every other
+  // slug on this list.
+  'fifa.cwc',
 ];
 
 const KBO_TEAM_NAMES: Record<string, { location: string; name: string }> = {
