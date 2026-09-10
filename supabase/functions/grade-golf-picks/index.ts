@@ -1,5 +1,5 @@
 // grade-golf-picks
-// Grades the 3 golf-specific Player Prop bets that NEITHER grade_picks
+// Grades the 4 golf-specific Player Prop bets that NEITHER grade_picks
 // (TheRundown) NOR grade_picks_espn_backfill can touch -- both explicitly
 // grade Moneyline/Spread/Total only and skip every Player Prop by design.
 // In this system's own established convention (see PROJECT-STATE's "New
@@ -8,7 +8,7 @@
 // Player Prop pathway rather than a dedicated bet type, so this function
 // is the only thing that will ever grade them.
 //
-// Recognizes exactly 3 `prop_stat` values, matched case/spacing-
+// Recognizes exactly 4 `prop_stat` values, matched case/spacing-
 // insensitively via normalize():
 //   - "Tournament Winner": prop_player is picked to win the whole event
 //     outright. No opponent needed.
@@ -16,7 +16,19 @@
 //     event better than the golfer named in `selection` (the opponent).
 //   - "Round Matchup": same as above, but scoped to a single round, not
 //     the whole event.
-// For both matchup types, `selection` holds the opponent's name -- this
+//   - "Round Strokes": prop_player is picked Over/Under a specific raw
+//     stroke count (`line`) for ONE round -- e.g. "JJ Spaun Round 2 Over
+//     73.5 Strokes." ADDED 2026-09-10, direct report: a real capper pick
+//     in exactly this shape (DirtyBubbleBets, "JJ Spaun Round 2 o73.5
+//     Strokes (-120)") had nowhere to go -- not a matchup (no opponent),
+//     not an outright. Unlike the 3 stats above, this one is graded
+//     against a numeric `line`, not another golfer, so `selection` here
+//     holds the literal "Over"/"Under" call (read the same way every
+//     other numeric Player Prop in this whole system is graded --
+//     normalize(selection) === 'over'/'under', NOT re-derived from the
+//     sign of `line` -- see grade_picks_espn_backfill's own player-prop
+//     branches for the identical pattern) rather than an opponent's name.
+// For the two matchup types, `selection` holds the opponent's name -- this
 // is a deliberate reuse of an existing column, not a new one. It works
 // because, unlike Tennis (where the real opponent can be inferred from
 // that day's actual tour draw), golf has no natural 1-on-1 pairing in the
@@ -34,7 +46,13 @@
 //   - `score`: their overall to-par total for the tournament so far
 //     (string, e.g. "-11", "E", "+3")
 //   - `linescores[]`: one entry per round played, `period` = round number
-//     (1-4), each with the same to-par `displayValue` format as above
+//     (1-4). CONFIRMED 2026-09-10 (live fetch, same FedEx St. Jude event):
+//     each of these round entries carries BOTH the to-par `displayValue`
+//     ("-2") already used by Round Matchup above AND a raw stroke count
+//     in `value` (a plain number, e.g. 68) -- this is what Round Strokes
+//     grades against. No extra API call or par-per-round lookup needed;
+//     the exact number was already sitting in data this function already
+//     fetched for the other 3 stats.
 //   - `order`: their live/final leaderboard rank (1 = the leader/winner)
 // PGA TOUR ONLY for now -- confirmed this specific endpoint only covers
 // PGA Tour events. LPGA/Champions Tour/Korn Ferry/European Tour picks
@@ -81,7 +99,7 @@
 // building this (2026-08-15).
 //
 // Only ever touches picks where result = 'pending', sport = Golf, the
-// bet type has uses_prop_fields = true, and prop_stat is one of the 3
+// bet type has uses_prop_fields = true, and prop_stat is one of the 4
 // values above -- every other pick, sport, and bet type is completely
 // untouched.
 //
@@ -117,6 +135,7 @@ function normalize(s: string): string {
 const STAT_ROUND_MATCHUP = normalize('Round Matchup');
 const STAT_TOURNAMENT_MATCHUP = normalize('Tournament Matchup');
 const STAT_TOURNAMENT_WINNER = normalize('Tournament Winner');
+const STAT_ROUND_STROKES = normalize('Round Strokes');
 
 // CONFIRMED FIX, ported from validate-nba-player-txt/validate-wnba-player-txt
 // (same real-world failure, same real fix): a bare fetch() to ESPN sends no
@@ -231,12 +250,12 @@ Deno.serve(async (req) => {
     }
 
     const picks = await db(supabaseUrl, serviceRoleKey,
-      `picks?select=id,selection,prop_player,prop_stat,event_date,bet_types(uses_prop_fields)&sport_id=eq.${golfSport.id}&event_date=eq.${targetDate}&result=eq.pending&prop_player=not.is.null`
+      `picks?select=id,selection,prop_player,prop_stat,event_date,line,bet_types(uses_prop_fields)&sport_id=eq.${golfSport.id}&event_date=eq.${targetDate}&result=eq.pending&prop_player=not.is.null`
     );
     const relevant = (picks || []).filter((p: any) => {
       if (!p.bet_types || !p.bet_types.uses_prop_fields) return false;
       const statNorm = normalize(p.prop_stat || '');
-      return statNorm === STAT_ROUND_MATCHUP || statNorm === STAT_TOURNAMENT_MATCHUP || statNorm === STAT_TOURNAMENT_WINNER;
+      return statNorm === STAT_ROUND_MATCHUP || statNorm === STAT_TOURNAMENT_MATCHUP || statNorm === STAT_TOURNAMENT_WINNER || statNorm === STAT_ROUND_STROKES;
     });
 
     const result = { date: targetDate, checked: relevant.length, graded: [] as any[], pending: [] as any[], unmatched: [] as any[] };
@@ -331,6 +350,50 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // Round Strokes -- graded against a numeric `line`, not another
+      // golfer, so this branches out BEFORE the opponent lookup below
+      // (which only applies to the two matchup stats). `selection` here
+      // holds the literal "Over"/"Under" call, same as every other
+      // numeric Player Prop in this system -- see this file's header
+      // comment for why that's read directly rather than re-derived from
+      // the sign of `line`.
+      if (statNorm === STAT_ROUND_STROKES) {
+        if (roundNumber < 1 || roundNumber > 4) {
+          result.unmatched.push({ id: p.id, prop_player: p.prop_player, reason: `This pick's event_date doesn't fall within this tournament's round window (computed round ${roundNumber}) -- check the date entered.` });
+          continue;
+        }
+        const backedRound = (backed.linescores || []).find((l: any) => l.period === roundNumber);
+        if (!backedRound || backedRound.value === undefined || backedRound.value === null) {
+          result.pending.push({ id: p.id, prop_player: p.prop_player, reason: `Round ${roundNumber} isn't recorded yet for this player -- may mean they haven't teed off yet, missed the cut, or withdrew.` });
+          continue;
+        }
+        // Same critical guard as grade_picks_espn_backfill's own numeric
+        // Player Prop branches -- a missing line must never silently
+        // become a real threshold of 0.
+        if (p.line === null || p.line === undefined) {
+          result.unmatched.push({ id: p.id, prop_player: p.prop_player, reason: `This pick has no line recorded -- cannot grade a Round Strokes Over/Under without one.` });
+          continue;
+        }
+        const threshold = Math.abs(Number(p.line));
+        const isOver = normalize(p.selection) === 'over';
+        const isUnder = normalize(p.selection) === 'under';
+        if (!isOver && !isUnder) {
+          result.unmatched.push({ id: p.id, prop_player: p.prop_player, reason: `Selection "${p.selection}" isn't a recognized Over/Under call -- needs manual review.` });
+          continue;
+        }
+        const actualStrokes = backedRound.value;
+        let outcome: 'win' | 'loss' | 'push';
+        if (actualStrokes === threshold) outcome = 'push';
+        else outcome = (isOver ? actualStrokes > threshold : actualStrokes < threshold) ? 'win' : 'loss';
+
+        await db(supabaseUrl, serviceRoleKey, `picks?id=eq.${p.id}`, {
+          method: 'PATCH', body: JSON.stringify({ result: outcome, graded_at: new Date().toISOString() })
+        });
+        result.graded.push({ id: p.id, prop_player: p.prop_player, scope: `Round ${roundNumber} strokes`, actualStrokes, line: p.line, result: outcome });
+        await registerKnownPlayer(supabaseUrl, serviceRoleKey, golfSport.id, (backed.athlete && backed.athlete.displayName) || p.prop_player);
+        continue;
+      }
+
       // Round Matchup / Tournament Matchup both need the opponent, stored
       // in `selection` per this function's own header comment.
       const opponentResult = findCompetitor(p.selection);
@@ -371,7 +434,7 @@ Deno.serve(async (req) => {
         oppVal = parseToPar(oppRound.displayValue);
         scopeLabel = `Round ${roundNumber} score`;
       } else {
-        continue; // unreachable -- already filtered to the 3 known stat values above
+        continue; // unreachable -- Tournament Winner and Round Strokes both `continue` above; only these 2 matchup stats can still reach here
       }
 
       if (backedVal === null || oppVal === null) {
