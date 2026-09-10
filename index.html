@@ -22345,9 +22345,51 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return FUTURES_NAME_KEYWORDS.some(k => n.includes(k));
   }
 
+  // Direct request 2026-09-10: "the best defense is uploading it with that
+  // built into the database so it will nudge us towards that when it
+  // throws an error... writing down 2-4 hundred individual picks by hand
+  // to stop, open another file, cross reference it to find the shorthand
+  // would be a large ask." A capper writing soccer shorthand (PSG, Barca,
+  // BVB) isn't a typo -- it shares no real letters with the full name in
+  // the right order, so it would never surface via the Levenshtein
+  // suggestion below no matter how close the threshold is tuned. Rather
+  // than a separate reference doc the user has to break flow to check
+  // (rejected for exactly that reason -- this whole feature exists to
+  // avoid an extra file/lookup step during an already-arduous manual
+  // entry session), this resolves INLINE, through the exact same "did you
+  // mean" warning path every other team-name issue already uses -- one
+  // more lookup before the substring/Levenshtein checks below, no new UI.
+  // Deliberately a short, high-confidence starter list, not an attempt at
+  // an exhaustive worldwide alias table (impossible to keep collision-free
+  // at that scale) -- grows the same incremental way SOCCER_COMPETITION_SLUGS
+  // does in schedule-sync-backfill: a real pick uses a shorthand this list
+  // doesn't cover, it gets added. An alias only ever fires when its target
+  // is ACTUALLY registered as a team for the sport being checked (see the
+  // lookup below) -- so "Inter" typed for an MLS pick is untouched by this
+  // list (Internazionale isn't an MLS team) and still resolves the normal
+  // way, via the existing substring match against "Inter Miami".
+  const TEAM_NAME_ALIASES = {
+    psg: 'Paris Saint-Germain',
+    fcb: 'FC Barcelona',
+    barca: 'FC Barcelona',
+    rma: 'Real Madrid',
+    bvb: 'Borussia Dortmund',
+    dortmund: 'Borussia Dortmund',
+    mufc: 'Manchester United',
+    manu: 'Manchester United',
+    mcfc: 'Manchester City',
+    mancity: 'Manchester City',
+    juve: 'Juventus',
+    atleti: 'Atlético Madrid',
+    atm: 'Atlético Madrid',
+    inter: 'Internazionale',
+    psv: 'PSV Eindhoven',
+  };
+
   // Checks one team-name-shaped string against the registered teams list
   // for a sport. Exact match first (always unambiguous by definition).
-  // Then substring matching (same generous approach as schedule-sync's own
+  // Then a curated shorthand/acronym alias (see TEAM_NAME_ALIASES above),
+  // then substring matching (same generous approach as schedule-sync's own
   // game matching, so "Milwaukee" correctly matches a registered "Milwaukee
   // Brewers") -- but collects EVERY matching team, not just the first one.
   // A bare city name shared by multiple teams (e.g. "New York" matching
@@ -22363,6 +22405,16 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
     const exactMatch = sportTeams.find(t => normalizeForMatch(t.name) === norm);
     if (exactMatch) return null; // exact match is always unambiguous, no issue
+
+    const aliasTarget = TEAM_NAME_ALIASES[norm];
+    if (aliasTarget) {
+      const aliasMatch = sportTeams.find(t => normalizeForMatch(t.name) === normalizeForMatch(aliasTarget));
+      // Only resolves if the alias's real name is actually registered for
+      // THIS sport -- otherwise falls through to the normal checks below
+      // exactly as if this list didn't exist, so a coincidental acronym
+      // collision across sports can never misfire.
+      if (aliasMatch) return { rawName, suggestion: aliasMatch.name };
+    }
 
     const substringMatches = sportTeams.filter(t => {
       const tn = normalizeForMatch(t.name);
@@ -23906,7 +23958,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 477; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 478; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
