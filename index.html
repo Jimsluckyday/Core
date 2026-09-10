@@ -22472,7 +22472,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       if (rawBetType) missing.bet_type = rawBetType;
     }
 
-    if (!row.selection) errors.push('missing selection');
+    // CONFIRMED REAL GAP, direct report 2026-09-10: a Golf Round/Tournament
+    // Matchup pick genuinely can't have a real Selection at entry time in
+    // ~95% of real cases -- the opponent is whichever golfer the
+    // sportsbook itself paired the pick against, which has to be
+    // researched separately (see RESEARCH-SOURCES.md's Golf section), not
+    // something the capper's own message states. The blanket "missing
+    // selection" error below forced a real upload to a dead stop over
+    // this every time, with no way through except typing a meaningless
+    // placeholder ("0") just to satisfy the check -- exactly the kind of
+    // silent-junk-value problem this whole file has spent a lot of effort
+    // fixing elsewhere (Anytime Goal's forced "0" being the closest
+    // precedent). This carve-out lets a Golf Matchup prop upload
+    // successfully with NO selection yet, auto-filling a clear, greppable
+    // "Opponent TBD" placeholder instead -- searchable later, never
+    // confusable with a real value the way a bare "0" was.
+    const earlyBetType = findByNameCI(betTypes, row.bet_type || row.bettype);
+    const earlyPropStatRaw = row.prop_stat || row.stat || '';
+    const isGolfMatchupUpload = earlyBetType && earlyBetType.uses_prop_fields && isGolfMatchupStat(earlyPropStatRaw);
+    if (isGolfMatchupUpload && !row.selection) {
+      row.selection = 'Opponent TBD';
+    } else if (!row.selection) {
+      errors.push('missing selection');
+    }
 
     const homeAway = (row.home_away || '').toLowerCase();
     if (homeAway && homeAway !== 'home' && homeAway !== 'away') errors.push('home_away must be "home", "away", or blank');
@@ -23769,7 +23791,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 468; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 469; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
