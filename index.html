@@ -5210,6 +5210,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // SECOND set of rules below this one paints just the one offending
       // cell in yellow, so the row draws the eye first and the yellow
       // cell answers "which one" without scrolling right to read U-AB.
+      //
+      // CONFIRMED REAL BUG, direct report 2026-09-10: "I had put in an
+      // addition that the offending cell should get highlighted... I
+      // don't know if this was a regression or it never did this" -- it
+      // never actually worked. Root cause: when two conditional-
+      // formatting rules both set a cell's fill and are both true on the
+      // same cell, Excel resolves the conflict by LOWER priority number
+      // wins (priority 1 beats priority 10), not higher. The row-level
+      // red rule was given priority 1-2 while the cell-level yellow rules
+      // below were given priority 10-18 -- so on the one cell where both
+      // rules genuinely fired (the actual offending cell), red always
+      // silently won and the yellow never rendered, on every row, since
+      // this shipped. Every OTHER cell in the row was never affected
+      // (only the row rule ever matched them), which is exactly why this
+      // read as "the row goes red" working fine while the yellow
+      // specifically never appeared. Fixed by swapping which side gets
+      // the lower numbers: the more specific, more useful cell-level
+      // rules now win the fill conflict on the one cell that matters,
+      // while every other cell in the row is untouched by this swap and
+      // still shows red exactly as before.
       const newEntryHighlight = {
         type: 'expression',
         formulae: [`OR(LEFT($U3,4)="NEW?",LEFT($V3,4)="NEW?",LEFT($W3,4)="NEW?",LEFT($X3,4)="NEW?",LEFT($Y3,4)="NEW?",LEFT($Z3,4)="NEW?",LEFT($AB3,4)="NEW?",AND($A3<>"",NOT(${dateFormatOkFormula('$A3')})),AND($B3<>"",NOT(${dateFormatOkFormula('$B3')})))`],
@@ -5218,8 +5238,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
           font: { color: { argb: 'FF9C0006' } }
         }
       };
-      ws.addConditionalFormatting({ ref: `A3:Q${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 1 }] });
-      ws.addConditionalFormatting({ ref: `AA3:AA${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 2 }] });
+      ws.addConditionalFormatting({ ref: `A3:Q${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 20 }] });
+      ws.addConditionalFormatting({ ref: `AA3:AA${LAST_DATA_ROW}`, rules: [{ ...newEntryHighlight, priority: 21 }] });
 
       // Cell-level highlight -- same idea, but painted ONLY on the single
       // typed cell that's actually wrong, in a color that reads as
@@ -5228,6 +5248,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
       // instead of making you scroll right to see which Check column
       // said "NEW?". One rule per typed field that has a check to fail;
       // Doubleheader Game # has no check (dropdown-only) so it's skipped.
+      // Lower priority numbers than the row-level rule above (1-8 vs.
+      // 20-21) so these win the fill conflict on the one cell where both
+      // are true -- see the bug note above for why this matters.
       const cellErrorHighlight = (formula, priority) => ({
         type: 'expression',
         formulae: [formula],
@@ -5237,15 +5260,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
         },
         priority
       });
-      ws.addConditionalFormatting({ ref: `C3:C${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($U3,4)="NEW?"', 10)] }); // Capper
-      ws.addConditionalFormatting({ ref: `D3:D${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($V3,4)="NEW?"', 11)] }); // Sport
-      ws.addConditionalFormatting({ ref: `E3:E${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($W3,4)="NEW?"', 12)] }); // Bet Type
-      ws.addConditionalFormatting({ ref: `F3:F${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($X3,4)="NEW?"', 13)] }); // Team 1 / Player
-      ws.addConditionalFormatting({ ref: `G3:G${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($Y3,4)="NEW?"', 14)] }); // Team 2 / Opponent
-      ws.addConditionalFormatting({ ref: `I3:I${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($AB3,4)="NEW?"', 15)] }); // Prop Stat
-      ws.addConditionalFormatting({ ref: `J3:J${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($Z3,4)="NEW?"', 16)] }); // Prop Team
-      ws.addConditionalFormatting({ ref: `A3:A${LAST_DATA_ROW}`, rules: [cellErrorHighlight(`AND($A3<>"",NOT(${dateFormatOkFormula('$A3')}))`, 17)] }); // Date entry
-      ws.addConditionalFormatting({ ref: `B3:B${LAST_DATA_ROW}`, rules: [cellErrorHighlight(`AND($B3<>"",NOT(${dateFormatOkFormula('$B3')}))`, 18)] }); // Event Date
+      ws.addConditionalFormatting({ ref: `C3:C${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($U3,4)="NEW?"', 1)] }); // Capper
+      ws.addConditionalFormatting({ ref: `D3:D${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($V3,4)="NEW?"', 2)] }); // Sport
+      ws.addConditionalFormatting({ ref: `E3:E${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($W3,4)="NEW?"', 3)] }); // Bet Type
+      ws.addConditionalFormatting({ ref: `F3:F${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($X3,4)="NEW?"', 4)] }); // Team 1 / Player
+      ws.addConditionalFormatting({ ref: `G3:G${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($Y3,4)="NEW?"', 5)] }); // Team 2 / Opponent
+      ws.addConditionalFormatting({ ref: `I3:I${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($AB3,4)="NEW?"', 6)] }); // Prop Stat
+      ws.addConditionalFormatting({ ref: `J3:J${LAST_DATA_ROW}`, rules: [cellErrorHighlight('LEFT($Z3,4)="NEW?"', 7)] }); // Prop Team
+      ws.addConditionalFormatting({ ref: `A3:A${LAST_DATA_ROW}`, rules: [cellErrorHighlight(`AND($A3<>"",NOT(${dateFormatOkFormula('$A3')}))`, 8)] }); // Date entry
+      ws.addConditionalFormatting({ ref: `B3:B${LAST_DATA_ROW}`, rules: [cellErrorHighlight(`AND($B3<>"",NOT(${dateFormatOkFormula('$B3')}))`, 9)] }); // Event Date
 
       ws.views = [{ state: 'frozen', ySplit: 2, showGridLines: false }];
 
@@ -23883,7 +23906,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 476; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 477; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
