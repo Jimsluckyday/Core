@@ -75,6 +75,29 @@
 // competitor data doesn't expose a clean per-round calendar date to cross-
 // check against without fragile string-parsing of a tee-time field.
 //
+// SUSPENDED/DELAYED ROUND -> PUSH, not a rolling wait. Direct rule
+// confirmed 2026-09-10: "it would be push just as in all other cases as
+// sports books don't want to carry data over a day and allows them to
+// adjust odds etc" -- if a round doesn't finish within its scheduled
+// calendar day (weather, darkness), the real sportsbook convention is to
+// push every bet tied to that round rather than carry it into the next
+// trading day once odds/lines may have moved. NOT YET IMPLEMENTED here --
+// this function currently just leaves an incomplete round `pending`
+// indefinitely (see "Round Matchup requires a real linescore entry"
+// below), with no way to tell "hasn't happened yet today, check back
+// later" apart from "was suspended and will never get a linescore entry
+// for this date." Confirmed via a live completed-event fetch the same day
+// that ESPN's `status.type` object (id/name/state/completed/description)
+// CAN carry richer states than a plain complete/not-complete flag, but a
+// genuinely suspended/delayed round was never caught live to see its
+// actual `name` value (e.g. a hypothetical "STATUS_SUSPENDED") -- so
+// auto-detecting this case is UNVERIFIED, not safe to build blind. Until
+// confirmed against a real delayed event: if a Round Matchup/Round
+// Strokes pick sits pending for longer than its round should reasonably
+// take to finish, that's the signal to check ESPN/the PGA Tour site
+// directly for a weather delay and, if confirmed, push it manually via
+// Bulk Upload Manual Changes rather than waiting on this function.
+//
 // MISSED CUT / WITHDRAWAL: no explicit status field was found on ESPN's
 // golf competitors (unlike team-sport competitors elsewhere in this
 // project). Handled pragmatically instead of guessed at:
