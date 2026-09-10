@@ -11803,7 +11803,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           // prompting you... I may task someone else with this who would
           // have no idea." unsupported_bet_type/unsupported are the two
           // keys used ONLY for a structural gap (a bet type or sport this
-          // grader has no logic for at all, e.g. NHL Player Props, CFL)
+          // grader has no logic for at all, e.g. CFL -- NHL Player Props
+          // was this kind of gap too until it was added 2026-09-07, see
+          // PLAYER_PROP_SPORTS' own comment)
           // -- these will fail identically every single run, forever,
           // until real code support gets added, regardless of any data
           // fix. Every other FAILURE_KEYS member (ambiguous, unmatched,
@@ -12364,7 +12366,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         // there" -- filling in event_date/event_name/game_start_time_et/
         // prop_team through this same import now stops that pick from
         // being re-flagged by the next automation run.
-        const prefixText = 'Read the Issue column for each row below to see what actually needs fixing -- not every failure here is a missing-odds problem. Check "Can auto-resolve?" first: "No" means this bet type/sport has no grading logic at all yet (e.g. NHL Player Props, CFL) -- it will fail the exact same way every single run no matter what you fix, so grade it manually and move on, don\'t spend time investigating it as if it were a data problem. "Maybe" means it IS a real, fixable data issue (a typo\'d name, a missing team/date) -- fix it and it should resolve on the next automated run. Depending on the Issue, add whichever of these columns apply: opening_odds, closing_odds, event_date, event_name, game_start_time_et, prop_team (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Bulk Upload Manual Changes -- it matches strictly by id and writes only the columns you included back onto these exact picks. Filling in event_date, event_name, game_start_time_et, or prop_team also marks the pick reviewed for schedule sync, so it stops being re-flagged by the next automation run.';
+        const prefixText = 'Read the Issue column for each row below to see what actually needs fixing -- not every failure here is a missing-odds problem. Check "Can auto-resolve?" first: "No" means this bet type/sport has no grading logic at all yet (e.g. CFL) -- it will fail the exact same way every single run no matter what you fix, so grade it manually and move on, don\'t spend time investigating it as if it were a data problem. "Maybe" means it IS a real, fixable data issue (a typo\'d name, a missing team/date) -- fix it and it should resolve on the next automated run. Depending on the Issue, add whichever of these columns apply: opening_odds, closing_odds, event_date, event_name, game_start_time_et, prop_team (id is required, everything else here is just for reference and gets ignored on import). Once filled in, paste this same file into Data Tools -> Bulk Upload Manual Changes -- it matches strictly by id and writes only the columns you included back onto these exact picks. Filling in event_date, event_name, game_start_time_et, or prop_team also marks the pick reviewed for schedule sync, so it stops being re-flagged by the next automation run.';
         downloadCsv(`${safeName || 'automation-export'}.csv`, ['id', 'Capper', 'Sport', 'Pick', 'Issue', 'Can auto-resolve?', 'opening_odds', 'closing_odds'], rows, prefixText);
       });
     }
@@ -23767,7 +23769,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 467; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 468; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
