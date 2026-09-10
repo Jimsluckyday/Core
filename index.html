@@ -1073,6 +1073,27 @@ These are almost always the same day, so "Date entered" only fills in a starting
     </div>
 
     <!-- FIND & EDIT A PICK -->
+    <!-- CONFIRMED REAL WORKFLOW GAP, direct report 2026-09-10: "once I
+         upload the first thing I do is run the tools in the pending picks
+         section... I have been doing it out of order." Verify Upload
+         Against Database only means anything checked immediately after
+         uploading, before anything gets corrected -- fixing a start time,
+         tournament name, or misspelled player HERE first, then running
+         Verify Upload against the original file afterward, makes every one
+         of those already-fixed picks look "missing" (the file is stale,
+         not the database), which risks a real duplicate if anyone takes
+         "safe to re-upload" at face value. This banner sits at the very
+         top of this tab specifically because it's where the habit of
+         landing right after an upload was breaking the order. -->
+    <div class="stub" data-tab="pending" style="border:1.5px solid var(--stamp-amber);border-radius:4px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+        <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;max-width:540px;">
+          &#9888; Just uploaded a batch? Run "Verify Upload Against Database" FIRST, before fixing anything here. Correcting a start time, tournament name, or misspelled name in this tab BEFORE verifying makes that pick look "missing" on the check -- it isn't, the file you're checking against is just now out of date -- and re-uploading it would create a real duplicate.
+        </div>
+        <button type="button" class="ghost" id="goVerifyUploadBtn" title="Takes you to Verify Upload Against Database (Data Tools tab) -- run this immediately after uploading, before fixing anything in Pending Picks.">Verify Upload Against Database &rarr;</button>
+      </div>
+    </div>
+
     <div class="stub" data-tab="pending">
       <p class="stub-title">Made a mistake? Find &amp; fix a pick</p>
       <div class="row">
@@ -11698,6 +11719,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const date = $('autoDate').value;
     if (date) { $('mdFrom').value = date; $('mdTo').value = date; }
     MD_CHECKBOX_IDS.forEach(id => { $(id).checked = id !== 'mdCheckNotScored'; });
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  $('goVerifyUploadBtn').addEventListener('click', () => {
+    switchTab('tools');
+    const panel = $('verifyUploadPanel');
+    panel.style.display = 'block';
+    $('toggleVerifyUploadBtn').textContent = 'Hide tool';
     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
@@ -23791,7 +23820,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 469; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 470; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
