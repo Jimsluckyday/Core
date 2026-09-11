@@ -5953,7 +5953,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       '  - tour: exactly "ATP", "WTA", or "Challenger".',
       '  - tournament_name: the real tournament name.',
       '  - round: e.g. "R32", "QF", "Q1" -- best effort, leave blank if unknown.',
-      '  - player_a and player_b: full player names.',
+      '  - player_a and player_b: full player names, ALWAYS in "Given name(s) Family name" order (surname LAST) -- e.g. "Qinwen Zheng", not "Zheng Qinwen", even if the player\'s native name order puts the family name first. This matters: this system identifies a player by treating the LAST word of the stored name as their surname, since that is how a capper usually refers to them (e.g. just "Zheng"). Getting the order backwards on a name that is natively family-name-first (common for Chinese, Hungarian, and some other names) will make that player unmatchable by surname alone.',
       `  - start_time_et: this SPECIFIC match's approximate start time in US Eastern time, as "YYYY-MM-DD HH:MM" (24-hour) -- leave blank rather than guessing if genuinely unknown.`,
       `  - tournament_play_start_et: this tournament's daily "order of play" start time for THIS DATE (when play begins at the venue that day, e.g. official schedules often say "Play begins at 10:00 local") -- convert to US Eastern time, "YYYY-MM-DD HH:MM". Fill this in for every match from the same tournament on the same day (repeat the same value). This is used as a fallback whenever a specific match's own start_time_et isn't known, so it must NEVER be later than the earliest real match of the day -- leave blank rather than guessing if genuinely unknown.`,
       '',
@@ -24780,7 +24780,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 487; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 488; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
