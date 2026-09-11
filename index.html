@@ -11925,7 +11925,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           // branch) so the row can offer a one-click "Fix to X" button --
           // see automationGroupListHtml -- instead of the reason text being
           // the only place a correction is visible.
-          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '', permanent, suggestion: it.suggestion || null })) });
+          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '', permanent, suggestion: it.suggestion || null, suggestion_field: it.suggestion_field || 'prop_player' })) });
         } else if (isItemArray && PENDING_KEYS.has(key)) {
           pendingCount += val.length;
           pendingGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '' })) });
@@ -12114,8 +12114,15 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // reviewed" convention Bulk Upload Manual Changes already uses) --
       // never calls the paid Edge Function again just to confirm a fix
       // that was already typed here.
+      // Direct request 2026-09-11: "we need to write in the suggestion
+      // field to all sports really so wherever it can find a suggestion it
+      // should give me the option at least" -- suggestion_field names
+      // WHICH column to PATCH (prop_player for a Player Prop name,
+      // selection for a team/tennis/MMA matchup), defaulting to
+      // prop_player only for backward compatibility with results from
+      // before this field existed at all.
       const fixSuggestionBtnHtml = (it.id && it.suggestion)
-        ? `<button type="button" class="fix-automation-suggestion-btn" data-pick-id="${it.id}" data-field="prop_player" data-new="${escapeHtml(it.suggestion)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;">Fix to "${escapeHtml(it.suggestion)}"</button>`
+        ? `<button type="button" class="fix-automation-suggestion-btn" data-pick-id="${it.id}" data-field="${escapeHtml(it.suggestion_field || 'prop_player')}" data-new="${escapeHtml(it.suggestion)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;">Fix to "${escapeHtml(it.suggestion)}"</button>`
         : '';
       // Direct request 2026-08-31: a plain, always-visible badge -- not
       // just something implied by the reason text -- so this reads
@@ -24160,7 +24167,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 481; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 482; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this

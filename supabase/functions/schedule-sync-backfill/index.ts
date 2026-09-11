@@ -1013,6 +1013,29 @@ function formatEtDateTime(isoString: string): string {
   return `${datePart} at ${timePart} ET`;
 }
 
+// CONFIRMED REAL BUG, direct report 2026-09-11: a real Botafogo pick got
+// "real match is on 2025-06-16" -- but the actual kickoff (2025-06-16T02:00Z)
+// is 10:00 PM Eastern on June 15, one day EARLIER. Every "Found on X, this
+// pick's event_date is currently Y" message in this file (Tennis, Cricket,
+// Soccer/KBO) built its displayed date via `(startTime || '').slice(0, 10)`
+// -- a raw UTC calendar-day slice, never converted to Eastern -- so any late
+// -night US game (a 10PM+ ET kickoff, common for West Coast MLS/soccer and
+// anything broadcast for US audiences) reports the WRONG day to a business
+// that thinks and operates in Eastern time. Same root cause already fixed
+// repeatedly elsewhere in this codebase for the identical "late-night ET
+// crosses into the next UTC day" shape (KBO's own reversed-home-away
+// investigation, the capper_message_timestamp late-night flag, etc.) --
+// this file's OWN date-mismatch reporting just never got the same fix.
+// Reuses formatEtDateTime's exact Intl.DateTimeFormat('...', {timeZone:
+// 'America/New_York'}) approach, just formatted as YYYY-MM-DD (en-CA locale
+// gives that directly) instead of a human-readable string, so it can still
+// be compared against pickOwnDate (a plain YYYY-MM-DD) and fed into
+// gapDays' own date-math unchanged.
+function toEasternDateStr(isoString: string): string {
+  const d = new Date(isoString);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
 function levenshtein(a: string, b: string): number {
   const m = a.length, n = b.length;
   const d: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
@@ -1651,9 +1674,31 @@ Deno.serve(async (req) => {
             const missingTokens = tokens.filter((t, i) => resolvedLists[i].length === 0);
 
             if (missingTokens.length) {
+              // Direct request 2026-09-11: "we need to write in the
+              // suggestion field to all sports really so wherever it can
+              // find a suggestion it should give me the option" -- ported
+              // the same structured-field idea from the player-prop branch
+              // (2026-09-11, see propSuggestion's own comment) to Tennis.
+              // A suggestion is only offered as a one-click fix when EVERY
+              // still-missing token has a real candidate -- a two-name pick
+              // where only ONE side got suggested would otherwise silently
+              // lock in a still-wrong name for the other side if applied
+              // blindly, so this reconstructs the FULL corrected selection
+              // (already-resolved tokens kept as-is, missing ones replaced)
+              // rather than exposing a single bare name -- the client can
+              // then just overwrite `selection`/`prop_player` wholesale with
+              // one PATCH, no token-splitting logic needed on that end.
+              const suggestionByToken = new Map<string, string>();
+              missingTokens.forEach(t => {
+                const s = suggestClosestTennisPlayer(t, tennisPlayerDisplayNames);
+                if (s) suggestionByToken.set(t, s);
+              });
               const suggestions = missingTokens
-                .map(t => { const s = suggestClosestTennisPlayer(t, tennisPlayerDisplayNames); return s ? `"${t}" -> "${s}"` : null; })
+                .map(t => suggestionByToken.has(t) ? `"${t}" -> "${suggestionByToken.get(t)}"` : null)
                 .filter(Boolean);
+              const fullSuggestion = missingTokens.every(t => suggestionByToken.has(t))
+                ? tokens.map(t => suggestionByToken.get(t) || t).join('/')
+                : null;
               let ambiguousTournament: string | null = null;
               if (tokens.length === 1 && !pick.event_name) {
                 const ambiguousCandidates = tennisSurnameAllCandidates.get(normalize(tokens[0]));
@@ -1670,7 +1715,10 @@ Deno.serve(async (req) => {
               }
               updatePayload.schedule_sync_note = note;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify(updatePayload) });
-              tennisSportResult.unmatched.push({ id: pick.id, selection: isProp ? pick.prop_player : pick.selection, reason: note, event_name: ambiguousTournament });
+              tennisSportResult.unmatched.push({
+                id: pick.id, selection: isProp ? pick.prop_player : pick.selection, reason: note, event_name: ambiguousTournament,
+                suggestion: fullSuggestion, suggestion_field: isProp ? 'prop_player' : 'selection'
+              });
               continue;
             }
 
@@ -1700,7 +1748,7 @@ Deno.serve(async (req) => {
             }
 
             if (matched) {
-              const matchedDateStr = (matched.startTime || '').slice(0, 10);
+              const matchedDateStr = matched.startTime ? toEasternDateStr(matched.startTime) : '';
               const dateDiffers = !!matchedDateStr && matchedDateStr !== pickOwnDate;
               const gapDays = matchedDateStr
                 ? Math.round((new Date(matchedDateStr + 'T00:00:00Z').getTime() - new Date(pickOwnDate + 'T00:00:00Z').getTime()) / 86400000)
@@ -1903,12 +1951,29 @@ Deno.serve(async (req) => {
             }
             const missingTokens = tokens.filter((_, i) => !realResolved[i]);
             if (missingTokens.length) {
+              // suggestion/suggestion_field added 2026-09-11, same pattern
+              // as Tennis/Cricket above -- only offered when EVERY missing
+              // token has a real candidate, reconstructing the full
+              // corrected selection ("/"-joined, one of the two formats
+              // splitMmaNames already accepts) so the client can overwrite
+              // the field wholesale with one PATCH.
+              const suggestionByToken = new Map<string, string>();
+              missingTokens.forEach(t => {
+                const s = suggestClosestPlayer(t, mmaFighterNamesToday);
+                if (s) suggestionByToken.set(t, s);
+              });
               const suggestions = missingTokens
-                .map(t => { const s = suggestClosestPlayer(t, mmaFighterNamesToday); return s ? `"${t}" -> "${s}"` : null; })
+                .map(t => suggestionByToken.has(t) ? `"${t}" -> "${suggestionByToken.get(t)}"` : null)
                 .filter(Boolean);
+              const fullSuggestion = missingTokens.every(t => suggestionByToken.has(t))
+                ? tokens.map(t => suggestionByToken.get(t) || t).join('/')
+                : null;
               const note = `Could not find ${missingTokens.map(t => `"${t}"`).join(', ')} on any UFC/Bellator/PFL card within a day of ${targetDate} -- may be a name spelling issue, or this card/promotion isn't covered yet.${suggestions.length ? ' ' + suggestions.join(', ') + '.' : ''}`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
-              mmaSportResult.unmatched.push({ id: pick.id, selection: tokens.join(' / '), reason: note });
+              mmaSportResult.unmatched.push({
+                id: pick.id, selection: tokens.join(' / '), reason: note,
+                suggestion: fullSuggestion, suggestion_field: isProp ? 'prop_player' : 'selection'
+              });
               continue;
             }
             const fightIds = new Set(realResolved.map(r => r!.fight.fightId));
@@ -2091,7 +2156,10 @@ Deno.serve(async (req) => {
               const ownError = cricketSearchErrors.get(rawName) || cricketInfoError;
               const note = `Could not find "${rawName}" on any Cricket series covering ${pick.event_date || targetDate} (checked matching series within ${CRICKET_DATE_BUFFER_DAYS} days of it)${ownError ? ` -- a lookup hit an error: ${ownError}` : ''}.${suggestion ? ` "${rawName}" -> "${suggestion}".` : ''}`;
               await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
-              cricketSportResult.unmatched.push({ id: pick.id, selection: rawName, reason: note });
+              // suggestion/suggestion_field added 2026-09-11, same "wherever
+              // it can find a suggestion it should give me the option"
+              // request as Tennis/Soccer above.
+              cricketSportResult.unmatched.push({ id: pick.id, selection: rawName, reason: note, suggestion: suggestion || null, suggestion_field: 'selection' });
               continue;
             }
             // Compares against THIS pick's own event_date (falling back to
@@ -2100,7 +2168,7 @@ Deno.serve(async (req) => {
             // real date can differ from the date you searched with.
             const pickOwnDate = pick.event_date || targetDate;
             const matched = closestCricketMatch(candidates, pickOwnDate);
-            const matchedDateStr = (matched.startTime || '').slice(0, 10);
+            const matchedDateStr = matched.startTime ? toEasternDateStr(matched.startTime) : '';
             const dateDiffers = !!matchedDateStr && matchedDateStr !== pickOwnDate;
             const correctionNote = usedSuggestion ? `Auto-corrected spelling: "${rawName}" -> "${usedSuggestion}" -- confirmed by a real match on the covering series, but please double-check this was the intended team. ` : '';
             const dateDifferNote = dateDiffers ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.` : '';
@@ -2700,7 +2768,7 @@ Deno.serve(async (req) => {
               // reasoning on pickOwnDate in the Tennis/Cricket branches
               // above.
               const pickOwnDate = pick.event_date || targetDate;
-              const matchedDateStr = (candidateGames[0].start_time || '').slice(0, 10);
+              const matchedDateStr = candidateGames[0].start_time ? toEasternDateStr(candidateGames[0].start_time) : '';
               if (matchedDateStr && matchedDateStr !== pickOwnDate) {
                 dnbDateCorrected = true;
                 updatePayload.schedule_sync_note = `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`;
@@ -2724,7 +2792,7 @@ Deno.serve(async (req) => {
             let dateCorrected = false;
             if (isSoccer || isKBO) {
               const pickOwnDate = pick.event_date || targetDate;
-              const matchedDateStr = (candidateGames[0].start_time || '').slice(0, 10);
+              const matchedDateStr = candidateGames[0].start_time ? toEasternDateStr(candidateGames[0].start_time) : '';
               if (matchedDateStr && matchedDateStr !== pickOwnDate) {
                 dateCorrected = true;
                 updatePayload.schedule_sync_note = `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`;
@@ -2740,21 +2808,38 @@ Deno.serve(async (req) => {
               date_corrected: dateCorrected, event_name: updatePayload.event_name || pick.event_name || null
             });
           } else if (candidateGames.length === 0) {
+            // suggestion/suggestion_field added 2026-09-11, same "wherever
+            // it can find a suggestion it should give me the option"
+            // request as Tennis/Cricket/MMA above. For a two-team "A/B"
+            // selection, only the SIDE(s) that genuinely had zero matches
+            // get replaced -- a side that already matched fine is never
+            // touched, same discipline as Tennis's per-token reconstruction.
             let suggestionText = '';
+            let fullSuggestion: string | null = null;
             if (hasSlash) {
               const parts: string[] = [];
+              let suggestedA: string | null = null, suggestedB: string | null = null;
               if (slashMatchesA && slashMatchesA.length === 0) {
-                const s = suggestClosest(slashTeamA, allTeamDisplayNamesToday);
-                if (s) parts.push(`"${slashTeamA}" -> "${s}"`);
+                suggestedA = suggestClosest(slashTeamA, allTeamDisplayNamesToday);
+                if (suggestedA) parts.push(`"${slashTeamA}" -> "${suggestedA}"`);
               }
               if (slashMatchesB && slashMatchesB.length === 0) {
-                const s = suggestClosest(slashTeamB, allTeamDisplayNamesToday);
-                if (s) parts.push(`"${slashTeamB}" -> "${s}"`);
+                suggestedB = suggestClosest(slashTeamB, allTeamDisplayNamesToday);
+                if (suggestedB) parts.push(`"${slashTeamB}" -> "${suggestedB}"`);
               }
               if (parts.length) suggestionText = ` Possible spelling issue: ${parts.join(', ')}.`;
+              // Only a real, confident one-click fix when EVERY side that
+              // needed a suggestion actually got one -- never replace one
+              // side while silently leaving the other's real problem
+              // unaddressed and unmentioned.
+              const aOk = !slashMatchesA || slashMatchesA.length > 0 || !!suggestedA;
+              const bOk = !slashMatchesB || slashMatchesB.length > 0 || !!suggestedB;
+              if (aOk && bOk && (suggestedA || suggestedB)) {
+                fullSuggestion = `${suggestedA || slashTeamA}/${suggestedB || slashTeamB}`;
+              }
             } else {
               const s = suggestClosest(pick.selection, allTeamDisplayNamesToday);
-              if (s) suggestionText = ` Closest team playing today: "${s}" -- possible spelling issue.`;
+              if (s) { suggestionText = ` Closest team playing today: "${s}" -- possible spelling issue.`; fullSuggestion = s; }
             }
             const pickOwnDate = pick.event_date || targetDate;
             let dateNote = ` on ${pickOwnDate}`;
@@ -2762,7 +2847,7 @@ Deno.serve(async (req) => {
             else if (isKBO) dateNote = ` (checked ${pickOwnDate} plus the day before and after)`;
             const note = `No matching ${ourSport.name} game found for "${pick.selection}"${dateNote}.${suggestionText}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
-            sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note });
+            sportResult.unmatched.push({ id: pick.id, selection: pick.selection, reason: note, suggestion: fullSuggestion, suggestion_field: 'selection' });
           } else if (isKBO) {
             // Compares against THIS pick's own event_date, not the global
             // targetDate you searched with -- an early-entered KBO pick's
