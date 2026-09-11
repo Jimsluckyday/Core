@@ -11918,7 +11918,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           // of someone having to infer it from the wording of the reason
           // text (or ask what it means).
           const permanent = key === 'unsupported_bet_type' || key === 'unsupported';
-          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '', permanent })) });
+          // Direct report 2026-09-11: "I had no option to pick the correct
+          // name... this is where it will provide maximum value." Carries
+          // through a real `suggestion` field when the backend provides one
+          // (currently: schedule-sync-backfill's player-prop unmatched
+          // branch) so the row can offer a one-click "Fix to X" button --
+          // see automationGroupListHtml -- instead of the reason text being
+          // the only place a correction is visible.
+          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '', permanent, suggestion: it.suggestion || null })) });
         } else if (isItemArray && PENDING_KEYS.has(key)) {
           pendingCount += val.length;
           pendingGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '' })) });
@@ -12095,6 +12102,21 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const refreshBtnHtml = (category && it.id)
         ? `<button type="button" class="refresh-automation-btn" data-pick-id="${it.id}" data-category="${escapeHtml(category)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #55584d;background:transparent;color:#55584d;white-space:nowrap;margin-right:4px;">Refresh</button>`
         : '';
+      // Direct request 2026-09-11: "I had no option to pick the correct
+      // name nor do I have this feature in the failed section of the
+      // picks... this is where it will provide maximum value" -- same
+      // one-click "Fix to X" idea already built for Bulk Import's team/
+      // capper/sport/bet-type suggestions, applied here for a Player Prop
+      // name schedule-sync-backfill already found a close real match for
+      // (see that function's own `suggestion` field, added same day).
+      // Directly PATCHes prop_player and clears the stale schedule_sync_
+      // status/note (same "a human supplying this is treated as already
+      // reviewed" convention Bulk Upload Manual Changes already uses) --
+      // never calls the paid Edge Function again just to confirm a fix
+      // that was already typed here.
+      const fixSuggestionBtnHtml = (it.id && it.suggestion)
+        ? `<button type="button" class="fix-automation-suggestion-btn" data-pick-id="${it.id}" data-field="prop_player" data-new="${escapeHtml(it.suggestion)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;">Fix to "${escapeHtml(it.suggestion)}"</button>`
+        : '';
       // Direct request 2026-08-31: a plain, always-visible badge -- not
       // just something implied by the reason text -- so this reads
       // correctly at a glance days later, or to someone else entirely who
@@ -12108,7 +12130,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
         <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}${permanentBadgeHtml}</td>
         <td style="${reasonCellStyle}" ${reasonCellAttrs}>${escapeHtml(shortReason)}</td>
-        <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${refreshBtnHtml}${editBtnHtml}${dismissBtnHtml}</td>
+        <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${fixSuggestionBtnHtml}${refreshBtnHtml}${editBtnHtml}${dismissBtnHtml}</td>
       </tr>`;
     });
     return html + '</table>';
@@ -12440,6 +12462,35 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           btn.disabled = false;
           btn.textContent = 'Failed -- retry?';
           btn.title = e.message;
+        }
+      });
+    });
+    // Direct request 2026-09-11: one-click "Fix to X" for a Player Prop
+    // name schedule-sync-backfill already found a close real match for --
+    // see automationGroupListHtml's own comment for why. PATCHes the
+    // suggested field directly and clears schedule_sync_status/note (same
+    // "a human supplying this counts as reviewed" convention Bulk Upload
+    // Manual Changes already uses), then removes the row immediately --
+    // no need to re-check via automationItemStillFails, since this just
+    // cleared the exact flag that check looks for.
+    container.querySelectorAll('.fix-automation-suggestion-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('tr');
+        const pickId = btn.dataset.pickId;
+        const field = btn.dataset.field;
+        const newValue = btn.dataset.new;
+        btn.disabled = true;
+        btn.textContent = 'Fixing...';
+        try {
+          await rest(`picks?id=eq.${pickId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ [field]: newValue, schedule_sync_status: null, schedule_sync_note: null })
+          });
+          removeAutomationRow(row);
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = `Fix to "${newValue}"`;
+          alert('Could not apply this fix: ' + e.message);
         }
       });
     });
@@ -24109,7 +24160,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 480; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 481; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this

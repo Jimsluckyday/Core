@@ -2605,7 +2605,17 @@ Deno.serve(async (req) => {
             // a known, accepted historical-lookup gap.
             const note = `"${pick.prop_player}" was not found in any real ${ourSport.name} box score for a game played on ${pick.event_date || targetDate} -- may be a name spelling issue, or the player may genuinely not have appeared in a game that day.${propSuggestion ? ` Closest name found: "${propSuggestion}".` : ''}`;
             await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
-            sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note });
+            // `suggestion` added as its own real field 2026-09-11, direct
+            // report: "I had no option to pick the correct name... this is
+            // where it will provide maximum value" -- propSuggestion was
+            // already computed and shown, but only baked into the free-text
+            // `note` above, so admin.html had nothing reliable to build a
+            // one-click fix button from (parsing "Closest name found: X"
+            // back out of prose is exactly the kind of fragile text-scraping
+            // this project avoids elsewhere). Returning it as its own field
+            // lets the client offer a real "Fix to X" action without ever
+            // touching the wording of `note`.
+            sportResult.unmatched.push({ id: pick.id, selection: pick.prop_player, reason: note, suggestion: propSuggestion || null });
             continue;
           }
 
