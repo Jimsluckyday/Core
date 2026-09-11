@@ -1432,10 +1432,12 @@ Deno.serve(async (req) => {
           // coverage of ATP Challenger Tour or ITF events, which is where a
           // large share of real picks land (confirmed same day: Prizmic,
           // Blanch, Shevchenko, Onclin all played real Challenger matches
-          // ESPN's API can't see). tennis-draw-research (separate,
-          // on-demand Edge Function) researches a day's real ATP/WTA/
-          // Challenger matches via Claude + web search and caches them into
-          // tennis_draw_cache; this reads that cache for the SAME
+          // ESPN's API can't see). admin.html's Setup tab now has a "Tennis
+          // draw cache" bulk-import tool (same shape as Bulk refresh
+          // tournaments -- export a research request, paste a chatbot's
+          // real ATP/WTA/Challenger findings back in as CSV, no metered API
+          // call needed) that writes into tennis_draw_cache; this reads that
+          // cache for the SAME
           // candidateDates window already computed for ESPN above and
           // appends into the SAME tennisMatches array, before any of the
           // lookup structures below are built off it -- so every one of
@@ -1802,12 +1804,12 @@ Deno.serve(async (req) => {
                 ? Math.round((new Date(matchedDateStr + 'T00:00:00Z').getTime() - new Date(pickOwnDate + 'T00:00:00Z').getTime()) / 86400000)
                 : 0;
               const TENNIS_DATE_GAP_SAFETY_DAYS = 2;
-              // Cache-sourced matches are AI-researched via web search, not
-              // ESPN's structured API -- flagged in the note on every
-              // cache-sourced match (matched or gap-flagged) so early
-              // results get spot-checked before being trusted the same way
-              // ESPN's data already is. See tennis-draw-research's own
-              // header comment for the full reasoning.
+              // Cache-sourced matches are AI-researched (via a chatbot, then
+              // pasted in through admin.html's Setup tab), not ESPN's
+              // structured API -- flagged in the note on every cache-sourced
+              // match (matched or gap-flagged) so early results get spot-
+              // checked before being trusted the same way ESPN's data
+              // already is.
               const cacheNote = matched.source === 'cache'
                 ? ' (source: AI-researched draw cache, not ESPN -- worth a spot-check until this proves reliable)'
                 : '';
