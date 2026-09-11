@@ -2644,44 +2644,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
-    <!-- BULK MARK PARLAY ODDS UNAVAILABLE -->
-    <div class="stub" data-tab="tools">
-      <p class="stub-title">
-        Bulk mark parlay odds unavailable <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— last resort only, see note below before using this</span>
-        <button class="ghost small" id="toggleParlayOddsUnavailableBtn">Show tool</button>
-      </p>
-      <div id="parlayOddsUnavailablePanel" style="display:none;">
-        <div style="font-size:10px;color:var(--e-red, #b23b3b);font-weight:bold;margin-bottom:6px;">
-          POLICY CHANGE 2026-09-06 -- read before using this tool. Direct request, after finding 8 of Seeking Returns' parlays (7 losses + 1 real win) had been run through this exact tool: "make a note that parlays shouldn't be using that rule anymore as we realize it's detrimental to how we calculate a capper's ROI." Marking a parlay odds_unavailable doesn't just hide a blank field -- it silently zeroes out any WIN's real payout (a loss/push isn't affected, since calcProfit doesn't need a price for those), understating exactly the cappers this report exists to evaluate. Confirmed via a real audit query how many of these are actually wins sitting at $0 across the whole capper list, not just one.
-        </div>
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          <strong>Do this first instead:</strong> research each leg's own real price the way any other historical odds gap gets researched, then build the parlay's combined price yourself (multiply each leg's decimal odds together, convert back to American) -- or, for spread/total/team-total-style legs specifically, the business has accepted a flat -110-per-leg estimate as good enough for now rather than chasing exact historical lines (moneyline legs still need real research -- too much variance for a flat default). This is NOT the same mistake this tool was originally built to avoid: guessing the PARLAY's own combined number directly is confidently wrong (an 11-leg parlay is nowhere near -110), but compounding a reasonable PER-LEG estimate through the real math is a legitimate approximation, not a guess.
-          Original reasoning below, kept for context on why this tool exists at all -- it's still the right call for a parlay whose legs genuinely can't be priced any other way (e.g. a truly unresearchable novelty prop), just not the default first move anymore. CONFIRMED direct request 2026-08-22: "if we don't have parlay odds from the cappers... should just put -110 which is not ideal as there's huge variance... we have no way of legitimately validating these on old data." This tool never guesses a number at all: it marks matching picks <strong>odds_unavailable</strong> instead, the same flag already used everywhere else in this system to mean "confirmed we can't get a real value for this" -- it drops them out of profit/value math and stops them re-appearing as "missing" in every future check, without ever presenting a fabricated price as if it were real. Only ever touches the PARENT parlay pick (the "N-Leg Parlay" record itself) -- never individual legs, which structurally never carry their own odds regardless of whether the parlay's real price is known, so checking a leg's own fields was never a meaningful signal (confirmed directly: two real legs showed up here once, even though their parlay already had a real price on the parent). Non-parlay picks missing odds are a different situation entirely and aren't touched here. Only ever considers a parlay with BOTH opening AND closing odds blank -- if either side already has a real value, that's a Bulk-match Odds job instead, not this tool's.
-        </div>
-        <div class="row">
-          <div class="field">
-            <label>Sport</label>
-            <select id="pouSport"><option value="">All sports</option></select>
-          </div>
-          <div class="field" style="flex: 0 0 auto; min-width: 190px;">
-            <label>From date</label>
-            <div style="display:flex; gap:4px; align-items:center;">
-              <input id="pouFrom" type="date" style="width:auto;" />
-              <button class="ghost small" id="pouFromEarliestBtn" type="button" title="Jump to the earliest date with any picks on file">Earliest</button>
-            </div>
-          </div>
-          <div class="field">
-            <label>To date</label>
-            <input id="pouTo" type="date" />
-          </div>
-          <div style="align-self:flex-end;">
-            <button id="previewParlayOddsUnavailableBtn">Preview</button>
-          </div>
-        </div>
-        <div id="parlayOddsUnavailableWrap" style="margin-top:12px;"></div>
-      </div>
-    </div>
-
     <!-- BULK FILL STANDARD ODDS -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -4065,12 +4027,6 @@ These are almost always the same day, so "Date entered" only fills in a starting
     omSportSel.innerHTML = '<option value="">All sports</option>' +
       sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
     omSportSel.value = keepOmSport;
-
-    const pouSportSel = $('pouSport');
-    const keepPouSport = pouSportSel.value;
-    pouSportSel.innerHTML = '<option value="">All sports</option>' +
-      sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-    pouSportSel.value = keepPouSport;
 
     const bupSportSel = $('bupSport');
     const keepBupSport = bupSportSel.value;
@@ -18798,98 +18754,6 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
   $('previewOddsMatchBtn').addEventListener('click', previewOddsMatch);
 
-  // ---------- Bulk mark parlay odds unavailable ----------
-  // Direct request 2026-08-22, see this panel's own on-page explanation
-  // for the full reasoning -- short version: a parlay's combined price
-  // compounds with every leg, so a flat default the way Bulk-fill
-  // Standard Odds handles Spread/Totals would be confidently wrong, not
-  // just imprecise. Marks odds_unavailable instead of ever inventing a
-  // number.
-  $('toggleParlayOddsUnavailableBtn').addEventListener('click', () => {
-    const panel = $('parlayOddsUnavailablePanel');
-    const showing = panel.style.display !== 'none';
-    panel.style.display = showing ? 'none' : 'block';
-    $('toggleParlayOddsUnavailableBtn').textContent = showing ? 'Show tool' : 'Hide tool';
-  });
-
-  async function previewParlayOddsUnavailable() {
-    const sportFilter = $('pouSport').value;
-    const from = $('pouFrom').value;
-    const to = $('pouTo').value;
-    const wrap = $('parlayOddsUnavailableWrap');
-
-    wrap.innerHTML = '<div class="empty-state">Finding parlays missing both odds...</div>';
-
-    try {
-      // CONFIRMED REAL DESIGN BUG, found through a live incident and a
-      // full SQL trace, direct report 2026-08-22: this originally also
-      // matched LEGS (is_parlay_leg=true), not just parent Parlay picks.
-      // Two MMA legs (Ketlen Souza, Joanderson Brito) showed up even
-      // though their real parent parlay -- confirmed via SQL to be a
-      // genuine, existing "2-Leg Parlay" pick -- already HAD real
-      // opening/closing odds (106/106 and 117/117). Root cause: a leg's
-      // OWN opening_odds/closing_odds are ALWAYS null, by design, no
-      // matter whether the parlay's real combined price is known --  only
-      // the PARENT pick ever carries it (see linkLegToParlay's own
-      // comment). Checking a leg's own fields for null-ness was therefore
-      // never a meaningful signal at all -- it would flag EVERY leg of
-      // EVERY parlay in the whole database this same way, whether or not
-      // anything was actually missing. Simplified to only ever query and
-      // mark the PARENT record -- the one place odds meaningfully live
-      // for a parlay -- rather than trying to reason about legs at all.
-      const parlayTypeIds = betTypes.filter(b => normalizeForMatch(b.name) === 'parlay').map(b => b.id);
-      if (!parlayTypeIds.length) {
-        wrap.innerHTML = '<div class="msg error">No "Parlay" bet type is registered in Setup.</div>';
-        return;
-      }
-      let query = `picks?select=id,event_date,selection,line,capper_id,sport_id,bet_type_id,cappers(name),sports(name),bet_types(name)&opening_odds=is.null&closing_odds=is.null&odds_unavailable=eq.false&bet_type_id=in.(${parlayTypeIds.join(',')})`;
-      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
-      if (from) query += `&event_date=gte.${from}`;
-      if (to) query += `&event_date=lte.${to}`;
-      query += '&order=event_date.desc';
-      const picks = await restAllPages(query);
-
-      if (!picks.length) {
-        wrap.innerHTML = '<div class="empty-state">Nothing matches these filters -- no parlays are missing both odds.</div>';
-        return;
-      }
-
-      const rows = picks.map(p => `<tr>
-          <td>${p.event_date}</td>
-          <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
-          <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
-          <td>${escapeHtml(p.selection)}${p.line !== null && p.line !== undefined ? ' (' + p.line + ')' : ''}</td>
-        </tr>`).join('');
-
-      wrap.innerHTML = `
-        <div style="font-size:12px;margin-bottom:10px;"><strong>${picks.length}</strong> parlay${picks.length === 1 ? '' : 's'} would be marked odds_unavailable.</div>
-        <table class="picks-table" style="margin-bottom:14px;">
-          <thead><tr><th>Date</th><th>Capper</th><th>Sport</th><th>Selection</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <button class="btn-danger" id="confirmParlayOddsUnavailableBtn">Mark ${picks.length} parlay${picks.length === 1 ? '' : 's'} odds unavailable</button>`;
-
-      $('confirmParlayOddsUnavailableBtn').addEventListener('click', async () => {
-        const btn = $('confirmParlayOddsUnavailableBtn');
-        if (!confirm(`This will mark ${picks.length} parlay(s) as odds_unavailable -- they'll drop out of profit/value math and stop showing as "missing odds" going forward, instead of ever getting a guessed price. Continue?`)) return;
-        btn.disabled = true;
-        btn.textContent = 'Applying...';
-        try {
-          await Promise.all(picks.map(p => rest(`picks?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ odds_unavailable: true }) })));
-          wrap.innerHTML = `<div class="msg ok">Marked ${picks.length} parlay${picks.length === 1 ? '' : 's'} odds_unavailable.</div>`;
-          await refreshPicksList();
-        } catch (e) {
-          alert('Could not apply: ' + e.message);
-          btn.disabled = false;
-          btn.textContent = `Mark ${picks.length} parlay${picks.length === 1 ? '' : 's'} odds unavailable`;
-        }
-      });
-    } catch (e) {
-      wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
-    }
-  }
-  $('previewParlayOddsUnavailableBtn').addEventListener('click', previewParlayOddsUnavailable);
-
   // ---------- Bulk unpublish by date range ----------
   // Direct request 2026-08-23: a way to pull a whole batch of test/backfill
   // data off the public site at once while playing with formulas/tiers,
@@ -19169,6 +19033,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const isFutures = p.bet_types && p.bet_types.is_futures;
     const sportName = p.sports ? p.sports.name : '';
     const betTypeName = p.bet_types ? p.bet_types.name : '';
+    // Direct request 2026-09-13: "wins on a parlay needs to add to a
+    // capper's ROI not fail silently and add nothing as there's no value
+    // given." A parlay's combined price can ALWAYS be derived -- price
+    // each leg (real research, or the accepted flat -110-per-leg estimate
+    // for spread/total-style legs) and refreshParlaySummary's own
+    // computeParlayAmericanOdds combines them automatically the moment a
+    // leg's own opening_odds is saved. There is no genuinely
+    // unresearchable case for the WRAPPER itself the way there can be for
+    // an obscure straight prop, so the "Odds unavailable" escape hatch is
+    // removed entirely for Parlay picks here -- not hidden behind a
+    // warning, not disableable, just not offered as an option.
+    const isParlayBetType = betTypeName.toLowerCase() === 'parlay';
     const eventNameScoped = sportUsesEventName(sportName);
     const lineScoped = betTypeUsesLine(betTypeName, isProp, p.prop_stat);
     const homeAwayApplies = !isProp && !isFutures && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName);
@@ -19218,18 +19094,21 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           </div>` : ''}
           <div class="field">
             <label>Opening odds</label>
-            <input id="rqOpeningOdds" type="number" step="1" value="${p.opening_odds ?? ''}" ${p.odds_unavailable ? 'disabled' : ''} />
+            <input id="rqOpeningOdds" type="number" step="1" value="${p.opening_odds ?? ''}" ${(!isParlayBetType && p.odds_unavailable) ? 'disabled' : ''} />
           </div>
           <div class="field">
             <label>Closing odds</label>
-            <input id="rqClosingOdds" type="number" step="1" value="${p.closing_odds ?? ''}" ${p.odds_unavailable ? 'disabled' : ''} />
+            <input id="rqClosingOdds" type="number" step="1" value="${p.closing_odds ?? ''}" ${(!isParlayBetType && p.odds_unavailable) ? 'disabled' : ''} />
           </div>
-          <div class="field">
+          ${isParlayBetType ? `<div class="field">
+            <label>&nbsp;</label>
+            <div style="font-size:10px;color:var(--ink-soft);max-width:220px;">No "unavailable" option for a parlay -- price each leg's own opening_odds instead and the combined price fills in here automatically.</div>
+          </div>` : `<div class="field">
             <label>&nbsp;</label>
             <label style="font-weight:normal;display:flex;align-items:center;gap:4px;height:32px;">
               <input type="checkbox" id="rqOddsUnavailable" ${p.odds_unavailable ? 'checked' : ''} /> Odds unavailable
             </label>
-          </div>
+          </div>`}
           <div class="field">
             <label>Tier</label>
             <select id="rqTier">
@@ -19269,11 +19148,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <button class="ghost" id="rqExitBtn">Exit Review</button>
     `;
 
-    $('rqOddsUnavailable').addEventListener('change', () => {
-      const checked = $('rqOddsUnavailable').checked;
-      $('rqOpeningOdds').disabled = checked;
-      $('rqClosingOdds').disabled = checked;
-    });
+    // Not rendered at all for a Parlay pick (see isParlayBetType above) --
+    // guard the listener attachment the same way homeAwayEl/eventNameEl/
+    // lineEl are already guarded just below for their own conditionally-
+    // rendered fields.
+    const rqOddsUnavailableEl = document.getElementById('rqOddsUnavailable');
+    if (rqOddsUnavailableEl) {
+      rqOddsUnavailableEl.addEventListener('change', () => {
+        const checked = rqOddsUnavailableEl.checked;
+        $('rqOpeningOdds').disabled = checked;
+        $('rqClosingOdds').disabled = checked;
+      });
+    }
 
     $('rqSaveNextBtn').addEventListener('click', async () => {
       const btn = $('rqSaveNextBtn');
@@ -19283,7 +19169,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         const payload = {};
         const homeAwayEl = document.getElementById('rqHomeAway');
         if (homeAwayEl) payload.home_away = homeAwayEl.value || null;
-        const oddsUnavailable = $('rqOddsUnavailable').checked;
+        // rqOddsUnavailableEl is undefined for a Parlay pick (not rendered
+        // at all) -- always saves false in that case, never true.
+        const oddsUnavailable = rqOddsUnavailableEl ? rqOddsUnavailableEl.checked : false;
         payload.odds_unavailable = oddsUnavailable;
         const openingVal = $('rqOpeningOdds').value;
         const closingVal = $('rqClosingOdds').value;
@@ -19760,7 +19648,6 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     ['usFrom', 'previewUndoSyncBtn'],
     ['tfFrom', 'previewTotalsFillBtn'],
     ['omFrom', 'previewOddsMatchBtn'],
-    ['pouFrom', 'previewParlayOddsUnavailableBtn'],
     ['bupFrom', 'previewBulkUnpublishBtn']
   ].forEach(([fromId, runBtnId]) => wireEarliestDateButton(fromId, runBtnId));
   wireEarliestDateButton('autoDate', null);
@@ -24903,7 +24790,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 494; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 495; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
