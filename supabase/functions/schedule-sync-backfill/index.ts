@@ -1236,9 +1236,29 @@ function mmaSortedNameKey(name: string): string {
   return name.trim().split(/\s+/).map(normalize).filter(Boolean).sort().join('|');
 }
 
+// CONFIRMED REAL BUG, direct report 2026-09-11: a real pick "Elena Ruse"
+// came back "could not find" even though ESPN's own data had her real
+// match that exact day, registered under her full name "Elena-Gabriela
+// Ruse" -- confirmed live against ESPN's raw feed before assuming this was
+// a coverage gap. Root cause: the surname-comparison branch below always
+// compared the RAW INPUT'S WHOLE normalized string against a candidate's
+// surname alone -- correct for the function's original bare-surname use
+// case ("Zheng" vs a candidate's surname), but wrong the moment rawName
+// itself is a two-word "First Last" name whose first name doesn't
+// exactly match (a shortened/common first name, a missing middle name,
+// etc.): normalize("Elena Ruse") = "elenaruse" compared against just
+// "ruse" is a real edit distance of ~5, nowhere near the tight cap of 2,
+// even though the surnames themselves are IDENTICAL. Fixed by extracting
+// the raw input's OWN last word first (same "last word = surname"
+// convention this whole file already uses everywhere else) and comparing
+// surname-to-surname, not whole-input-to-surname -- a genuinely bare
+// single-word input (e.g. "Zheng") is completely unaffected, since its
+// own "last word" is just itself.
 function suggestClosestTennisPlayer(rawName: string, candidateNames: string[]): string | null {
   const norm = normalize(rawName);
   if (!norm || !candidateNames.length) return null;
+  const rawWords = rawName.trim().split(/\s+/);
+  const rawSurnameNorm = rawWords.length > 1 ? normalize(rawWords[rawWords.length - 1]) : norm;
   let best: string | null = null;
   let bestDist = Infinity;
   for (const candidate of candidateNames) {
@@ -1249,7 +1269,7 @@ function suggestClosestTennisPlayer(rawName: string, candidateNames: string[]): 
     }
     const words = candidate.trim().split(/\s+/);
     if (words.length > 1) {
-      const surnameDist = levenshtein(norm, normalize(words[words.length - 1]));
+      const surnameDist = levenshtein(rawSurnameNorm, normalize(words[words.length - 1]));
       if (surnameDist <= 2 && surnameDist < bestDist) {
         best = candidate; bestDist = surnameDist;
       }
