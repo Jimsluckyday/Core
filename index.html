@@ -1359,6 +1359,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button type="button" class="ghost small" id="togglePrePublishToolsBtn">Show tools</button>
             </div>
             <div id="prePublishToolsPanel" style="display:none;margin-top:10px;">
+              <!-- Direct request 2026-09-11: "leave a note in the
+                   automation tools section in case someone has forgotten or
+                   never used the tools before... run those 2 in the order
+                   required to cut down on having to duplicate work later." -->
+              <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
+                &#9888; Tennis or KBO picks tonight? Populate the <strong>Tennis draw cache</strong> / <strong>KBO results cache</strong> (Setup tab) for this date FIRST, then run "Find &amp; Update Pick Info" below -- running Pick Info first means re-running it again afterward to pick up anything the cache would have caught.
+              </div>
               <div class="row">
                 <div style="align-self:flex-end;">
                   <button id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
@@ -1388,6 +1395,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button type="button" class="ghost small" id="toggleGradingToolsBtn">Show tools</button>
             </div>
             <div id="gradingToolsPanel" style="display:none;margin-top:10px;">
+              <!-- Direct request 2026-09-11, same reasoning as the Prep &
+                   publish note above: run the cache-import step BEFORE
+                   grading, not after, to avoid a duplicate grading run. -->
+              <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
+                &#9888; Grading Tennis or KBO picks? Paste in results via <strong>Tennis draw cache &gt; Import results</strong> / <strong>KBO results cache</strong> (Setup tab) for this date FIRST, then run "Find &amp; Update Results" below -- grading first just means running it again afterward to pick up anything the cache would have caught.
+              </div>
               <div class="row">
                 <div style="align-self:flex-end;">
                   <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
@@ -24752,7 +24765,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 486; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 487; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
