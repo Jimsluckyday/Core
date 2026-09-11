@@ -15871,7 +15871,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const valued = profits.filter(v => v !== null);
     const totalProfit = valued.reduce((sum, v) => sum + v, 0);
     const winPct = (wins + losses) > 0 ? Math.round((1000 * wins) / (wins + losses)) / 10 : null;
-    const roiPct = decided.length ? Math.round((1000 * totalProfit) / (decided.length * 100)) / 10 : null;
+    // FIXED 2026-09-11, found investigating the parlay-odds visibility bug:
+    // this used to divide totalProfit by decided.length*100 -- ALL decided
+    // picks, including ones with unknown profit (e.g. a WIN missing odds,
+    // excluded from `valued`/totalProfit above but still counted here as a
+    // full $100 stake with $0 return). That silently DEFLATED the ROI%
+    // shown any time a decided pick lacked odds, exactly the "deflates/
+    // inflates ROI" risk this whole feature exists to avoid -- the same
+    // mismatch the main scoring engine already avoids elsewhere by pairing
+    // valueSum with valuedCount, never with the full decided count. Now
+    // divides by valued.length instead, so ROI% is only ever computed over
+    // the same population its numerator actually reflects.
+    const roiPct = valued.length ? Math.round((1000 * totalProfit) / (valued.length * 100)) / 10 : null;
     return {
       total_picks: picks.length, cappers, wins, losses, pushes, pending,
       win_pct: winPct, total_profit: totalProfit, roi_pct: roiPct,
@@ -15892,7 +15903,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td>${s.pending}</td>
         <td>${s.win_pct !== null ? s.win_pct + '%' : '—'}</td>
         <td>${profitText} <span style="color:var(--ink-soft);font-size:10px;">(${s.valuedCount}/${s.decidedCount} w/ odds)</span></td>
-        <td>${s.roi_pct !== null ? s.roi_pct + '%' : '—'}</td>
+        <td>${s.roi_pct !== null ? s.roi_pct + '%' : '—'} ${s.valuedCount < s.decidedCount ? `<span style="color:var(--ink-soft);font-size:10px;">(of ${s.valuedCount})</span>` : ''}</td>
       </tr>`;
     }
     return `
@@ -15906,7 +15917,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           ${row('Published (what we posted)', pubStats)}
         </tbody>
       </table>
-      <div style="font-size:10px;color:var(--ink-soft);margin-top:10px;">Excludes parlay legs (counted once on the parlay's own combined price, never once per leg). Profit/ROI use $100-per-pick stake sizing, opening odds where present else closing odds. Picks still pending are shown but excluded from win % and profit/ROI.</div>
+      <div style="font-size:10px;color:var(--ink-soft);margin-top:10px;">Excludes parlay legs (counted once on the parlay's own combined price, never once per leg). Profit/ROI use $100-per-pick stake sizing, opening odds where present else closing odds. Picks still pending are shown but excluded from win % and profit/ROI. A decided pick with no odds on file (and not marked odds_unavailable) is also excluded from Profit and ROI -- never counted as a $0 result -- which is why ROI's denominator is the "w/ odds" count, not the full decided count.</div>
     `;
   }
 
@@ -24892,7 +24903,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 493; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 494; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
