@@ -733,10 +733,12 @@
       <div id="tennisDrawsToolsPanel" style="display:none;margin-top:10px;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           ADDED 2026-09-11, direct request: "if I've got 15+ Tennis picks a night doing this one by one is not a solution that works long term." ESPN's tennis scoreboard (what "Find & Update Pick Info" checks against) only covers ATP/WTA main-tour level — it has zero coverage of ATP Challenger Tour or ITF events, which is where a large share of real Tennis picks actually land. Same idea as Bulk refresh tournaments above: export a research request, hand it to any AI chat (your own subscription — no per-call API cost), and paste the CSV it gives back here. It gets stored in a cache that "Find & Update Pick Info"'s Tennis matching already checks alongside ESPN, so a Challenger-level match ESPN can't see still gets found automatically once it's in here.
+          <br /><br />
+          <strong style="color:var(--ink);">Pulls the WHOLE tournament, not just one day</strong> — direct follow-up after a real miss: "this shouldn't be looking for specific players... the entire match draw should [be pulled]... this would avoid misses." The export below asks for every real match from every round of every tournament active that week, each tagged with its own real date — not just whatever's scheduled on the one date you pick here. Honest limitation: for a live/upcoming week, later rounds (QF/SF/F) genuinely don't exist yet until earlier rounds decide who advances, so a single pull early in the week only returns what's been drawn or played so far — re-running it later in the week fills in the rest. For a past/historical date, the whole bracket is already decided, so one pull gets everything.
         </div>
         <div class="row">
           <div class="field" style="flex:0 0 auto;">
-            <label>Date to research</label>
+            <label>Any date in the tournament week</label>
             <input id="tennisDrawExportDate" type="date" />
           </div>
           <div style="align-self:flex-end;">
@@ -745,7 +747,7 @@
         </div>
         <div style="margin-top:14px;">
           <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
-          <textarea id="tennisDrawImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,start_time_et,tournament_play_start_et&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Taro Daniel,,2025-06-14 05:00"></textarea>
+          <textarea id="tennisDrawImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,match_date,start_time_et,tournament_play_start_et&#10;Challenger,Bratislava Open,R32,Alexander Shevchenko,Federico Cina,2025-06-10,,&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Federico Cina,2025-06-13,,2025-06-13 05:00"></textarea>
           <div style="margin-top:8px;">
             <button id="parseTennisDrawImportBtn">Parse &amp; preview</button>
           </div>
@@ -5936,6 +5938,25 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // research for free). Lands in the same tennis_draw_cache table either
   // way -- schedule-sync-backfill's Tennis matching doesn't care how a row
   // got there, only that it's there.
+  // ADDED 2026-09-11, direct follow-up after a real test miss (James
+  // Trotter, real Ilkley player, lost in the Round of 16 -- a round this
+  // tool never asked for at all): "this shouldn't be looking for specific
+  // players... the entire match draw should [be pulled], should it not?
+  // ...this would avoid misses." Previously asked for only ONE calendar
+  // day's matches, tagging every row with that same single date -- missed
+  // any player whose real match fell on a different day of the same
+  // tournament (which is most of the draw, since a tournament runs 5-7
+  // days). Now asks for the WHOLE tournament's real bracket instead of a
+  // single day's slice, and each match carries its OWN real match_date
+  // (new required column) rather than inheriting the button's date.
+  // HONEST LIMITATION, explained directly in the instructions below too:
+  // for a LIVE/upcoming week, later rounds (QF/SF/F) genuinely don't exist
+  // yet until earlier rounds are actually played -- a single research pass
+  // early in the week can only ever return whatever's been drawn or played
+  // SO FAR, not a full bracket predicted in advance. Re-running this later
+  // in the week naturally fills in more of it. For a HISTORICAL date (like
+  // this feature's own June 2025 test batch), the whole bracket is already
+  // decided, so one pass genuinely does get everything.
   $('exportTennisDrawRequestBtn').addEventListener('click', () => {
     const date = $('tennisDrawExportDate').value;
     if (!date) { alert('Pick a date to research first.'); return; }
@@ -5943,26 +5964,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const instructions = [
       '=== INSTRUCTIONS FOR RESEARCHING TENNIS DRAWS (read this whole block first) ===',
       '',
-      `Please research real professional tennis matches scheduled or played on ${date} (Eastern Time, USA).`,
+      `Please research real professional tennis tournaments active during the WEEK containing ${date} (Eastern Time, USA).`,
       '',
       'Scope: ONLY ATP tour, WTA tour, and ATP Challenger Tour events. Do NOT include ITF-level events, exhibitions, or juniors -- that tier is explicitly out of scope.',
       '',
       'IMPORTANT -- there are typically SEVERAL Challenger-level events running concurrently in any given week worldwide, not just the headline ATP/WTA events. Do not stop after finding one or two. Check official ATP/WTA draw/schedule pages for the week, and cross-reference against a comprehensive week-by-week source (e.g. Wikipedia\'s "[year] ATP Challenger Tour" page and the WTA 125 equivalent) to catch concurrent Challenger events a single general search would miss.',
       '',
-      'OUTPUT FORMAT -- please return a CSV with exactly these columns: tour,tournament_name,round,player_a,player_b,start_time_et,tournament_play_start_et',
+      'IMPORTANT -- for EACH tournament found, report EVERY REAL MATCH FROM THE ENTIRE DRAW you can confirm (every round -- R32, R16, QF, SF, F -- not just one day\'s matches), not only matches on the exact date above. If this is a PAST/historical week, the full bracket is already decided -- report all of it. If this is the CURRENT or a FUTURE week, only report rounds that have actually been drawn or already played as of right now -- later rounds genuinely do not exist yet until the earlier rounds decide who advances, so do not guess or predict a hypothetical pairing.',
+      '',
+      'OUTPUT FORMAT -- please return a CSV with exactly these columns: tour,tournament_name,round,player_a,player_b,match_date,start_time_et,tournament_play_start_et',
       '  - tour: exactly "ATP", "WTA", or "Challenger".',
       '  - tournament_name: the real tournament name.',
       '  - round: e.g. "R32", "QF", "Q1" -- best effort, leave blank if unknown.',
       '  - player_a and player_b: full player names, ALWAYS in "Given name(s) Family name" order (surname LAST) -- e.g. "Qinwen Zheng", not "Zheng Qinwen", even if the player\'s native name order puts the family name first. This matters: this system identifies a player by treating the LAST word of the stored name as their surname, since that is how a capper usually refers to them (e.g. just "Zheng"). Getting the order backwards on a name that is natively family-name-first (common for Chinese, Hungarian, and some other names) will make that player unmatchable by surname alone.',
-      `  - start_time_et: this SPECIFIC match's approximate start time in US Eastern time, as "YYYY-MM-DD HH:MM" (24-hour) -- leave blank rather than guessing if genuinely unknown.`,
-      `  - tournament_play_start_et: this tournament's daily "order of play" start time for THIS DATE (when play begins at the venue that day, e.g. official schedules often say "Play begins at 10:00 local") -- convert to US Eastern time, "YYYY-MM-DD HH:MM". Fill this in for every match from the same tournament on the same day (repeat the same value). This is used as a fallback whenever a specific match's own start_time_et isn't known, so it must NEVER be later than the earliest real match of the day -- leave blank rather than guessing if genuinely unknown.`,
+      `  - match_date: the REAL calendar date (US Eastern) THIS SPECIFIC match was actually played or is scheduled, as "YYYY-MM-DD" -- this will usually be a DIFFERENT date for different rounds of the same tournament (e.g. R32 early in the week, the Final on the last day). Required for every row -- do not leave blank, and do not just repeat ${date} for every match.`,
+      `  - start_time_et: this SPECIFIC match's approximate start time in US Eastern time, as "YYYY-MM-DD HH:MM" (24-hour, matching match_date above) -- leave blank rather than guessing if genuinely unknown.`,
+      `  - tournament_play_start_et: this tournament's daily "order of play" start time on THIS match's own match_date (when play begins at the venue that day, e.g. official schedules often say "Play begins at 10:00 local") -- convert to US Eastern time, "YYYY-MM-DD HH:MM". Fill this in for every match from the same tournament on the same match_date (repeat the same value for that day). This is used as a fallback whenever a specific match's own start_time_et isn't known, so it must NEVER be later than the earliest real match of that day -- leave blank rather than guessing if genuinely unknown.`,
       '',
-      'Only include matches you are reasonably confident are real and scheduled for this date -- if uncertain about a specific match, leave it out rather than guessing.',
+      'Only include matches you are reasonably confident are real -- if uncertain about a specific match or its date, leave it out rather than guessing.',
       '',
       '=== END INSTRUCTIONS ==='
     ].join('\r\n');
 
-    downloadCsv(`tennis-draw-request-${date}.csv`, ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'start_time_et', 'tournament_play_start_et'], [], instructions);
+    downloadCsv(`tennis-draw-request-week-of-${date}.csv`, ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'match_date', 'start_time_et', 'tournament_play_start_et'], [], instructions);
   });
 
   const TENNIS_DRAW_TOURS = ['ATP', 'WTA', 'Challenger'];
@@ -5985,6 +6009,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const roundIdx = headers.indexOf('round');
     const playerAIdx = headers.indexOf('player_a');
     const playerBIdx = headers.indexOf('player_b');
+    const matchDateIdx = headers.indexOf('match_date');
     const startTimeIdx = headers.indexOf('start_time_et');
     const playStartIdx = headers.indexOf('tournament_play_start_et');
     if (tourIdx === -1 || playerAIdx === -1 || playerBIdx === -1) {
@@ -6021,7 +6046,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const playStartParsed = parseEtField(playStartRaw, i + 1, 'tournament_play_start_et');
       const start_time_et = startParsed.value;
       const tournament_play_start_et = playStartParsed.value;
-      const match_date = startParsed.dateStr || playStartParsed.dateStr || fallbackDate;
+      // match_date is the REAL date this specific match happened -- a
+      // full-draw pull spans many different days (R32 early in the week,
+      // Final on the last day), so this must come from the row's OWN
+      // match_date/start_time_et, never uniformly from the single "Date to
+      // research" field above. That field is only a last-resort fallback
+      // now, for a row that somehow has none of its own date info.
+      const matchDateRaw = matchDateIdx !== -1 ? cells[matchDateIdx] : '';
+      const matchDateValid = /^\d{4}-\d{2}-\d{2}$/.test(matchDateRaw) ? matchDateRaw : null;
+      if (matchDateRaw && !matchDateValid) {
+        errors.push(`Row ${i + 1}: match_date "${matchDateRaw}" isn't in the expected "YYYY-MM-DD" format -- ignored for this row.`);
+      }
+      const match_date = matchDateValid || startParsed.dateStr || playStartParsed.dateStr || fallbackDate;
       // Sorted alphabetically (not the CSV's own left/right order) so
       // re-importing the same match later, even with the two names
       // swapped, upserts onto the same row instead of duplicating it --
@@ -6043,7 +6079,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
     const missingDate = rows.filter(r => !r.match_date);
     if (missingDate.length) {
-      wrap.innerHTML = errorsHtml + `<div class="msg error">${missingDate.length} row(s) have no start_time_et AND no "Date to research" set above -- pick a date above or fill in start_time_et, then re-parse.</div>`;
+      wrap.innerHTML = errorsHtml + `<div class="msg error">${missingDate.length} row(s) have no match_date, no start_time_et, AND no "Date to research" set above -- pick a date above or fill in match_date, then re-parse.</div>`;
       return;
     }
 
@@ -24780,7 +24816,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 488; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 489; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
