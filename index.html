@@ -19487,7 +19487,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      let baseQuery = `picks?select=id,event_date,date_entered,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,capper_message_timestamp,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields,is_futures)&or=(${conditions.join(',')})`;
+      // Direct report 2026-09-11: "both of the ones I'm looking at in the
+      // pop out page when doing data validation are missing this
+      // information" -- source_image was simply never in this SELECT list
+      // at all, so the Data Validation Tool's own results (and its pop-out)
+      // showed blank Source for every pick regardless of what was actually
+      // in the database. Not a data-loss bug -- a missing-column bug in
+      // this one query.
+      let baseQuery = `picks?select=id,event_date,date_entered,event_name,selection,line,home_away,opening_odds,closing_odds,odds_unavailable,game_start_time,result,is_published,pick_tier,raw_unit_size,is_parlay_leg,prop_player,prop_stat,prop_team,source_image,capper_id,sport_id,bet_type_id,schedule_sync_status,schedule_sync_note,capper_message_timestamp,cappers(name,no_tier_signal),sports(name),bet_types(name,uses_prop_fields,is_futures)&or=(${conditions.join(',')})`;
       if (statusFilter) baseQuery += `&result=eq.${statusFilter}`;
       if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
       if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
@@ -24818,7 +24825,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 490; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 491; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
