@@ -1390,7 +1390,7 @@ Deno.serve(async (req) => {
 
         if (isTennis) {
           const seenMatchIds = new Set<string>();
-          const tennisMatches: { matchId: string; startTime: string; playerNames: string[]; matchup: string; tournamentName?: string | null }[] = [];
+          const tennisMatches: { matchId: string; startTime: string; playerNames: string[]; matchup: string; tournamentName?: string | null; source?: 'espn' | 'cache' }[] = [];
 
           const candidateDates = await getCandidateQueryDates(db, ourSport.id, targetDate, 30);
           const tourResults = await Promise.allSettled(
@@ -1422,6 +1422,54 @@ Deno.serve(async (req) => {
                 }
               }
             }
+          }
+
+          // ADDED 2026-09-11, direct request: "if I can go in and ask
+          // Gemini to find me the tennis draws... is there any way we can
+          // pull this information and store it somewhere so when we do our
+          // uploads we get around this tennis quagmire" -- ESPN's
+          // tennis/atp + tennis/wta scoreboard endpoints above have zero
+          // coverage of ATP Challenger Tour or ITF events, which is where a
+          // large share of real picks land (confirmed same day: Prizmic,
+          // Blanch, Shevchenko, Onclin all played real Challenger matches
+          // ESPN's API can't see). tennis-draw-research (separate,
+          // on-demand Edge Function) researches a day's real ATP/WTA/
+          // Challenger matches via Claude + web search and caches them into
+          // tennis_draw_cache; this reads that cache for the SAME
+          // candidateDates window already computed for ESPN above and
+          // appends into the SAME tennisMatches array, before any of the
+          // lookup structures below are built off it -- so every one of
+          // them (surnameToPlayers, tennisPlayerLookup,
+          // tennisSurnameAllCandidates, closestTennisMatch,
+          // suggestClosestTennisPlayer, the suggestion/suggestion_field
+          // output) treats a cache-sourced match identically to an
+          // ESPN-sourced one, with zero duplicated matching logic. Wrapped
+          // in try/catch, same fallback discipline as
+          // getCandidateQueryDates' own tournaments-table lookup above -- a
+          // cache read failure must never break the existing ESPN-only path.
+          try {
+            const cacheDates = candidateDates.map(d => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`);
+            const cachedRows = await db(`tennis_draw_cache?select=*&match_date=in.(${cacheDates.join(',')})`);
+            for (const row of (cachedRows || [])) {
+              const matchId = `cache-${row.id}`;
+              if (seenMatchIds.has(matchId)) continue;
+              seenMatchIds.add(matchId);
+              // start_time_et is best-effort and may be null -- fall back to
+              // a synthetic midday-ET timestamp on match_date so the
+              // downstream date-diff arithmetic (closestTennisMatch, the
+              // gap-safety check) still has a real Date to compare against
+              // instead of producing NaN.
+              const startTime = row.start_time_et || `${row.match_date}T16:00:00Z`;
+              tennisMatches.push({
+                matchId, startTime,
+                playerNames: [row.player_a_name, row.player_b_name],
+                matchup: `${row.player_a_name} / ${row.player_b_name}`,
+                tournamentName: row.tournament_name,
+                source: 'cache'
+              });
+            }
+          } catch {
+            // Best-effort enhancement only -- see comment above.
           }
 
           const surnameToPlayers = new Map<string, Set<string>>();
@@ -1754,8 +1802,17 @@ Deno.serve(async (req) => {
                 ? Math.round((new Date(matchedDateStr + 'T00:00:00Z').getTime() - new Date(pickOwnDate + 'T00:00:00Z').getTime()) / 86400000)
                 : 0;
               const TENNIS_DATE_GAP_SAFETY_DAYS = 2;
+              // Cache-sourced matches are AI-researched via web search, not
+              // ESPN's structured API -- flagged in the note on every
+              // cache-sourced match (matched or gap-flagged) so early
+              // results get spot-checked before being trusted the same way
+              // ESPN's data already is. See tennis-draw-research's own
+              // header comment for the full reasoning.
+              const cacheNote = matched.source === 'cache'
+                ? ' (source: AI-researched draw cache, not ESPN -- worth a spot-check until this proves reliable)'
+                : '';
               if (Math.abs(gapDays) > TENNIS_DATE_GAP_SAFETY_DAYS) {
-                const note = `Found a same-name match on ${matchedDateStr} (${matched.matchup}, ${matched.tournamentName || 'tournament unknown'}), but that's ${Math.abs(gapDays)} days from this pick's own event_date (${pickOwnDate}) -- too far to auto-confirm this is the same match. This may be a real event outside this system's data source (e.g. a Challenger/lower-tier tournament ESPN doesn't cover), not the tour-level match found here. Needs manual verification before trusting this date.`;
+                const note = `Found a same-name match on ${matchedDateStr} (${matched.matchup}, ${matched.tournamentName || 'tournament unknown'}), but that's ${Math.abs(gapDays)} days from this pick's own event_date (${pickOwnDate}) -- too far to auto-confirm this is the same match. This may be a real event outside this system's data source (e.g. a Challenger/lower-tier tournament ESPN doesn't cover), not the tour-level match found here. Needs manual verification before trusting this date.${cacheNote}`;
                 await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ schedule_sync_status: 'unmatched', schedule_sync_note: note }) });
                 tennisSportResult.unmatched.push({ id: pick.id, selection: isProp ? pick.prop_player : pick.selection, reason: note });
                 continue;
@@ -1771,7 +1828,7 @@ Deno.serve(async (req) => {
               const dateDifferNote = dateDiffers
                 ? `Found on ${matchedDateStr} -- this pick's event_date is currently ${pickOwnDate}. Consider correcting event_date to match; game_start_time has already been set to the real value.`
                 : '';
-              const note = (correctionNote || dateDifferNote) ? `${correctionNote}${dateDifferNote}`.trim() : null;
+              const note = (correctionNote || dateDifferNote || cacheNote) ? `${correctionNote}${dateDifferNote}${cacheNote}`.trim() : null;
               const updatePayload: Record<string, unknown> = {
                 game_start_time: matched.startTime, schedule_sync_status: 'matched', schedule_sync_note: note
               };

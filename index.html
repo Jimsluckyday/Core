@@ -1273,6 +1273,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
             <div id="prePublishToolsPanel" style="display:none;margin-top:10px;">
               <div class="row">
                 <div style="align-self:flex-end;">
+                  <select id="tennisDrawModel" style="font-size:11px;" title="Which Claude model researches the day's tennis draws -- Sonnet is cheaper, Opus costs more but may be more thorough on a night with many concurrent Challenger events.">
+                    <option value="sonnet" selected>Sonnet 5 (cheaper)</option>
+                    <option value="opus">Opus 5 (pricier, broader coverage)</option>
+                  </select>
+                  <button id="tennisDrawResearchBtn" title="Uses Claude with live web search to research real ATP/WTA/Challenger tennis matches for this date and cache them -- this is the only button here with a real per-click cost.">Find Tennis Draws (AI)</button>
+                </div>
+                <div style="align-self:flex-end;">
                   <button id="autoBackfillBtn">Find &amp; Update Pick Info (Start Time, Home/Away)</button>
                 </div>
                 <div style="align-self:flex-end;">
@@ -12698,6 +12705,58 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     } finally {
       btn.disabled = false;
       btn.textContent = 'Find & Update Golf Results';
+    }
+  });
+
+  // ADDED 2026-09-11, direct request: "if I've got 15+ Tennis picks a night
+  // doing this one by one is not a solution that works long term." ESPN's
+  // tennis scoreboard endpoints (used by autoBackfillBtn below) have zero
+  // coverage of ATP Challenger Tour/lower-tier events, which is where a
+  // large share of real Tennis picks land -- this button asks Claude (with
+  // live web search) to research a day's real ATP/WTA/Challenger matches
+  // and cache them, so autoBackfillBtn's Tennis matching below can then find
+  // them too. This is the FIRST automation button in this app with a real
+  // per-click dollar cost (every other button here hits free APIs), so the
+  // confirm() below says so plainly, states the selected model's rate, and
+  // makes clear this only fills a cache -- it never touches a pick.
+  // Purpose-built rendering (not renderAutomationResult/
+  // summarizeAutomationResult, which assume per-pick matched/unmatched
+  // arrays) since this is an ingestion job, not a per-pick one.
+  function renderTennisDrawResearchResult(date, data) {
+    if (data.error) {
+      $('automationResultsWrap').innerHTML = `<div class="msg error">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+    const tRows = (data.tournaments || []).map(t => `<tr><td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.tour)}</td><td>${t.match_count}</td></tr>`).join('');
+    $('automationResultsWrap').innerHTML = `
+      <div class="msg ok" style="margin-bottom:10px;">
+        Found ${data.tournaments_found} tournament(s), ${data.matches_found} match(es) for ${escapeHtml(date)}
+        using ${escapeHtml(data.model_used)} -- ${data.matches_upserted} cached${data.matches_skipped ? `, ${data.matches_skipped} skipped` : ''}.
+        ${typeof data.cost_estimate_usd === 'number' ? ` Estimated cost: $${data.cost_estimate_usd.toFixed(3)}.` : ''}
+      </div>
+      ${tRows ? `<table class="picks-table"><thead><tr><th>Tournament</th><th>Tour</th><th># Matches</th></tr></thead><tbody>${tRows}</tbody></table>` : ''}
+      ${data.skipped_reasons && data.skipped_reasons.length ? `<div class="msg error" style="margin-top:10px;">${data.skipped_reasons.map(r => `<div>${escapeHtml(r)}</div>`).join('')}</div>` : ''}
+      ${data.search_errors && data.search_errors.length ? `<div class="msg error" style="margin-top:10px;">Web search reported: ${data.search_errors.map(escapeHtml).join(', ')}</div>` : ''}
+    `;
+  }
+  $('tennisDrawResearchBtn').addEventListener('click', async () => {
+    const date = $('autoDate').value;
+    if (!date) { alert('Pick a date first — this will not run without one.'); return; }
+    const model = $('tennisDrawModel').value;
+    const rate = model === 'opus' ? 'Opus 5, ~$5/$25 per million tokens' : 'Sonnet 5, ~$2/$10 per million tokens';
+    if (!confirm(`This uses Claude (${rate}) with live web search to research real ATP/WTA/Challenger-level tennis matches for ${date}, and caches them for tonight's Tennis matching.\n\nThis costs real money per click, unlike every other automation button here (ESPN/PGA are free). The data is AI-researched from web search -- approximate start times, not authoritative like ESPN. It does NOT touch any pick directly; it only fills a cache that "Find & Update Pick Info" and "Find & Update Teams / Tournaments" will use for Tennis picks ESPN can't see (Challenger/lower-tier events).\n\nContinue?`)) return;
+    const btn = $('tennisDrawResearchBtn');
+    btn.disabled = true;
+    btn.textContent = 'Researching...';
+    $('automationResultsWrap').innerHTML = '<div class="empty-state">Asking Claude to research tennis draws for this date (web search in progress, this can take a while)...</div>';
+    try {
+      const data = await invokeEdgeFunction('tennis-draw-research', `?date=${date}&model=${model}`);
+      renderTennisDrawResearchResult(date, data);
+    } catch (e) {
+      alert('Tennis draw research failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Find Tennis Draws (AI)';
     }
   });
 
@@ -24167,7 +24226,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 482; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 483; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
