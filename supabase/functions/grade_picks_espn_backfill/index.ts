@@ -1502,6 +1502,7 @@ Deno.serve(async (req) => {
             playerNames: string[]; winnerByName: Map<string, boolean>; gamesByName: Map<string, number>;
             setsPlayed: number | null; setWinnerNames: (string | null)[];
             gamesBySetByName: Map<string, (number | null)[]>;
+            source?: 'cache';
           };
           const tennisMatches: TennisMatchEntry[] = [];
           const seenMatchIds = new Set<string>();
@@ -1616,6 +1617,87 @@ Deno.serve(async (req) => {
             }
           }
 
+          // ADDED 2026-09-11, direct follow-up: "in a live environment I
+          // would ask the chatbot the draws for tomorrow's tennis games...
+          // the day after ask it for the results... which my grading tool
+          // could compare against instead of coming up with a blank
+          // result." Same ESPN tennis/atp+wta gap as the schedule side
+          // (Challenger/ITF matches ESPN never carries at all) -- a match
+          // that never had a draw here never has a result here either.
+          // admin.html's Setup tab now has a "Tennis draw cache" Import
+          // results sub-tool that pastes a chatbot's real result (winner +
+          // set scores) into tennis_draw_cache's own result_status/
+          // winner_side/set_scores columns (same table schedule-sync-
+          // backfill already reads for draws, since a result row shares
+          // the exact same match identity). Read it here and append into
+          // the SAME tennisMatches[] array ESPN just populated, before any
+          // of the lookup structures below are built off it -- so a
+          // cache-sourced result flows through every one of them
+          // (surnameToPlayers, tennisPlayerLookup, resolveTennisSelection,
+          // every bet-type's grading math) identically to an ESPN one,
+          // with zero duplicated grading logic. Exact-date match only (no
+          // +/-N window) -- same convention this branch's own ESPN fetch
+          // already uses, since by grading time schedule-sync's own work
+          // is what's responsible for event_date being correct.
+          try {
+            const cachedResultRows = await db(`tennis_draw_cache?select=*&match_date=eq.${targetDate}&result_status=in.(completed,voided)`);
+            for (const row of (cachedResultRows || [])) {
+              const matchId = `cache-${row.id}`;
+              if (seenMatchIds.has(matchId)) continue;
+              seenMatchIds.add(matchId);
+              const names = [row.player_a_name, row.player_b_name];
+              const voided = row.result_status === 'voided';
+              const winnerByName = new Map<string, boolean>();
+              if (!voided && row.winner_side) {
+                winnerByName.set(row.player_a_name, row.winner_side === 'a');
+                winnerByName.set(row.player_b_name, row.winner_side === 'b');
+              }
+              // set_scores is a compact "6-4,3-6,6-2" string -- player_a's
+              // games listed first each set, comma-separated between sets
+              // (same convention documented in admin.html's own Import
+              // results instructions). Absent on a voided row, or on a
+              // Moneyline-only result pasted without a full score line --
+              // gamesByName/setsPlayed/etc. are left empty in that case, so
+              // Total/Spread grading correctly falls through to "no line
+              // data" rather than guessing.
+              const gamesByName = new Map<string, number>();
+              const gamesBySetByName = new Map<string, (number | null)[]>();
+              const setWinnerNames: (string | null)[] = [];
+              let setsPlayed: number | null = null;
+              if (row.set_scores) {
+                const sets = String(row.set_scores).split(',').map((s: string) => s.trim()).filter(Boolean);
+                const perSetA: (number | null)[] = [];
+                const perSetB: (number | null)[] = [];
+                let sumA = 0, sumB = 0, sawBadEntry = false;
+                sets.forEach((setStr: string, i: number) => {
+                  const parts = setStr.split('-').map(p => Number(p.trim()));
+                  if (parts.length === 2 && parts.every(n => Number.isFinite(n))) {
+                    perSetA[i] = parts[0]; perSetB[i] = parts[1];
+                    sumA += parts[0]; sumB += parts[1];
+                    if (parts[0] > parts[1]) setWinnerNames[i] = row.player_a_name;
+                    else if (parts[1] > parts[0]) setWinnerNames[i] = row.player_b_name;
+                  } else {
+                    perSetA[i] = null; perSetB[i] = null; sawBadEntry = true;
+                  }
+                });
+                setsPlayed = sets.length;
+                gamesBySetByName.set(row.player_a_name, perSetA);
+                gamesBySetByName.set(row.player_b_name, perSetB);
+                if (!sawBadEntry) { gamesByName.set(row.player_a_name, sumA); gamesByName.set(row.player_b_name, sumB); }
+              }
+              tennisMatches.push({
+                matchId, matchup: names.join(' / '), completed: true, voided,
+                playerNames: names, winnerByName, gamesByName, setsPlayed, setWinnerNames, gamesBySetByName,
+                source: 'cache'
+              });
+            }
+          } catch {
+            // Best-effort enhancement only, same fallback discipline as
+            // schedule-sync-backfill's own tennis_draw_cache read -- a
+            // cache-read failure must never break the existing ESPN-only
+            // grading path.
+          }
+
           // Same safety pattern as schedule-sync-backfill's own tennis
           // matching: a bare surname is only a safe lookup key when it's
           // unique across everyone who actually played that day -- the
@@ -1684,7 +1766,7 @@ Deno.serve(async (req) => {
               }
               const match = tennisPlayerLookup.get(key);
               if (!match) {
-                return { match: null, ownName: null, reason: `Could not find "${selectionText}" on today's ATP/WTA schedule -- may be a name spelling issue, a Challenger/lower-tier event this data source doesn't cover, or the wrong event_date.` };
+                return { match: null, ownName: null, reason: `Could not find "${selectionText}" on today's ATP/WTA schedule -- may be a name spelling issue, a Challenger/lower-tier event this data source doesn't cover, or the wrong event_date. If you have the result, paste it via Setup > Tennis draw cache > Import results.` };
               }
               const ownName = match.playerNames.find(n => normalize(n) === key || normalize(n.trim().split(/\s+/).pop() || '') === key) || null;
               return { match, ownName, reason: null };
@@ -1774,9 +1856,18 @@ Deno.serve(async (req) => {
               continue;
             }
             const match = resolved.match;
+            // Same spot-check discipline already applied to cache-sourced
+            // SCHEDULE matches (schedule-sync-backfill) -- a manually
+            // pasted result is less trustworthy than ESPN's own structured
+            // data, so every grade sourced from one carries this note
+            // instead of the usual grading_note: null, on every bet-type
+            // branch below.
+            const cacheResultNote: string | null = match.source === 'cache'
+              ? 'Graded from a manually-pasted result (source: AI-researched, not ESPN) -- worth a spot-check until this proves reliable.'
+              : null;
             if (!match.completed) {
               if (match.voided) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1815,7 +1906,7 @@ Deno.serve(async (req) => {
               const threshold = Math.abs(line);
               const isOver = line < 0; // project-wide convention: negative line = Over
               const grade = combined === threshold ? 'push' : (isOver ? (combined > threshold ? 'win' : 'loss') : (combined < threshold ? 'win' : 'loss'));
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, total_games: combined });
               continue;
             }
@@ -1836,7 +1927,7 @@ Deno.serve(async (req) => {
               const setsThreshold = Math.abs(setsLine);
               const setsIsOver = setsLine < 0; // same project-wide convention: negative line = Over
               const setsGrade = match.setsPlayed === setsThreshold ? 'push' : (setsIsOver ? (match.setsPlayed > setsThreshold ? 'win' : 'loss') : (match.setsPlayed < setsThreshold ? 'win' : 'loss'));
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setsGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setsGrade, grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setsGrade, matchup: match.matchup, sets_played: match.setsPlayed });
               continue;
             }
@@ -1859,7 +1950,7 @@ Deno.serve(async (req) => {
                 tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
                 continue;
               }
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup, own_games: ownGames, opp_games: oppGames });
               continue;
             }
@@ -1878,7 +1969,7 @@ Deno.serve(async (req) => {
               // convention for a market that never came into play is no
               // action, graded push, not left pending or lost.
               if (match.setsPlayed !== null && setMoneylineIndex >= match.setsPlayed) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1890,7 +1981,7 @@ Deno.serve(async (req) => {
                 continue;
               }
               const setGrade = setWinnerName === ownName ? 'win' : 'loss';
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setGrade, grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setGrade, matchup: match.matchup, set_index: setMoneylineIndex + 1 });
               continue;
             }
@@ -1908,7 +1999,7 @@ Deno.serve(async (req) => {
               // reached that set (shouldn't occur for set 1, but matters
               // for 4th/5th) has no action to grade.
               if (match.setsPlayed !== null && spreadSetIndex >= match.setsPlayed) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1928,14 +2019,14 @@ Deno.serve(async (req) => {
                 tennisSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
                 continue;
               }
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setSpreadGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setSpreadGrade, grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setSpreadGrade, matchup: match.matchup, set_index: spreadSetIndex + 1, own_games: ownSetGames, opp_games: oppSetGames });
               continue;
             }
 
             if (isTotalSet) {
               if (match.setsPlayed !== null && totalSetIndex >= match.setsPlayed) {
-                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+                await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
                 tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup: match.matchup });
                 continue;
               }
@@ -1953,7 +2044,7 @@ Deno.serve(async (req) => {
               const setThreshold = Math.abs(setLine);
               const setIsOver = setLine < 0; // same project-wide convention: negative line = Over
               const setTotalGrade = setCombined === setThreshold ? 'push' : (setIsOver ? (setCombined > setThreshold ? 'win' : 'loss') : (setCombined < setThreshold ? 'win' : 'loss'));
-              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setTotalGrade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: setTotalGrade, grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
               tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: setTotalGrade, matchup: match.matchup, set_index: totalSetIndex + 1, total_games: setCombined });
               continue;
             }
@@ -1968,12 +2059,159 @@ Deno.serve(async (req) => {
               continue;
             }
             const grade = won ? 'win' : 'loss';
-            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: null, graded_at: new Date().toISOString() }) });
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: grade, grading_status: 'graded', grading_note: cacheResultNote, graded_at: new Date().toISOString() }) });
             tennisSportResult.graded.push({ id: pick.id, selection: pick.selection, result: grade, matchup: match.matchup });
           }
           overall.sports_processed.push(tennisSportResult);
         } catch (tennisErr) {
           overall.sports_processed.push({ sport: ourSport.name, error: String(tennisErr) });
+        }
+        continue;
+      }
+
+      // ---- KBO grading (Moneyline, Spread, Total, First 5 variants) --
+      // ADDED 2026-09-11, direct follow-up to the Tennis results cache
+      // above: "could this not work for all these outliers like KBO,
+      // Soccer etc?" Checked directly: KBO has ZERO automated grading
+      // today -- neither grade_picks (TheRundown) nor this file's own
+      // ESPN_SPORT_MAP cover it at all (see this file's header comment).
+      // Every KBO result has been entered by hand until now. Same "paste
+      // a chatbot's research" pattern as everything else this session --
+      // admin.html's Setup tab has a "KBO results cache" bulk-import tool
+      // that writes into kbo_results_cache (home_team/away_team/
+      // home_score/away_score/home_score_f5/away_score_f5/result_status).
+      // KBO has no ESPN_SPORT_MAP entry (no live scoreboard to map to), so
+      // like Tennis it needs its own branch intercepting before the
+      // generic dispatch just below, rather than an entry in that map.
+      //
+      // Confirmed via this session's own research (schedule-sync-
+      // backfill's KBO branch + a direct check of real KBO picks on file):
+      // KBO is team-vs-team only, no player props, and only Moneyline/
+      // Spread/Total/First-5 variants are real existing bet patterns here
+      // -- scope matches that exactly. Team matching is a direct two-way
+      // substring match against this cache's own home_team/away_team text
+      // (KBO only ever has 10 real team names with no abbreviation
+      // collisions -- none of ESPN's cross-league substring-safe/exact-
+      // only variant machinery is needed). gradeMoneyline/gradeSpread/
+      // gradeTotal/gradeMoneylineFirstN/gradeTotalFirstN below are the
+      // exact same standalone functions the generic branch already uses --
+      // real reuse, not a re-implementation, so this shares the same
+      // proven win/loss/push math (including the quarter-line handling
+      // and the missing-line/missing-score null-safety already fixed
+      // there) rather than risking a second, slightly-different copy of
+      // it.
+      if (sportNormName === 'kbo') {
+        try {
+          await sleep(500);
+          // KST is 13-14h ahead of ET -- a late-night KBO game can span a
+          // calendar-day boundary, same reasoning schedule-sync-backfill's
+          // own KBO branch already uses for its Naver fetch window.
+          const kboDateSet = new Set<string>();
+          for (const offset of [-1, 0, 1]) {
+            const d = new Date(targetDate + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() + offset);
+            kboDateSet.add(d.toISOString().slice(0, 10));
+          }
+          const kboCacheRows = await db(`kbo_results_cache?select=*&game_date=in.(${[...kboDateSet].join(',')})`);
+
+          const kboPicks = await db(
+            `picks?select=id,selection,line,bet_type_id,bet_types!inner(name,is_futures)&sport_id=eq.${ourSport.id}&event_date=eq.${targetDate}&result=eq.pending&bet_types.is_futures=eq.false`
+          );
+          const kboSportResult = {
+            sport: ourSport.name, matches_found: (kboCacheRows || []).length,
+            graded: [] as any[], ambiguous: [] as any[], unsupported_bet_type: [] as any[]
+          };
+
+          for (const pick of (kboPicks || [])) {
+            const betTypeName = pick.bet_types ? pick.bet_types.name : '';
+            const betTypeNorm = normalize(betTypeName);
+            if (betTypeNorm === 'parlay') continue;
+            const isMoneyline = betTypeNorm === 'moneyline';
+            const isSpread = betTypeNorm === 'spread';
+            const isTotalType = betTypeNorm === 'total' || betTypeNorm.startsWith('overunder');
+            const isMoneylineFirst5 = betTypeNorm === 'moneylinefirst5';
+            const isTotalFirst5 = betTypeNorm === 'overunderfirst5';
+            if (!isMoneyline && !isSpread && !isTotalType && !isMoneylineFirst5 && !isTotalFirst5) {
+              const note = `Bet type "${betTypeName}" is not supported for KBO grading yet -- needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
+              kboSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
+              continue;
+            }
+            if (pick.selection.includes('/')) {
+              const note = `"${pick.selection}" -- can't tell which team this ${betTypeName} pick actually backs from a two-name selection alone. Needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'unsupported', grading_note: note }) });
+              kboSportResult.unsupported_bet_type.push({ id: pick.id, selection: pick.selection, bet_type: betTypeName, reason: note });
+              continue;
+            }
+
+            const selNorm = normalize(pick.selection);
+            const candidates = (kboCacheRows || []).filter((g: any) => {
+              const homeNorm = normalize(g.home_team), awayNorm = normalize(g.away_team);
+              return homeNorm === selNorm || awayNorm === selNorm || homeNorm.includes(selNorm) || awayNorm.includes(selNorm) || selNorm.includes(homeNorm) || selNorm.includes(awayNorm);
+            });
+            if (candidates.length !== 1) {
+              const note = candidates.length === 0
+                ? `No KBO result cached for "${pick.selection}" near ${targetDate} -- paste it via Setup > KBO results cache first.`
+                : `"${pick.selection}" matches more than one cached KBO game near ${targetDate} -- needs manual review.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              kboSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+            const game = candidates[0];
+            const matchup = `${game.home_team} vs ${game.away_team}`;
+            const cacheNote = 'Graded from a manually-pasted result (source: AI-researched, not ESPN) -- worth a spot-check until this proves reliable.';
+
+            if (game.result_status === 'voided') {
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: 'push', grading_status: 'graded', grading_note: cacheNote, graded_at: new Date().toISOString() }) });
+              kboSportResult.graded.push({ id: pick.id, selection: pick.selection, result: 'push', matchup });
+              continue;
+            }
+
+            if ((isMoneyline || isSpread || isTotalType) && (typeof game.home_score !== 'number' || typeof game.away_score !== 'number')) {
+              const note = `${matchup} is cached but has no final score recorded -- needs manual grading.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              kboSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+
+            const isHome = normalize(game.home_team) === selNorm || normalize(game.home_team).includes(selNorm) || selNorm.includes(normalize(game.home_team));
+            const score = {
+              score_home: game.home_score, score_away: game.away_score,
+              winner_home: (typeof game.home_score === 'number' && typeof game.away_score === 'number' && game.home_score > game.away_score) ? 1 : 0,
+              winner_away: (typeof game.home_score === 'number' && typeof game.away_score === 'number' && game.away_score > game.home_score) ? 1 : 0,
+              first5_home: typeof game.home_score_f5 === 'number' ? game.home_score_f5 : null,
+              first5_away: typeof game.away_score_f5 === 'number' ? game.away_score_f5 : null
+            };
+
+            let grade: Grade | 'win' | 'loss' | 'push' | null = null;
+            if (isMoneyline) grade = gradeMoneyline(score, isHome);
+            else if (isSpread) grade = gradeSpread(score, isHome, pick.line);
+            else if (isTotalType) grade = gradeTotal(score, pick.line);
+            else if (isMoneylineFirst5) grade = gradeMoneylineFirstN(score, isHome, 5);
+            else if (isTotalFirst5) grade = gradeTotalFirstN(score, 5, pick.line);
+
+            if (!grade) {
+              const isLineBetType = isSpread || isTotalType || isTotalFirst5;
+              const lineMissing = isLineBetType && (pick.line === null || pick.line === undefined);
+              const note = lineMissing
+                ? 'This pick has no line recorded -- cannot grade a Spread/Total-style bet without one. Add the real line, then re-run grading.'
+                : (isMoneylineFirst5 || isTotalFirst5)
+                ? `${matchup} is cached, but no score through 5 innings was recorded -- paste home_score_f5/away_score_f5 for this game via Setup > KBO results cache, or grade manually.`
+                : `${matchup} is cached, but the final score data looked incomplete or unclear -- needs manual review.`;
+              await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ grading_status: 'ambiguous', grading_note: note }) });
+              kboSportResult.ambiguous.push({ id: pick.id, selection: pick.selection, reason: note });
+              continue;
+            }
+
+            const gradeResult = typeof grade === 'string' ? grade : grade.result;
+            const gradeMultiplier = typeof grade === 'string' ? 1 : grade.multiplier;
+            await db(`picks?id=eq.${pick.id}`, { method: 'PATCH', body: JSON.stringify({ result: gradeResult, grading_multiplier: gradeMultiplier, grading_status: 'graded', grading_note: cacheNote, graded_at: new Date().toISOString() }) });
+            kboSportResult.graded.push({ id: pick.id, selection: pick.selection, result: gradeResult, matchup });
+          }
+
+          overall.sports_processed.push(kboSportResult);
+        } catch (kboErr) {
+          overall.sports_processed.push({ sport: ourSport.name, error: String(kboErr) });
         }
         continue;
       }

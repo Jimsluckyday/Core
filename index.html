@@ -741,6 +741,54 @@
         </div>
         <div id="tennisDrawImportWrap" style="margin-top:12px;"></div>
       </div>
+
+      <div style="margin-top:24px;padding-top:16px;border-top:1px dashed var(--field);">
+        <p class="stub-title" style="margin-bottom:4px;">Import results <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— the day after, for grading</span></p>
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          ADDED 2026-09-11, direct follow-up: "the day after ask it for the results... which my grading tool could compare against instead of coming up with a blank result." Same ESPN gap on the grading side -- a Challenger match ESPN never carried the draw for, it also never carries the result for, so those picks sit pending forever. Export lists the matches already cached for this date and asks the chatbot specifically for their outcomes (narrower and more reliable than an open-ended ask); paste the result CSV back in below. Updates the SAME cached match rather than creating a new one, so this works whether or not you ran the draws import above for this date.
+        </div>
+        <div class="row">
+          <div class="field" style="flex:0 0 auto;">
+            <label>Date matches were played</label>
+            <input id="tennisResultsExportDate" type="date" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button id="exportTennisResultsRequestBtn">&#8681; Export results request</button>
+          </div>
+        </div>
+        <div style="margin-top:14px;">
+          <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+          <textarea id="tennisResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,winner,set_scores,status&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Taro Daniel,A,6-4,3-6,6-2,completed"></textarea>
+          <div style="margin-top:8px;">
+            <button id="parseTennisResultsImportBtn">Parse &amp; preview</button>
+          </div>
+          <div id="tennisResultsImportWrap" style="margin-top:12px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="setupKboResultsPanel">
+      <p class="stub-title" style="margin-top:24px;">KBO results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— KBO has no automated grading source at all today</span></p>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+        ADDED 2026-09-11, direct follow-up: "could this not work for all these outliers like KBO, Soccer etc?" Checked directly -- unlike Tennis (partial ESPN coverage), KBO has ZERO automated grading today; every KBO result has been entered by hand. Same free bulk-paste pattern: export a request (lists the real team names this system expects), paste a chatbot's real KBO scores back in, confirm. "Find & Update Results" then checks this cache for Moneyline/Spread/Total/First 5 KBO picks instead of leaving them pending indefinitely.
+      </div>
+      <div class="row">
+        <div class="field" style="flex:0 0 auto;">
+          <label>Date games were played</label>
+          <input id="kboResultsExportDate" type="date" />
+        </div>
+        <div style="align-self:flex-end;">
+          <button id="exportKboResultsRequestBtn">&#8681; Export results request</button>
+        </div>
+      </div>
+      <div style="margin-top:14px;">
+        <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+        <textarea id="kboResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="home_team,away_team,home_score,away_score,home_score_f5,away_score_f5,status&#10;KIA Tigers,Doosan Bears,5,3,2,1,completed"></textarea>
+        <div style="margin-top:8px;">
+          <button id="parseKboResultsImportBtn">Parse &amp; preview</button>
+        </div>
+        <div id="kboResultsImportWrap" style="margin-top:12px;"></div>
+      </div>
     </div>
 
     <!-- OLD TOOLS -->
@@ -5993,6 +6041,336 @@ These are almost always the same day, so "Date entered" only fills in a starting
         alert('Could not cache: ' + e.message);
         btn.disabled = false;
         btn.textContent = `Cache ${rows.length} match(es)`;
+      }
+    });
+  });
+
+  // ---------- Tennis results cache (export request / import results) ----------
+  // ADDED 2026-09-11, direct follow-up: "the day after ask it for the
+  // results... which my grading tool could compare against instead of
+  // coming up with a blank result." Same ESPN Challenger/ITF gap as the
+  // draws tool above, just on the grading side -- writes into the SAME
+  // tennis_draw_cache table/row (shared natural key), which
+  // grade_picks_espn_backfill's Tennis branch reads alongside ESPN.
+  async function fetchCachedTennisMatchesForDate(date) {
+    if (!date) return [];
+    try {
+      return await rest(`tennis_draw_cache?select=tour,tournament_name,round,player_a_name,player_b_name&match_date=eq.${date}&order=tour,tournament_name,round`);
+    } catch (e) { return []; }
+  }
+
+  $('exportTennisResultsRequestBtn').addEventListener('click', async () => {
+    const date = $('tennisResultsExportDate').value;
+    if (!date) { alert('Pick the date the matches were played first.'); return; }
+    const btn = $('exportTennisResultsRequestBtn');
+    btn.disabled = true;
+    try {
+      const cached = await fetchCachedTennisMatchesForDate(date);
+      const cachedList = cached.length
+        ? cached.map(m => `  - ${m.tour} ${m.tournament_name}${m.round ? ' ' + m.round : ''}: ${m.player_a_name} vs ${m.player_b_name}`).join('\n')
+        : '  (none currently cached for this date -- research these fresh instead)';
+
+      const instructions = [
+        '=== INSTRUCTIONS FOR RESEARCHING TENNIS RESULTS (read this whole block first) ===',
+        '',
+        `Please find the real results of the following professional tennis matches played on ${date} (Eastern Time, USA):`,
+        '',
+        cachedList,
+        '',
+        'For each match, report who won and the final score. If you know of additional real ATP/WTA/Challenger matches played this date that are NOT in the list above, include those too (same output format).',
+        '',
+        'OUTPUT FORMAT -- please return a CSV with exactly these columns: tour,tournament_name,round,player_a,player_b,winner,set_scores,status',
+        '  - tour: exactly "ATP", "WTA", or "Challenger".',
+        '  - tournament_name, round, player_a, player_b: same as the match listed above (or your own finding).',
+        '  - winner: "A" if player_a won, "B" if player_b won.',
+        '  - set_scores: the final score as a comma-separated list of "playerA_games-playerB_games" per set, e.g. "6-4,3-6,6-2" (player_a\'s games always listed first each set).',
+        '  - status: "completed" normally, or "voided" if the match was postponed/canceled (leave winner/set_scores blank in that case).',
+        '',
+        'Only include matches you are reasonably confident actually happened as described -- if uncertain, leave it out rather than guessing.',
+        '',
+        '=== END INSTRUCTIONS ==='
+      ].join('\r\n');
+
+      downloadCsv(`tennis-results-request-${date}.csv`, ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'winner', 'set_scores', 'status'], [], instructions);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function parseTennisResultsImportCsv(text, matchDate) {
+    const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
+    if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
+    function looksLikeHeader(line) {
+      const delim = line.includes('\t') ? '\t' : ',';
+      const tokens = splitCsvLine(line, delim).map(t => t.trim().toLowerCase());
+      return tokens.includes('tour') && tokens.includes('player_a') && tokens.includes('player_b');
+    }
+    const headerRowIndex = allLines.findIndex(looksLikeHeader);
+    if (headerRowIndex === -1) return { error: 'Missing required columns: tour, player_a, and/or player_b.' };
+    const lines = allLines.slice(headerRowIndex);
+    const delimiter = lines[0].includes('\t') ? '\t' : ',';
+    const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
+    const tourIdx = headers.indexOf('tour');
+    const tournamentIdx = headers.indexOf('tournament_name');
+    const roundIdx = headers.indexOf('round');
+    const playerAIdx = headers.indexOf('player_a');
+    const playerBIdx = headers.indexOf('player_b');
+    const winnerIdx = headers.indexOf('winner');
+    const setScoresIdx = headers.indexOf('set_scores');
+    const statusIdx = headers.indexOf('status');
+    if (tourIdx === -1 || playerAIdx === -1 || playerBIdx === -1) {
+      return { error: 'Missing required columns: tour, player_a, and/or player_b.' };
+    }
+
+    const rows = [];
+    const errors = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i], delimiter).map(c => c.trim());
+      const tourRaw = cells[tourIdx];
+      const matchedTour = TENNIS_DRAW_TOURS.find(t => t.toLowerCase() === (tourRaw || '').toLowerCase());
+      if (!matchedTour) { errors.push(`Row ${i + 1}: tour "${tourRaw}" must be ATP, WTA, or Challenger -- skipped.`); continue; }
+      const playerAOrig = cells[playerAIdx];
+      const playerBOrig = cells[playerBIdx];
+      if (!playerAOrig || !playerBOrig) { errors.push(`Row ${i + 1}: missing player_a or player_b -- skipped.`); continue; }
+      const tournament_name = (tournamentIdx !== -1 && cells[tournamentIdx]) || 'Unknown Tournament';
+      const round = (roundIdx !== -1 && cells[roundIdx]) || '';
+      const statusRaw = ((statusIdx !== -1 && cells[statusIdx]) || 'completed').toLowerCase();
+      const isVoided = statusRaw === 'voided';
+
+      // Sorted alphabetically first (same idempotency key tennis_draw_cache
+      // already relies on) -- winner_side/set_scores must be computed
+      // AFTER sorting, remapped against the SORTED order, not the CSV's
+      // own original left/right order.
+      const aFirst = playerAOrig.localeCompare(playerBOrig) <= 0;
+      const player_a_name = aFirst ? playerAOrig : playerBOrig;
+      const player_b_name = aFirst ? playerBOrig : playerAOrig;
+
+      let winner_side = null;
+      let set_scores = null;
+      if (!isVoided) {
+        const winnerRaw = ((winnerIdx !== -1 && cells[winnerIdx]) || '').trim().toUpperCase();
+        if (winnerRaw !== 'A' && winnerRaw !== 'B') {
+          errors.push(`Row ${i + 1}: winner must be "A" or "B" (or status must be "voided") -- skipped.`);
+          continue;
+        }
+        const winnerName = winnerRaw === 'A' ? playerAOrig : playerBOrig;
+        winner_side = winnerName === player_a_name ? 'a' : 'b';
+        const setScoresRaw = setScoresIdx !== -1 ? cells[setScoresIdx] : '';
+        if (setScoresRaw) {
+          // set_scores as pasted lists the CSV's own player_a first each
+          // set -- if sorting swapped which name is "a", flip each set's
+          // two numbers so the stored string always lists OUR player_a
+          // (the alphabetically-first one) first.
+          const sets = setScoresRaw.split(',').map(s => s.trim()).filter(Boolean);
+          set_scores = sets.map(s => {
+            const parts = s.split('-').map(p => p.trim());
+            return aFirst ? parts.join('-') : [parts[1], parts[0]].join('-');
+          }).join(',');
+        }
+      }
+
+      rows.push({ match_date: matchDate, tour: matchedTour, tournament_name, round, player_a_name, player_b_name, result_status: isVoided ? 'voided' : 'completed', winner_side, set_scores });
+    }
+    return { rows, errors };
+  }
+
+  $('parseTennisResultsImportBtn').addEventListener('click', () => {
+    const wrap = $('tennisResultsImportWrap');
+    const matchDate = $('tennisResultsExportDate').value;
+    if (!matchDate) { wrap.innerHTML = '<div class="msg error">Pick the date the matches were played first.</div>'; return; }
+    const { rows, errors, error } = parseTennisResultsImportCsv($('tennisResultsImportInput').value, matchDate);
+    if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
+
+    const errorsHtml = errors.length
+      ? `<div class="msg error" style="margin-bottom:10px;">${errors.map(e => `<div>${escapeHtml(e)}</div>`).join('')}</div>` : '';
+
+    if (!rows.length) {
+      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import.</div>';
+      return;
+    }
+
+    const rowsHtml = rows.map(r => `
+      <tr><td>${escapeHtml(r.tour)}</td><td>${escapeHtml(r.tournament_name)}</td><td>${escapeHtml(r.round)}</td><td>${escapeHtml(r.player_a_name)} / ${escapeHtml(r.player_b_name)}</td><td>${r.winner_side ? escapeHtml(r.winner_side === 'a' ? r.player_a_name : r.player_b_name) : '—'}</td><td>${r.set_scores ? escapeHtml(r.set_scores) : '—'}</td><td>${escapeHtml(r.result_status)}</td></tr>`).join('');
+
+    wrap.innerHTML = `
+      ${errorsHtml}
+      <div style="font-size:12px;margin-bottom:10px;"><strong>${rows.length}</strong> result(s) ready to cache:</div>
+      <table class="picks-table" style="margin-bottom:14px;">
+        <thead><tr><th>Tour</th><th>Tournament</th><th>Round</th><th>Players</th><th>Winner</th><th>Score</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <button id="confirmTennisResultsImportBtn">Cache ${rows.length} result(s)</button>`;
+
+    $('confirmTennisResultsImportBtn').addEventListener('click', async () => {
+      const btn = $('confirmTennisResultsImportBtn');
+      btn.disabled = true;
+      btn.textContent = 'Caching...';
+      try {
+        await rest('tennis_draw_cache?on_conflict=match_date,tour,tournament_name,round,player_a_name,player_b_name', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows)
+        });
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} result(s). "Find & Update Results" will now check these alongside ESPN for Tennis picks on ${matchDate}.</div>`;
+        $('tennisResultsImportInput').value = '';
+      } catch (e) {
+        alert('Could not cache: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = `Cache ${rows.length} result(s)`;
+      }
+    });
+  });
+
+  // ---------- KBO results cache (export request / import results) ----------
+  // ADDED 2026-09-11, direct follow-up: "could this not work for all these
+  // outliers like KBO, Soccer etc?" Checked directly -- unlike Tennis
+  // (partial ESPN coverage), KBO has ZERO automated grading today (neither
+  // TheRundown nor ESPN backfill touch it at all). Same free bulk-paste
+  // pattern, writing into a new kbo_results_cache table that
+  // grade_picks_espn_backfill's new isKBO branch reads.
+  const KBO_TEAM_ROSTER = ['Hanwha Eagles', 'KIA Tigers', 'KT Wiz', 'LG Twins', 'Lotte Giants', 'NC Dinos', 'Doosan Bears', 'SSG Landers', 'Samsung Lions', 'Kiwoom Heroes'];
+
+  async function fetchCachedKboGamesForDate(date) {
+    if (!date) return [];
+    try {
+      return await rest(`kbo_results_cache?select=home_team,away_team&game_date=eq.${date}`);
+    } catch (e) { return []; }
+  }
+
+  $('exportKboResultsRequestBtn').addEventListener('click', async () => {
+    const date = $('kboResultsExportDate').value;
+    if (!date) { alert('Pick the date the games were played first.'); return; }
+    const btn = $('exportKboResultsRequestBtn');
+    btn.disabled = true;
+    try {
+      const cached = await fetchCachedKboGamesForDate(date);
+      const cachedLine = cached.length
+        ? `Already cached for this date (confirm/find scores for these):\n${cached.map(g => `  - ${g.home_team} vs ${g.away_team}`).join('\n')}`
+        : 'No games currently cached for this date yet -- research and report any real KBO games played this date.';
+
+      const instructions = [
+        '=== INSTRUCTIONS FOR RESEARCHING KBO (Korean Baseball Organization) RESULTS ===',
+        '',
+        `Please find the real final scores of KBO games played on ${date} (Eastern Time, USA -- KBO games are played in Korea, so also check the corresponding Korea Standard Time calendar date if ${date} doesn't turn up results).`,
+        '',
+        'Use EXACTLY these team names (the 10 real KBO teams this system recognizes):',
+        '  ' + KBO_TEAM_ROSTER.join(', '),
+        '',
+        cachedLine,
+        '',
+        'For each game played this date, report the final score AND, if available, the score through 5 innings (needed for "First 5" bets).',
+        '',
+        'OUTPUT FORMAT -- please return a CSV with exactly these columns: home_team,away_team,home_score,away_score,home_score_f5,away_score_f5,status',
+        '  - home_team/away_team: use the exact team names listed above.',
+        '  - home_score/away_score: final score. Leave home_score_f5/away_score_f5 blank if the through-5-innings score isn\'t available.',
+        '  - status: "completed" normally, or "voided" if the game was postponed/suspended and not completed (leave scores blank in that case).',
+        '',
+        'Only include games you are reasonably confident actually happened as described -- if uncertain, leave it out rather than guessing.',
+        '',
+        '=== END INSTRUCTIONS ==='
+      ].join('\r\n');
+
+      downloadCsv(`kbo-results-request-${date}.csv`, ['home_team', 'away_team', 'home_score', 'away_score', 'home_score_f5', 'away_score_f5', 'status'], [], instructions);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function parseKboResultsImportCsv(text, gameDate) {
+    const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
+    if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
+    function looksLikeHeader(line) {
+      const delim = line.includes('\t') ? '\t' : ',';
+      const tokens = splitCsvLine(line, delim).map(t => t.trim().toLowerCase());
+      return tokens.includes('home_team') && tokens.includes('away_team');
+    }
+    const headerRowIndex = allLines.findIndex(looksLikeHeader);
+    if (headerRowIndex === -1) return { error: 'Missing required columns: home_team and/or away_team.' };
+    const lines = allLines.slice(headerRowIndex);
+    const delimiter = lines[0].includes('\t') ? '\t' : ',';
+    const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
+    const homeIdx = headers.indexOf('home_team');
+    const awayIdx = headers.indexOf('away_team');
+    const homeScoreIdx = headers.indexOf('home_score');
+    const awayScoreIdx = headers.indexOf('away_score');
+    const homeF5Idx = headers.indexOf('home_score_f5');
+    const awayF5Idx = headers.indexOf('away_score_f5');
+    const statusIdx = headers.indexOf('status');
+    if (homeIdx === -1 || awayIdx === -1) return { error: 'Missing required columns: home_team and/or away_team.' };
+
+    const rows = [];
+    const errors = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i], delimiter).map(c => c.trim());
+      const home_team = cells[homeIdx];
+      const away_team = cells[awayIdx];
+      if (!home_team || !away_team) { errors.push(`Row ${i + 1}: missing home_team or away_team -- skipped.`); continue; }
+      const statusRaw = ((statusIdx !== -1 && cells[statusIdx]) || 'completed').toLowerCase();
+      const isVoided = statusRaw === 'voided';
+      function parseScore(idx) {
+        if (idx === -1 || !cells[idx]) return null;
+        const n = Number(cells[idx]);
+        return Number.isFinite(n) ? n : null;
+      }
+      let home_score = null, away_score = null;
+      if (!isVoided) {
+        home_score = parseScore(homeScoreIdx);
+        away_score = parseScore(awayScoreIdx);
+        if (home_score === null || away_score === null) {
+          errors.push(`Row ${i + 1}: missing or non-numeric home_score/away_score (or set status to "voided") -- skipped.`);
+          continue;
+        }
+      }
+      const home_score_f5 = isVoided ? null : parseScore(homeF5Idx);
+      const away_score_f5 = isVoided ? null : parseScore(awayF5Idx);
+      rows.push({ game_date: gameDate, home_team, away_team, home_score, away_score, home_score_f5, away_score_f5, result_status: isVoided ? 'voided' : 'completed' });
+    }
+    return { rows, errors };
+  }
+
+  $('parseKboResultsImportBtn').addEventListener('click', () => {
+    const wrap = $('kboResultsImportWrap');
+    const gameDate = $('kboResultsExportDate').value;
+    if (!gameDate) { wrap.innerHTML = '<div class="msg error">Pick the date the games were played first.</div>'; return; }
+    const { rows, errors, error } = parseKboResultsImportCsv($('kboResultsImportInput').value, gameDate);
+    if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
+
+    const errorsHtml = errors.length
+      ? `<div class="msg error" style="margin-bottom:10px;">${errors.map(e => `<div>${escapeHtml(e)}</div>`).join('')}</div>` : '';
+
+    if (!rows.length) {
+      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import.</div>';
+      return;
+    }
+
+    const rowsHtml = rows.map(r => `
+      <tr><td>${escapeHtml(r.home_team)}</td><td>${escapeHtml(r.away_team)}</td><td>${r.home_score ?? '—'}</td><td>${r.away_score ?? '—'}</td><td>${r.home_score_f5 ?? '—'}</td><td>${r.away_score_f5 ?? '—'}</td><td>${escapeHtml(r.result_status)}</td></tr>`).join('');
+
+    wrap.innerHTML = `
+      ${errorsHtml}
+      <div style="font-size:12px;margin-bottom:10px;"><strong>${rows.length}</strong> game(s) ready to cache:</div>
+      <table class="picks-table" style="margin-bottom:14px;">
+        <thead><tr><th>Home</th><th>Away</th><th>Home score</th><th>Away score</th><th>Home F5</th><th>Away F5</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <button id="confirmKboResultsImportBtn">Cache ${rows.length} game(s)</button>`;
+
+    $('confirmKboResultsImportBtn').addEventListener('click', async () => {
+      const btn = $('confirmKboResultsImportBtn');
+      btn.disabled = true;
+      btn.textContent = 'Caching...';
+      try {
+        await rest('kbo_results_cache?on_conflict=game_date,home_team,away_team', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows)
+        });
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} game(s). "Find & Update Results" will now check these for KBO picks on ${gameDate}.</div>`;
+        $('kboResultsImportInput').value = '';
+      } catch (e) {
+        alert('Could not cache: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = `Cache ${rows.length} game(s)`;
       }
     });
   });
@@ -24342,7 +24720,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 484; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 485; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
