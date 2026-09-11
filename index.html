@@ -5972,6 +5972,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
       '',
       'IMPORTANT -- for EACH tournament found, report EVERY REAL MATCH FROM THE ENTIRE DRAW you can confirm (every round -- R32, R16, QF, SF, F -- not just one day\'s matches), not only matches on the exact date above. If this is a PAST/historical week, the full bracket is already decided -- report all of it. If this is the CURRENT or a FUTURE week, only report rounds that have actually been drawn or already played as of right now -- later rounds genuinely do not exist yet until the earlier rounds decide who advances, so do not guess or predict a hypothetical pairing.',
       '',
+      'IMPORTANT -- NEVER skip a tournament\'s QUALIFYING rounds (Q1, Q2, etc.). Real cappers bet on qualifying matches too -- it is real, bettable tennis, not noise. Qualifying is the single most commonly missed category here: it typically happens 1-3 days BEFORE a tournament\'s commonly-listed main-draw start date, and that qualifying window is usually NOT included in the tournament\'s own headline date range (a tournament listed as running "16-22 June", for example, very likely has real qualifying matches on the 14th and 15th that a search will completely miss if it only looks for tournaments whose LISTED dates cover the date being researched). So: also check any tournament whose MAIN DRAW starts within the next 2-3 days AFTER the week being researched, and include its real qualifying matches too, not just tournaments already fully underway.',
+      '',
       'OUTPUT FORMAT -- please return a CSV with exactly these columns: tour,tournament_name,round,player_a,player_b,match_date,start_time_et,tournament_play_start_et',
       '  - tour: exactly "ATP", "WTA", or "Challenger".',
       '  - tournament_name: the real tournament name.',
@@ -24816,7 +24818,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 489; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 490; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
