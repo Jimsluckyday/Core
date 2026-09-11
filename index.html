@@ -8750,7 +8750,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // tool's own v335 comment). Flagging a leg as "missing odds" was
     // never a real gap, same "not a real gap" treatment as the
     // is_parlay_leg exclusion already applied to Unit size just below.
-    // Direct follow-up 2026-09-02 (SUPERSEDED 2026-09-13): this used to
+    // Direct follow-up 2026-09-02 (SUPERSEDED 2026-09-11): this used to
     // also exclude the parlay WRAPPER itself (betTypeName === 'parlay'),
     // back when a parlay's missing odds was expected to be resolved via
     // "Bulk mark parlay odds unavailable" rather than flagged here. That
@@ -8759,7 +8759,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // computed odds by default, `odds_unavailable` is last-resort only,
     // so a parlay sitting at "NO ODDS" with odds_unavailable still false
     // is exactly the gap this check exists to catch, not something to
-    // wave through. Direct report 2026-09-13: a real parlay ("Parlay #4
+    // wave through. Direct report 2026-09-11: a real parlay ("Parlay #4
     // -- 2 Legs", Cash It Baby) sat with zero odds, graded as a loss, and
     // never once surfaced here because of this now-stale exclusion.
     // `is_parlay_leg` and `odds_unavailable` exclusions are unrelated to
@@ -19383,7 +19383,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // unavailable tool's own v335 comment). Flagging a leg as "missing
       // odds" was never a real gap, same is_parlay_leg exclusion already
       // used for Unit size just below.
-      // Direct follow-up 2026-09-02 (SUPERSEDED 2026-09-13): same fix as
+      // Direct follow-up 2026-09-02 (SUPERSEDED 2026-09-11): same fix as
       // missingFieldsSummary's own Opening/Closing odds check just above
       // it in that function -- this used to also exclude the parlay
       // WRAPPER itself (betTypeName === 'parlay'), under the old
@@ -19393,7 +19393,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // now needs real researched/computed odds by default -- a wrapper
       // sitting at "NO ODDS" with odds_unavailable still false is exactly
       // the gap this tool exists to catch, not a case to wave through.
-      // Direct report 2026-09-13: a real parlay sat with zero odds,
+      // Direct report 2026-09-11: a real parlay sat with zero odds,
       // already graded as a loss, and never surfaced here because of
       // this now-stale exclusion. is_parlay_leg/odds_unavailable are
       // unrelated and still correct to exclude.
