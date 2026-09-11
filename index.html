@@ -8750,16 +8750,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
     // tool's own v335 comment). Flagging a leg as "missing odds" was
     // never a real gap, same "not a real gap" treatment as the
     // is_parlay_leg exclusion already applied to Unit size just below.
-    // Direct follow-up 2026-09-02: "either we have odds on a parent or it
-    // gets cleared by the bulk fix of parlays not needing odds... it
-    // wastes my time and my token count chasing data we don't need to
-    // validate." The PARENT parlay wrapper itself (is_parlay_leg=false,
-    // it's not a leg -- it IS the parlay) was never excluded here the way
-    // it already is for Start time/Event name just below -- a parlay's
-    // combined price is exactly what "Bulk mark parlay odds unavailable"
-    // exists to resolve, not something this generic field-completeness
-    // scan should ever flag as a plain missing value to go research.
-    if (!p.odds_unavailable && !p.is_parlay_leg && betTypeName.toLowerCase() !== 'parlay') {
+    // Direct follow-up 2026-09-02 (SUPERSEDED 2026-09-13): this used to
+    // also exclude the parlay WRAPPER itself (betTypeName === 'parlay'),
+    // back when a parlay's missing odds was expected to be resolved via
+    // "Bulk mark parlay odds unavailable" rather than flagged here. That
+    // assumption no longer holds -- the 2026-09-06 ROI policy change
+    // means a parlay wrapper missing odds now needs real researched/
+    // computed odds by default, `odds_unavailable` is last-resort only,
+    // so a parlay sitting at "NO ODDS" with odds_unavailable still false
+    // is exactly the gap this check exists to catch, not something to
+    // wave through. Direct report 2026-09-13: a real parlay ("Parlay #4
+    // -- 2 Legs", Cash It Baby) sat with zero odds, graded as a loss, and
+    // never once surfaced here because of this now-stale exclusion.
+    // `is_parlay_leg` and `odds_unavailable` exclusions are unrelated to
+    // this and still correct: a LEG never carries its own price by
+    // design, and a wrapper explicitly marked odds_unavailable (still a
+    // legitimate last-resort outcome) shouldn't re-appear as missing.
+    if (!p.odds_unavailable && !p.is_parlay_leg) {
       if (p.opening_odds === null || p.opening_odds === undefined) missing.push('Opening odds');
       if (p.closing_odds === null || p.closing_odds === undefined) missing.push('Closing odds');
     }
@@ -19376,14 +19383,22 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // unavailable tool's own v335 comment). Flagging a leg as "missing
       // odds" was never a real gap, same is_parlay_leg exclusion already
       // used for Unit size just below.
-      // Direct follow-up 2026-09-02: same fix as missingFieldsSummary's
-      // own Opening/Closing odds check -- the PARENT parlay wrapper
-      // itself was never excluded here the way it already is for Start
-      // time/Event name below, so it kept surfacing as "missing odds" to
-      // go research even though a parlay's combined price is exactly
-      // what Bulk mark parlay odds unavailable exists to resolve instead.
-      if (has('mdCheckClosing') && !p.odds_unavailable && !p.is_parlay_leg && betTypeName.toLowerCase() !== 'parlay' && (p.closing_odds === null || p.closing_odds === undefined)) return true;
-      if (has('mdCheckOpening') && !p.odds_unavailable && !p.is_parlay_leg && betTypeName.toLowerCase() !== 'parlay' && (p.opening_odds === null || p.opening_odds === undefined)) return true;
+      // Direct follow-up 2026-09-02 (SUPERSEDED 2026-09-13): same fix as
+      // missingFieldsSummary's own Opening/Closing odds check just above
+      // it in that function -- this used to also exclude the parlay
+      // WRAPPER itself (betTypeName === 'parlay'), under the old
+      // assumption that a parlay's missing odds gets resolved via "Bulk
+      // mark parlay odds unavailable" rather than surfaced here. The
+      // 2026-09-06 ROI policy change means a parlay wrapper missing odds
+      // now needs real researched/computed odds by default -- a wrapper
+      // sitting at "NO ODDS" with odds_unavailable still false is exactly
+      // the gap this tool exists to catch, not a case to wave through.
+      // Direct report 2026-09-13: a real parlay sat with zero odds,
+      // already graded as a loss, and never surfaced here because of
+      // this now-stale exclusion. is_parlay_leg/odds_unavailable are
+      // unrelated and still correct to exclude.
+      if (has('mdCheckClosing') && !p.odds_unavailable && !p.is_parlay_leg && (p.closing_odds === null || p.closing_odds === undefined)) return true;
+      if (has('mdCheckOpening') && !p.odds_unavailable && !p.is_parlay_leg && (p.opening_odds === null || p.opening_odds === undefined)) return true;
       if (has('mdCheckHomeAway') && !p.home_away && !isFutures && !usesPropFields && betTypeUsesHomeAway(betTypeName) && sportUsesHomeAway(sportName)) return true;
       // CONFIRMED REAL BUG (found 2026-08-14), direct report: parlay legs
       // were showing up as individually-editable rows needing Unit size,
@@ -24877,7 +24892,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 492; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 493; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
