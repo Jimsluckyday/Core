@@ -1036,6 +1036,37 @@ function toEasternDateStr(isoString: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 
+// ADDED 2026-09-11, direct request: "if we don't know can we default to the
+// earliest time so that in the instance we put a pick up on the website for
+// the public we don't show them a time that's later than the actual draw so
+// they have zero chance of missing it." Used as the fallback whenever a
+// cached Tennis draw has no real start_time_et -- returns 00:00:00 Eastern
+// on the given date, converted to a correct UTC instant (handles EDT/EST
+// automatically, same offset-detection trick as index.html's own
+// etStringToUtcIso). Midnight ET is BEFORE every real match that could ever
+// be assigned this Eastern calendar date, by definition -- guaranteed never
+// later than the truth, unlike the previous fixed-UTC guess (16:00 UTC =
+// noon EDT / 11am EST), which was already later than several real grass-
+// season start times (Queen's Club, Halle) reported directly this session.
+function etStartOfDayUtcIso(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const naiveUtc = new Date(Date.UTC(year, month - 1, day, 0, 0));
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  const parts = fmt.formatToParts(naiveUtc);
+  const partsObj: Record<string, string> = {};
+  parts.forEach(p => { partsObj[p.type] = p.value; });
+  const etAsIfUtc = Date.UTC(
+    Number(partsObj.year), Number(partsObj.month) - 1, Number(partsObj.day),
+    Number(partsObj.hour) === 24 ? 0 : Number(partsObj.hour), Number(partsObj.minute)
+  );
+  const offsetMs = naiveUtc.getTime() - etAsIfUtc;
+  return new Date(naiveUtc.getTime() + offsetMs).toISOString();
+}
+
 function levenshtein(a: string, b: string): number {
   const m = a.length, n = b.length;
   const d: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
@@ -1457,11 +1488,13 @@ Deno.serve(async (req) => {
               if (seenMatchIds.has(matchId)) continue;
               seenMatchIds.add(matchId);
               // start_time_et is best-effort and may be null -- fall back to
-              // a synthetic midday-ET timestamp on match_date so the
-              // downstream date-diff arithmetic (closestTennisMatch, the
-              // gap-safety check) still has a real Date to compare against
-              // instead of producing NaN.
-              const startTime = row.start_time_et || `${row.match_date}T16:00:00Z`;
+              // the START of the Eastern calendar day (see
+              // etStartOfDayUtcIso's own comment) rather than a midday
+              // guess, so a publicly-shown approximate time can never be
+              // LATER than the real match and risk someone missing it. Also
+              // gives closestTennisMatch/the gap-safety check a real Date
+              // to compare against instead of producing NaN.
+              const startTime = row.start_time_et || etStartOfDayUtcIso(row.match_date);
               tennisMatches.push({
                 matchId, startTime,
                 playerNames: [row.player_a_name, row.player_b_name],

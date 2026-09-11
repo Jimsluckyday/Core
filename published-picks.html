@@ -326,6 +326,15 @@
     margin-right: 5px;
     opacity: 0.75;
   }
+  .start-time-approx {
+    display: block;
+    font-weight: 400;
+    text-transform: none;
+    font-size: 10px;
+    letter-spacing: 0;
+    opacity: 0.75;
+    margin-top: 2px;
+  }
 
   .win-amount {
     font-family: 'Space Mono', monospace;
@@ -810,8 +819,19 @@
         // bottom next to the date, since knowing exactly when to place
         // the bet is one of the most important things here and shouldn't
         // be something eyes can wander past.
+        // Direct request 2026-09-11: Tennis draw times for Challenger/
+        // lower-tier events (ESPN has no coverage) come from a manually-
+        // pasted cache that often doesn't know the real time at all -- that
+        // case now defaults to the START of the Eastern calendar day
+        // (schedule-sync-backfill's etStartOfDayUtcIso) specifically so it
+        // can never show LATER than the real match and risk someone
+        // missing it, but that means a Tennis time shown here can be
+        // meaningfully earlier than reality. This note says so, so nobody
+        // reads a Tennis start time as exact the way every other sport's
+        // (real ESPN-sourced) time already is.
+        const isTennisCard = p.sports && p.sports.name === 'Tennis';
         const startTimeHtml = p.game_start_time
-          ? `<span class="start-time-label">Event start:</span> ${new Date(p.game_start_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+          ? `<span class="start-time-label">Event start:</span> ${new Date(p.game_start_time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${isTennisCard ? '<span class="start-time-approx">Tennis times are approximate -- confirm the exact time with your sportsbook.</span>' : ''}`
           : '';
         // Hypothetical payout on a flat bet if this specific pick wins --
         // always shown regardless of the pick's actual current result
