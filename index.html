@@ -6179,6 +6179,38 @@ These are almost always the same day, so "Date entered" only fills in a starting
     }
   });
 
+  // A blank paste (or header-only paste) means the chatbot researched this
+  // date and confirmed there was nothing to report -- that's a legitimate,
+  // expected outcome, NOT a paste-format mistake, and must be treated
+  // differently from garbled/invalid content (which IS a real problem
+  // worth surfacing as an error). Distinguishing these two cases is what
+  // lets "run it every night as a catch-all" be a safe, unambiguous habit.
+  function isBlankResultsPaste(text, requiredCols) {
+    const allLines = (text || '').split('\n').map(l => l.trim()).filter(l => l.length);
+    if (!allLines.length) return true;
+    if (allLines.length === 1) {
+      const delim = allLines[0].includes('\t') ? '\t' : ',';
+      const tokens = splitCsvLine(allLines[0], delim).map(t => t.trim().toLowerCase());
+      if (requiredCols.every(c => tokens.includes(c))) return true;
+    }
+    return false;
+  }
+
+  // Durable record of every results check, whether it found 0 or N results --
+  // so "nobody ran this tonight" and "ran it, confirmed nothing" are never
+  // indistinguishable after the fact.
+  async function logResultsCheck(tool, checkedDate, rowsFound) {
+    try {
+      await rest('results_check_log', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify([{ tool, checked_date: checkedDate, rows_found: rowsFound }])
+      });
+    } catch (e) {
+      console.error('Could not log results check:', e);
+    }
+  }
+
   function parseTennisResultsImportCsv(text, matchDate) {
     const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
     if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
@@ -6260,6 +6292,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const wrap = $('tennisResultsImportWrap');
     const matchDate = $('tennisResultsExportDate').value;
     if (!matchDate) { wrap.innerHTML = '<div class="msg error">Pick the date the matches were played first.</div>'; return; }
+
+    if (isBlankResultsPaste($('tennisResultsImportInput').value, ['tour', 'player_a', 'player_b'])) {
+      logResultsCheck('tennis_results', matchDate, 0);
+      wrap.innerHTML = `<div class="msg ok">Results check complete for ${escapeHtml(matchDate)}: no games found to update. Safe to run "Find & Update Results" now.</div>`;
+      alert(`Results ran -- no games to update for ${matchDate}. Safe for you to run Find & Update Results.`);
+      $('tennisResultsImportInput').value = '';
+      return;
+    }
+
     const { rows, errors, error } = parseTennisResultsImportCsv($('tennisResultsImportInput').value, matchDate);
     if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
 
@@ -6267,7 +6308,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       ? `<div class="msg error" style="margin-bottom:10px;">${errors.map(e => `<div>${escapeHtml(e)}</div>`).join('')}</div>` : '';
 
     if (!rows.length) {
-      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import.</div>';
+      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import -- this doesn\'t look like a clean "no games" response, check the errors above before assuming there\'s nothing to do tonight.</div>';
       return;
     }
 
@@ -6293,6 +6334,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(rows)
         });
+        logResultsCheck('tennis_results', matchDate, rows.length);
         wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} result(s). "Find & Update Results" will now check these alongside ESPN for Tennis picks on ${matchDate}.</div>`;
         $('tennisResultsImportInput').value = '';
       } catch (e) {
@@ -6414,6 +6456,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const wrap = $('kboResultsImportWrap');
     const gameDate = $('kboResultsExportDate').value;
     if (!gameDate) { wrap.innerHTML = '<div class="msg error">Pick the date the games were played first.</div>'; return; }
+
+    if (isBlankResultsPaste($('kboResultsImportInput').value, ['home_team', 'away_team'])) {
+      logResultsCheck('kbo_results', gameDate, 0);
+      wrap.innerHTML = `<div class="msg ok">Results check complete for ${escapeHtml(gameDate)}: no games found to update. Safe to run "Find & Update Results" now.</div>`;
+      alert(`Results ran -- no games to update for ${gameDate}. Safe for you to run Find & Update Results.`);
+      $('kboResultsImportInput').value = '';
+      return;
+    }
+
     const { rows, errors, error } = parseKboResultsImportCsv($('kboResultsImportInput').value, gameDate);
     if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
 
@@ -6421,7 +6472,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       ? `<div class="msg error" style="margin-bottom:10px;">${errors.map(e => `<div>${escapeHtml(e)}</div>`).join('')}</div>` : '';
 
     if (!rows.length) {
-      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import.</div>';
+      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import -- this doesn\'t look like a clean "no games" response, check the errors above before assuming there\'s nothing to do tonight.</div>';
       return;
     }
 
@@ -6447,6 +6498,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(rows)
         });
+        logResultsCheck('kbo_results', gameDate, rows.length);
         wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} game(s). "Find & Update Results" will now check these for KBO picks on ${gameDate}.</div>`;
         $('kboResultsImportInput').value = '';
       } catch (e) {
@@ -24825,7 +24877,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 491; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 492; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
