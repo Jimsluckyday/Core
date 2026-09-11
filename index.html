@@ -745,7 +745,7 @@
         </div>
         <div style="margin-top:14px;">
           <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
-          <textarea id="tennisDrawImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,start_time_et&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Taro Daniel,2025-06-14 09:00"></textarea>
+          <textarea id="tennisDrawImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,start_time_et,tournament_play_start_et&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Taro Daniel,,2025-06-14 05:00"></textarea>
           <div style="margin-top:8px;">
             <button id="parseTennisDrawImportBtn">Parse &amp; preview</button>
           </div>
@@ -5949,19 +5949,20 @@ These are almost always the same day, so "Date entered" only fills in a starting
       '',
       'IMPORTANT -- there are typically SEVERAL Challenger-level events running concurrently in any given week worldwide, not just the headline ATP/WTA events. Do not stop after finding one or two. Check official ATP/WTA draw/schedule pages for the week, and cross-reference against a comprehensive week-by-week source (e.g. Wikipedia\'s "[year] ATP Challenger Tour" page and the WTA 125 equivalent) to catch concurrent Challenger events a single general search would miss.',
       '',
-      'OUTPUT FORMAT -- please return a CSV with exactly these columns: tour,tournament_name,round,player_a,player_b,start_time_et',
+      'OUTPUT FORMAT -- please return a CSV with exactly these columns: tour,tournament_name,round,player_a,player_b,start_time_et,tournament_play_start_et',
       '  - tour: exactly "ATP", "WTA", or "Challenger".',
       '  - tournament_name: the real tournament name.',
       '  - round: e.g. "R32", "QF", "Q1" -- best effort, leave blank if unknown.',
       '  - player_a and player_b: full player names.',
-      `  - start_time_et: approximate start time in US Eastern time, as "YYYY-MM-DD HH:MM" (24-hour) -- leave blank rather than guessing if genuinely unknown.`,
+      `  - start_time_et: this SPECIFIC match's approximate start time in US Eastern time, as "YYYY-MM-DD HH:MM" (24-hour) -- leave blank rather than guessing if genuinely unknown.`,
+      `  - tournament_play_start_et: this tournament's daily "order of play" start time for THIS DATE (when play begins at the venue that day, e.g. official schedules often say "Play begins at 10:00 local") -- convert to US Eastern time, "YYYY-MM-DD HH:MM". Fill this in for every match from the same tournament on the same day (repeat the same value). This is used as a fallback whenever a specific match's own start_time_et isn't known, so it must NEVER be later than the earliest real match of the day -- leave blank rather than guessing if genuinely unknown.`,
       '',
       'Only include matches you are reasonably confident are real and scheduled for this date -- if uncertain about a specific match, leave it out rather than guessing.',
       '',
       '=== END INSTRUCTIONS ==='
     ].join('\r\n');
 
-    downloadCsv(`tennis-draw-request-${date}.csv`, ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'start_time_et'], [], instructions);
+    downloadCsv(`tennis-draw-request-${date}.csv`, ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'start_time_et', 'tournament_play_start_et'], [], instructions);
   });
 
   const TENNIS_DRAW_TOURS = ['ATP', 'WTA', 'Challenger'];
@@ -5985,8 +5986,21 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const playerAIdx = headers.indexOf('player_a');
     const playerBIdx = headers.indexOf('player_b');
     const startTimeIdx = headers.indexOf('start_time_et');
+    const playStartIdx = headers.indexOf('tournament_play_start_et');
     if (tourIdx === -1 || playerAIdx === -1 || playerBIdx === -1) {
       return { error: 'Missing required columns: tour, player_a, and/or player_b.' };
+    }
+
+    // Shared parser for either time column -- both use the same "YYYY-MM-DD
+    // HH:MM" Eastern format and the same etStringToUtcIso conversion.
+    function parseEtField(raw, rowNum, fieldName) {
+      if (!raw) return { value: null, dateStr: null };
+      if (!/^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}$/.test(raw)) {
+        errors.push(`Row ${rowNum}: ${fieldName} "${raw}" isn't in the expected "YYYY-MM-DD HH:MM" format -- left blank for this row.`);
+        return { value: null, dateStr: null };
+      }
+      try { return { value: etStringToUtcIso(raw), dateStr: raw.slice(0, 10) }; }
+      catch (e) { errors.push(`Row ${rowNum}: could not parse ${fieldName} "${raw}" -- left blank for this row.`); return { value: null, dateStr: null }; }
     }
 
     const rows = [];
@@ -6001,23 +6015,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (!playerA || !playerB) { errors.push(`Row ${i + 1}: missing player_a or player_b -- skipped.`); continue; }
       const tournament_name = (tournamentIdx !== -1 && cells[tournamentIdx]) || 'Unknown Tournament';
       const round = (roundIdx !== -1 && cells[roundIdx]) || '';
-      let start_time_et = null;
-      let match_date = fallbackDate;
       const startRaw = startTimeIdx !== -1 ? cells[startTimeIdx] : '';
-      if (startRaw) {
-        if (!/^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}$/.test(startRaw)) {
-          errors.push(`Row ${i + 1}: start_time_et "${startRaw}" isn't in the expected "YYYY-MM-DD HH:MM" format -- left blank for this row.`);
-        } else {
-          try { start_time_et = etStringToUtcIso(startRaw); match_date = startRaw.slice(0, 10); }
-          catch (e) { errors.push(`Row ${i + 1}: could not parse start_time_et "${startRaw}" -- left blank for this row.`); }
-        }
-      }
+      const playStartRaw = playStartIdx !== -1 ? cells[playStartIdx] : '';
+      const startParsed = parseEtField(startRaw, i + 1, 'start_time_et');
+      const playStartParsed = parseEtField(playStartRaw, i + 1, 'tournament_play_start_et');
+      const start_time_et = startParsed.value;
+      const tournament_play_start_et = playStartParsed.value;
+      const match_date = startParsed.dateStr || playStartParsed.dateStr || fallbackDate;
       // Sorted alphabetically (not the CSV's own left/right order) so
       // re-importing the same match later, even with the two names
       // swapped, upserts onto the same row instead of duplicating it --
       // same reasoning tennis_draw_cache's unique index relies on.
       const [player_a_name, player_b_name] = [playerA, playerB].sort();
-      rows.push({ match_date, tour: matchedTour, tournament_name, round, player_a_name, player_b_name, start_time_et, source: 'manual_paste' });
+      rows.push({ match_date, tour: matchedTour, tournament_name, round, player_a_name, player_b_name, start_time_et, tournament_play_start_et, source: 'manual_paste' });
     }
     return { rows, errors };
   }
@@ -6042,8 +6052,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
       return;
     }
 
-    const rowsHtml = rows.map(r => `
-      <tr><td>${escapeHtml(r.match_date)}</td><td>${escapeHtml(r.tour)}</td><td>${escapeHtml(r.tournament_name)}</td><td>${escapeHtml(r.round)}</td><td>${escapeHtml(r.player_a_name)} / ${escapeHtml(r.player_b_name)}</td><td>${r.start_time_et ? escapeHtml(new Date(r.start_time_et).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'short' })) : 'unknown'}</td></tr>`).join('');
+    function fmtEt(iso) {
+      return iso ? new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'short' }) : null;
+    }
+    const rowsHtml = rows.map(r => {
+      const startDisplay = fmtEt(r.start_time_et) || (r.tournament_play_start_et ? `~${fmtEt(r.tournament_play_start_et)} (tournament start)` : 'unknown');
+      return `<tr><td>${escapeHtml(r.match_date)}</td><td>${escapeHtml(r.tour)}</td><td>${escapeHtml(r.tournament_name)}</td><td>${escapeHtml(r.round)}</td><td>${escapeHtml(r.player_a_name)} / ${escapeHtml(r.player_b_name)}</td><td>${escapeHtml(startDisplay)}</td></tr>`;
+    }).join('');
 
     wrap.innerHTML = `
       ${errorsHtml}

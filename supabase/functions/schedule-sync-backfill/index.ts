@@ -1487,14 +1487,23 @@ Deno.serve(async (req) => {
               const matchId = `cache-${row.id}`;
               if (seenMatchIds.has(matchId)) continue;
               seenMatchIds.add(matchId);
-              // start_time_et is best-effort and may be null -- fall back to
-              // the START of the Eastern calendar day (see
-              // etStartOfDayUtcIso's own comment) rather than a midday
-              // guess, so a publicly-shown approximate time can never be
-              // LATER than the real match and risk someone missing it. Also
-              // gives closestTennisMatch/the gap-safety check a real Date
-              // to compare against instead of producing NaN.
-              const startTime = row.start_time_et || etStartOfDayUtcIso(row.match_date);
+              // Three-tier fallback, direct follow-up: "does it have times
+              // for the tournament? ...should we not default to the start
+              // time of the tournament [instead of midnight]?" -- a
+              // tournament's own daily play-start time (its "order of play"
+              // start, e.g. "play begins at 10:00 local") is real,
+              // commonly-published information that's much more useful
+              // than an arbitrary safety-net time, while still being
+              // provably safe -- no real match can start before the day's
+              // session begins. Falls further back to the START of the
+              // Eastern calendar day (see etStartOfDayUtcIso's own comment)
+              // only when NEITHER the match's own time NOR the tournament's
+              // play-start time is known, so a publicly-shown approximate
+              // time can never be LATER than the real match and risk
+              // someone missing it. Also gives closestTennisMatch/the gap-
+              // safety check a real Date to compare against instead of
+              // producing NaN.
+              const startTime = row.start_time_et || row.tournament_play_start_et || etStartOfDayUtcIso(row.match_date);
               tennisMatches.push({
                 matchId, startTime,
                 playerNames: [row.player_a_name, row.player_b_name],
