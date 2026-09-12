@@ -6039,13 +6039,28 @@ These are almost always the same day, so "Date entered" only fills in a starting
         try {
           // Reuse the exact same validation used for a pasted CSV, just
           // starting from already-structured rows instead of raw text --
-          // still checks sport names match and skips exact duplicates.
+          // still checks sport names match and skips exact duplicates
+          // against whatever's already loaded client-side.
+          // Direct question 2026-09-12: "if I run it say daily/weekly...
+          // we don't try to upload things multiple times?" That client-side
+          // check alone only catches a duplicate against tournaments
+          // already loaded in memory -- it was never backed by a real
+          // database constraint the way tennis_draw_cache/kbo_results_cache
+          // already are, so a tournament genuinely could get inserted twice
+          // (e.g. re-found by a research pass on an overlapping date
+          // window, or the client's local `tournaments` array was simply
+          // stale). Added the same on_conflict + merge-duplicates upsert
+          // pattern already used for those two caches, at all 4 places this
+          // file ever POSTs to `tournaments` -- needs a matching unique
+          // constraint on (name, sport_id, start_date, end_date), see the
+          // SQL given alongside this fix.
           const asCsvText = 'name,sport,start_date,end_date\n' +
             batch.proposed_rows.map(r => `${r.name},${r.sport},${r.start_date},${r.end_date}`).join('\n');
           const { rows: validRows } = parseTournamentImportCsv(asCsvText);
           if (validRows.length) {
-            await rest('tournaments', {
+            await rest('tournaments?on_conflict=name,sport_id,start_date,end_date', {
               method: 'POST',
+              headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
               body: JSON.stringify(validRows.map(r => ({ name: r.name, sport_id: r.sport_id, start_date: r.start_date, end_date: r.end_date })))
             });
           }
@@ -6117,8 +6132,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!start_date || !end_date) { showMsg($('tournamentMsg'), 'Enter both a start and end date.', 'error'); return; }
     if (end_date < start_date) { showMsg($('tournamentMsg'), 'End date can\'t be before the start date.', 'error'); return; }
     try {
-      await rest('tournaments', {
+      await rest('tournaments?on_conflict=name,sport_id,start_date,end_date', {
         method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify([{ name, sport_id, start_date, end_date }])
       });
       $('newTournamentName').value = '';
@@ -6263,8 +6279,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
       btn.disabled = true;
       btn.textContent = 'Adding...';
       try {
-        await rest('tournaments', {
+        await rest('tournaments?on_conflict=name,sport_id,start_date,end_date', {
           method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(rows.map(r => ({ name: r.name, sport_id: r.sport_id, start_date: r.start_date, end_date: r.end_date })))
         });
         wrap.innerHTML = `<div class="msg ok">Added ${rows.length} tournament${rows.length === 1 ? '' : 's'}.</div>`;
@@ -7044,7 +7061,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!start_date || !end_date) { alert('Enter both a start and end date.'); return; }
     if (end_date < start_date) { alert('End date can\'t be before the start date.'); return; }
     try {
-      await rest('tournaments', { method: 'POST', body: JSON.stringify([{ name, sport_id, start_date, end_date }]) });
+      await rest('tournaments?on_conflict=name,sport_id,start_date,end_date', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ name, sport_id, start_date, end_date }])
+      });
       await refreshTournaments();
       $('pickEventName').value = name;
       $('pickEventNameQuickAdd').style.display = 'none';
@@ -25566,7 +25587,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 510; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 511; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
