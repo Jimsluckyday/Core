@@ -486,6 +486,17 @@
     of a separate tool to remember to open. -->
     <div id="futuresBanner" style="display:none;"></div>
 
+    <!-- Direct request 2026-09-13: "This red warning label should sit ...
+    right below the long term futures bets and stay there until all the
+    data is resolved... a day's work is not complete if I move on leaving
+    errors." Same always-visible, every-tab placement as futuresBanner
+    just above (a real error belongs where it can't be scrolled past, not
+    buried inside one specific tool's own results panel) -- but styled
+    red, not amber, since this is a real, active problem rather than an
+    expected-to-sit-for-months state like futures bets. See
+    refreshDataQualityBanner() for what it queries and why. -->
+    <div id="dataQualityBanner" style="display:none;"></div>
+
     <!-- ADD CAPPER / SPORT / BET TYPE -->
     <div class="stub" data-tab="setup">
       <p class="stub-title">Cappers, sports &amp; bet types</p>
@@ -13395,6 +13406,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       }
       renderAutomationResult(`Grading results (ESPN backfill) for ${date}`, allResults, 'results');
       await refreshPicksList();
+      await refreshDataQualityBanner();
     } catch (e) {
       alert('Grading failed: ' + e.message);
     } finally {
@@ -13420,6 +13432,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const data = await invokeEdgeFunction('grade-golf-picks', `?date=${date}`);
       renderAutomationResult(`Golf grading results for ${date}`, data, 'golf_results');
       await refreshPicksList();
+      await refreshDataQualityBanner();
     } catch (e) {
       alert('Golf grading failed: ' + e.message);
     } finally {
@@ -13447,6 +13460,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const data = await invokeEdgeFunctionWithRetry('schedule-sync-backfill', `?date=${date}&skipProps=true`);
       renderAutomationResult(`Pick info update for ${date}`, data, 'pick_info');
       await refreshPicksList();
+      await refreshDataQualityBanner();
     } catch (e) {
       alert('Update failed: ' + e.message);
     } finally {
@@ -13539,6 +13553,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
       renderAutomationResult(`Teams / Tournaments check for ${date}`, summary, 'teams_tournaments');
       await refreshPicksList();
+      await refreshDataQualityBanner();
     } catch (e) {
       alert('Find & Update Teams / Tournaments failed: ' + e.message);
     } finally {
@@ -20045,6 +20060,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           $('gradingCorrectionsInput').value = '';
           await refreshPicksList();
           await refreshFuturesBanner();
+          await refreshDataQualityBanner();
         } catch (e) {
           alert('Could not apply all corrections: ' + e.message);
           btn.disabled = false;
@@ -24344,6 +24360,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           $('bulkImportPreview').innerHTML = '';
           await refreshPicksList();
           await refreshFuturesBanner();
+          await refreshDataQualityBanner();
         } catch (e) {
           alert('Import failed: ' + e.message);
           btn.disabled = false;
@@ -24836,6 +24853,109 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     });
   }
 
+  // CONFIRMED REAL GAP, direct report 2026-09-13: two misspelled/ambiguous
+  // Tennis names ("Fuscovics", "Bautista") only surfaced as grading
+  // failures days after the odds/results research for that date was
+  // already done -- "a day's work is not complete if I move on leaving
+  // errors... this should be caught and corrected right after it's
+  // uploaded." schedule_sync_status (set by schedule-sync-backfill) and
+  // grading_status (set by grade_picks/grade_picks_espn_backfill/
+  // grade-golf-picks) are two genuinely separate flag pairs on the
+  // same picks row -- both already existed, both were already selected in
+  // various places, but nothing surfaced either one as a standing,
+  // impossible-to-miss problem the way futuresBanner does for long-term
+  // futures. This is that same pattern applied to real, active errors
+  // instead of an expected-to-sit-for-months state -- same every-tab
+  // placement (right below futuresBanner in the HTML), refreshed at the
+  // same lifecycle points PLUS every automation run that could change
+  // either flag (schedule-sync, pick info, teams/tournaments, grading).
+  //
+  // Reuses the EXISTING automation_dismissed_flags mechanism (the same
+  // "Mark resolved" the Automation tools panel already uses) rather than
+  // inventing a second, parallel dismissal state -- dismissing here also
+  // stops the Automation panel from re-flagging it, and vice versa, since
+  // both read/write the same array. Deliberately excludes futures-bet
+  // picks (that expected-to-sit-for-a-long-time state already has its own
+  // banner just above this one) and anything not still pending (a pick
+  // that already graded doesn't need this warning regardless of how it
+  // got there).
+  let dataQualityBannerExpanded = false;
+  function dataQualityDismissCategories(p) {
+    // Mirrors the same "essentially never stuck on both at once" fallback
+    // order already used for display elsewhere (see the syncNoteCell
+    // comment in the picks-table row builder) -- prefer schedule_sync's
+    // own categories when both happen to be present, since that's the
+    // more actionable, earlier-stage fact.
+    if (p.schedule_sync_status === 'unmatched' || p.schedule_sync_status === 'not_supported') {
+      return ['teams_tournaments', 'pick_info'];
+    }
+    if (p.grading_status === 'ambiguous') return ['results', 'golf_results'];
+    return [];
+  }
+  async function refreshDataQualityBanner() {
+    const banner = $('dataQualityBanner');
+    if (!banner) return;
+    let rows;
+    try {
+      rows = await rest(`picks?select=id,event_date,selection,automation_dismissed_flags,schedule_sync_status,schedule_sync_note,grading_status,grading_note,cappers(name),sports(name),bet_types(name,is_futures)&result=eq.pending&or=(schedule_sync_status.in.(unmatched,not_supported),grading_status.eq.ambiguous)&order=event_date.asc`);
+    } catch (e) {
+      banner.style.display = 'none';
+      banner.innerHTML = '';
+      return;
+    }
+    // is_futures done client-side, not as a server-side filter -- an older
+    // bet_types row that's never had is_futures touched reads as null, and
+    // `eq.false` on the server would wrongly exclude it (null isn't false)
+    // right alongside the real futures rows this is meant to skip.
+    const flagged = rows.filter(p => {
+      if (p.bet_types && p.bet_types.is_futures === true) return false;
+      const cats = dataQualityDismissCategories(p);
+      if (!cats.length) return false;
+      const dismissed = p.automation_dismissed_flags || [];
+      return !cats.some(c => dismissed.includes(c));
+    });
+    if (!flagged.length) {
+      banner.style.display = 'none';
+      banner.innerHTML = '';
+      return;
+    }
+    const issueText = p => p.schedule_sync_note ? p.schedule_sync_note
+      : (p.grading_note ? `Grading: ${p.grading_note}` : 'Flagged, no note on file.');
+    const listHtml = dataQualityBannerExpanded ? `
+      <div style="max-height:260px;overflow-y:auto;margin-top:6px;font-size:11px;">
+        <table class="picks-table" style="width:100%;">
+          <thead><tr><th>Event date</th><th>Capper</th><th>Sport</th><th>Selection</th><th>Issue</th><th></th><th></th></tr></thead>
+          <tbody>${flagged.map(p => `<tr>
+            <td>${escapeHtml(p.event_date)}</td>
+            <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
+            <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
+            <td>${escapeHtml(p.selection || '—')}</td>
+            <td>${escapeHtml(issueText(p))}</td>
+            <td><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;">Fix</button></td>
+            <td><button type="button" class="dataQualityDismissBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;">Mark resolved</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : '';
+    banner.style.display = 'block';
+    banner.innerHTML = `
+      <div style="background:#f7dede;color:#7a1f2b;border-left:4px solid var(--e-red, #b23b3b);border-radius:0 3px 3px 0;font-size:12px;padding:6px 12px;">
+        <span style="cursor:pointer;font-weight:bold;" id="dataQualityBannerToggle">&#9888; ${flagged.length} pick${flagged.length === 1 ? '' : 's'} stuck on a spelling/schedule/grading problem -- fix or mark resolved before calling today's data done ${dataQualityBannerExpanded ? '&#9650;' : '&#9660;'}</span>
+        ${listHtml}
+      </div>`;
+    $('dataQualityBannerToggle').addEventListener('click', () => {
+      dataQualityBannerExpanded = !dataQualityBannerExpanded;
+      refreshDataQualityBanner();
+    });
+    banner.querySelectorAll('.dataQualityEditBtn').forEach(btn => {
+      btn.addEventListener('click', () => enterPickEditMode(btn.getAttribute('data-id')));
+    });
+    banner.querySelectorAll('.dataQualityDismissBtn').forEach(btn => {
+      const id = btn.getAttribute('data-id');
+      const p = flagged.find(f => String(f.id) === String(id));
+      btn.addEventListener('click', () => dismissAutomationFlags(id, dataQualityDismissCategories(p), btn, refreshDataQualityBanner));
+    });
+  }
+
   // ---------- init ----------
   let mainAppInited = false;
   async function initMainApp() {
@@ -24864,10 +24984,11 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     await refreshTournaments();
     await refreshPicksList();
     await refreshFuturesBanner();
+    await refreshDataQualityBanner();
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 497; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 498; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
