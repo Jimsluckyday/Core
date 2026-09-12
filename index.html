@@ -768,6 +768,7 @@
               <button id="exportTennisResultsRequestBtn">&#8681; Export results request</button>
             </div>
           </div>
+          <div id="tennisResultsExportWarnWrap" style="margin-top:10px;"></div>
           <div style="margin-top:14px;">
             <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
             <textarea id="tennisResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,winner,set_scores,status&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Taro Daniel,A,6-4,3-6,6-2,completed"></textarea>
@@ -798,6 +799,7 @@
             <button id="exportKboResultsRequestBtn">&#8681; Export results request</button>
           </div>
         </div>
+        <div id="kboResultsExportWarnWrap" style="margin-top:10px;"></div>
         <div style="margin-top:14px;">
           <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
           <textarea id="kboResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="home_team,away_team,home_score,away_score,home_score_f5,away_score_f5,status&#10;KIA Tigers,Doosan Bears,5,3,2,1,completed"></textarea>
@@ -6103,6 +6105,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const btn = $('exportTennisResultsRequestBtn');
     btn.disabled = true;
     try {
+      await checkScheduleSyncFlags('Tennis', date, 'tennisResultsExportWarnWrap');
       const cached = await fetchCachedTennisMatchesForDate(date);
       const cachedList = cached.length
         ? cached.map(m => `  - ${m.tour} ${m.tournament_name}${m.round ? ' ' + m.round : ''}: ${m.player_a_name} vs ${m.player_b_name}`).join('\n')
@@ -6150,6 +6153,43 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (requiredCols.every(c => tokens.includes(c))) return true;
     }
     return false;
+  }
+
+  // CONFIRMED REAL GAP, direct report 2026-09-13: "When I did the export to
+  // Tennis results nothing stood out that there was an error and when I
+  // input these results there's so many things to look at that its easily
+  // missed." A pick can already be sitting flagged (schedule_sync_status
+  // unmatched/not_supported -- a misspelled name, an ambiguous surname like
+  // bare "Bautista", an unsupported bet type) from an EARLIER automated run,
+  // days before anyone researches odds or results for that date -- and
+  // nothing in the results-export/import flow ever surfaced that, so it
+  // silently rode along until grading finally failed on it, sometimes days
+  // later, forcing a cold re-research of something that could have been
+  // caught for free up front. Runs at BOTH the export step (before any
+  // research time gets spent) and the parse/import step (a second chance to
+  // catch it, since that's the other place this got missed) -- a real
+  // alert() that forces acknowledgment, plus a persistent bold panel left
+  // in place afterward so it's not just a fleeting popup.
+  async function checkScheduleSyncFlags(sportName, date, wrapId) {
+    const wrap = $(wrapId);
+    if (wrap) wrap.innerHTML = '';
+    const sport = sports.find(s => s.name.toLowerCase() === sportName.toLowerCase());
+    if (!sport) return;
+    let flagged = [];
+    try {
+      flagged = await rest(`picks?select=id,selection,schedule_sync_note,cappers(name)&sport_id=eq.${sport.id}&event_date=eq.${date}&schedule_sync_status=in.(unmatched,not_supported)`);
+    } catch (e) { return; }
+    if (!flagged.length) return;
+    const listHtml = flagged.map(p => `<li><strong>${escapeHtml(p.cappers ? p.cappers.name : '?')}</strong>: "${escapeHtml(p.selection)}" -- ${escapeHtml(p.schedule_sync_note || 'flagged, no note')}</li>`).join('');
+    const listText = flagged.map(p => `- ${p.cappers ? p.cappers.name : '?'}: "${p.selection}"`).join('\n');
+    if (wrap) {
+      wrap.innerHTML = `<div style="border:3px solid var(--e-red, #b23b3b);border-radius:4px;padding:12px;background:rgba(178,59,59,0.08);">
+        <div style="font-size:13px;font-weight:bold;color:var(--e-red, #b23b3b);margin-bottom:6px;">&#9888; STOP -- ${flagged.length} ${escapeHtml(sportName)} pick${flagged.length === 1 ? '' : 's'} for ${escapeHtml(date)} already ${flagged.length === 1 ? 'has' : 'have'} an unresolved name/schedule problem that researching results will NOT fix:</div>
+        <ul style="margin:0 0 8px 18px;font-size:12px;">${listHtml}</ul>
+        <div style="font-size:11px;color:var(--ink-soft);">Fix these first (correct a typo, confirm an ambiguous name from the original screenshot, or accept it needs manual grading) before spending time researching this date -- otherwise that research gets spent on a pick that still won't grade.</div>
+      </div>`;
+    }
+    alert(`STOP -- ${flagged.length} ${sportName} pick(s) for ${date} already have an unresolved name/schedule problem that researching results will NOT fix:\n\n${listText}\n\nFix these first -- see the red box on the page for details.`);
   }
 
   // Durable record of every results check, whether it found 0 or N results --
@@ -6244,10 +6284,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return { rows, errors };
   }
 
-  $('parseTennisResultsImportBtn').addEventListener('click', () => {
+  $('parseTennisResultsImportBtn').addEventListener('click', async () => {
     const wrap = $('tennisResultsImportWrap');
     const matchDate = $('tennisResultsExportDate').value;
     if (!matchDate) { wrap.innerHTML = '<div class="msg error">Pick the date the matches were played first.</div>'; return; }
+
+    await checkScheduleSyncFlags('Tennis', matchDate, 'tennisResultsExportWarnWrap');
 
     if (isBlankResultsPaste($('tennisResultsImportInput').value, ['tour', 'player_a', 'player_b'])) {
       logResultsCheck('tennis_results', matchDate, 0);
@@ -6323,6 +6365,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const btn = $('exportKboResultsRequestBtn');
     btn.disabled = true;
     try {
+      await checkScheduleSyncFlags('KBO', date, 'kboResultsExportWarnWrap');
       const cached = await fetchCachedKboGamesForDate(date);
       const cachedLine = cached.length
         ? `Already cached for this date (confirm/find scores for these):\n${cached.map(g => `  - ${g.home_team} vs ${g.away_team}`).join('\n')}`
@@ -6408,10 +6451,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return { rows, errors };
   }
 
-  $('parseKboResultsImportBtn').addEventListener('click', () => {
+  $('parseKboResultsImportBtn').addEventListener('click', async () => {
     const wrap = $('kboResultsImportWrap');
     const gameDate = $('kboResultsExportDate').value;
     if (!gameDate) { wrap.innerHTML = '<div class="msg error">Pick the date the games were played first.</div>'; return; }
+
+    await checkScheduleSyncFlags('KBO', gameDate, 'kboResultsExportWarnWrap');
 
     if (isBlankResultsPaste($('kboResultsImportInput').value, ['home_team', 'away_team'])) {
       logResultsCheck('kbo_results', gameDate, 0);
@@ -24822,7 +24867,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 496; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 497; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
