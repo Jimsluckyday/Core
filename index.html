@@ -1020,6 +1020,7 @@
           <input type="text" id="rulingSearchInput" placeholder="e.g. soccer, decision...">
         </div>
         <button type="button" class="ghost-list small" id="toggleRulingListBtn" style="margin-top:6px;">Show rulings list</button>
+        <button type="button" class="ghost small" id="openRulingsPopoutBtn" style="margin-top:6px;margin-left:8px;" title="Opens every ruling in a new tab with bigger text, easier to read when you actually need to look one up.">&#8599; Open reference card (bigger text)</button>
         <div id="rulingListPanel" style="display:none;">
           <div id="rulingListWrap" style="margin-top:10px;"></div>
         </div>
@@ -5949,6 +5950,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     panel.style.display = showing ? 'none' : 'block';
     $('toggleRulingListBtn').textContent = showing ? 'Show rulings list' : 'Hide rulings list';
   });
+  $('openRulingsPopoutBtn').addEventListener('click', openBetTypeRulingsPopout);
   $('addRulingBtn').addEventListener('click', async () => {
     const title = $('newRulingTitle').value.trim();
     const ruling = $('newRulingText').value.trim();
@@ -16943,6 +16945,44 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     win.document.close();
   }
 
+  // Direct request 2026-09-12: "This format can be useful in the database
+  // to look at but needs maybe a little work as with it being so wordy...
+  // the small type font on the generic background makes it a tough read.
+  // Maybe we can have a pop out." Same window.open() pop-out pattern as
+  // every other report in this file, just applied to reference text
+  // instead of a results table -- bigger font, generous line spacing,
+  // nothing to squint at. Deliberately NOT a Word doc: a separate file
+  // would need to be re-exported by hand every time a ruling gets added or
+  // edited here, and would silently go stale the moment it isn't. This
+  // pulls straight from the same `rulings` array Setup already keeps
+  // current, so there's only ever one real copy to maintain.
+  function openBetTypeRulingsPopout() {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
+      return;
+    }
+    const cardsHtml = rulings.length
+      ? rulings.map(r => `
+        <div style="border-bottom:1.5px dashed #b9b09a;padding:18px 0;">
+          <h2 style="font-size:17px;margin:0 0 6px;">${escapeHtml(r.title)}${r.sports ? ` <span style="font-size:12px;font-weight:normal;text-transform:uppercase;letter-spacing:0.06em;color:#55584d;border:1px solid #b9b09a;border-radius:10px;padding:2px 9px;vertical-align:middle;">${escapeHtml(r.sports.name)}</span>` : ''}</h2>
+          <div style="font-size:15px;line-height:1.6;white-space:pre-wrap;">${escapeHtml(r.ruling)}</div>
+        </div>`).join('')
+      : '<p style="font-size:15px;">No rulings added yet -- add one in Setup &gt; Bet type rulings.</p>';
+    win.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Bet Type Rulings -- Reference Card</title>
+<style>
+  body { font-family: 'Courier New', ui-monospace, monospace; background: #eae5d6; color: #22281f; padding: 32px; max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 22px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 3px double #22281f; padding-bottom: 12px; }
+</style>
+</head><body>
+  <h1>Bet Type Rulings -- Reference Card</h1>
+  <div style="font-size:13px;color:#55584d;margin-bottom:8px;">Use your browser's Find (Ctrl/Cmd+F) to jump straight to a bet type. Print or "Save as PDF" from here for an offline copy -- this page always reflects whatever is currently in Setup, so re-open it instead of keeping a saved copy around long-term.</div>
+  ${cardsHtml}
+</body></html>`);
+    win.document.close();
+  }
+
   $('runNotableStatsBtn').addEventListener('click', async () => {
     const minPct = Number($('notableStatsMinPct').value) || 5;
     const absMin = Math.max(1, Number($('notableStatsAbsMin').value) || 5);
@@ -25526,7 +25566,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 509; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 510; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
