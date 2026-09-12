@@ -24904,12 +24904,40 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // approximate is fine here: "if not they will either ask me or prompt
   // you to ask what to do next" -- the tooltip is the fallback for
   // exactly that case, not a reason to hold out for perfect classification.
+  function dataQualityShortDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!m) return iso;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[parseInt(m[2], 10) - 1]} ${parseInt(m[3], 10)}`;
+  }
+  // Direct follow-up 2026-09-11 to v499: the bucketed labels ("Date doesn't
+  // match") were too thin to act on without opening the tooltip every time --
+  // "I need this simple but not too simple... easy to understand with not
+  // too much fluff." Pulls the one specific fact worth surfacing (which
+  // tournament is closest, which bet type isn't automated, etc.) straight
+  // out of the existing note text instead of inventing new fields, so the
+  // label stays a short phrase but still answers "why", not just "what kind
+  // of why". Full original note is still the hover tooltip for anything this
+  // doesn't manage to parse cleanly.
   function dataQualityShortIssueLabel(p) {
-    const note = (p.schedule_sync_note || p.grading_note || '').toLowerCase();
-    if (!note) return 'Flagged, no note on file';
+    const noteRaw = p.schedule_sync_note || p.grading_note || '';
+    const note = noteRaw.toLowerCase();
+    if (!noteRaw) return 'Flagged, no note on file';
     if (note.includes('spelling issue') || note.includes('could not find')) return "Spelling doesn't match";
-    if (note.includes('does not appear to be playing on') || note.includes("doesn't fall within") || note.includes('wrong event_date') || note.includes('wrong date')) return "Date doesn't match";
-    if (note.includes('not supported') || note.includes('no player roster data source') || note.includes('needs manual grading') || note.includes('needs manual entry')) return 'Not supported -- manual only';
+
+    const windowMatch = noteRaw.match(new RegExp('closest registered is \\u0022([^\\u0022]+)\\u0022 \\((\\d{4}-\\d{2}-\\d{2}) to (\\d{4}-\\d{2}-\\d{2})\\)', 'i'));
+    if (windowMatch) {
+      return `No registered tournament for this date -- closest is ${windowMatch[1]} (${dataQualityShortDate(windowMatch[2])}-${dataQualityShortDate(windowMatch[3])})`;
+    }
+    if (note.includes('no matching') && note.includes('game found')) return 'No matching game found for this date';
+    if (note.includes('does not appear to be playing on')) return "Team doesn't appear to be playing on this date";
+    if (note.includes('possible games matched') || note.includes('needs manual review')) return 'Multiple possible games matched -- needs manual review';
+    if (note.includes("doesn't fall within") || note.includes('wrong event_date') || note.includes('wrong date')) return "Date doesn't match a known tournament/schedule";
+
+    const sourceMatch = noteRaw.match(/no (?:automated [a-z /]*?(?:lookup|source) exists for|[a-z /]*data source available for) ([^-.]+)/i);
+    if (sourceMatch) return `No automated support for ${sourceMatch[1].trim()} -- needs manual entry`;
+    if (note.includes('not supported') || note.includes('needs manual grading') || note.includes('needs manual entry')) return 'Not automated for this bet type -- needs manual entry';
+
     if (note.includes('ambiguous')) return 'Ambiguous match -- multiple candidates';
     return 'Flagged -- hover for detail';
   }
@@ -25028,7 +25056,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 500; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 501; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
