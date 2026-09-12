@@ -6155,7 +6155,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return false;
   }
 
-  // CONFIRMED REAL GAP, direct report 2026-09-13: "When I did the export to
+  // CONFIRMED REAL GAP, direct report 2026-09-11: "When I did the export to
   // Tennis results nothing stood out that there was an error and when I
   // input these results there's so many things to look at that its easily
   // missed." A pick can already be sitting flagged (schedule_sync_status
@@ -7683,7 +7683,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
     if (!capper_id) { showMsg($('pickMsg'), 'Add a capper first.', 'error'); return; }
     if (!bet_type_id) { showMsg($('pickMsg'), 'Add a bet type first.', 'error'); return; }
-    // CONFIRMED REAL BUG, direct report 2026-09-13: a parlay wrapper pick
+    // CONFIRMED REAL BUG, direct report 2026-09-11: a parlay wrapper pick
     // (bet_type "Parlay") should only ever come into existence as the
     // byproduct of linkLegToParlay finding-or-creating it behind the
     // scenes -- it is not a real, directly-enterable bet type the way
@@ -19094,7 +19094,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const isFutures = p.bet_types && p.bet_types.is_futures;
     const sportName = p.sports ? p.sports.name : '';
     const betTypeName = p.bet_types ? p.bet_types.name : '';
-    // Direct request 2026-09-13: "wins on a parlay needs to add to a
+    // Direct request 2026-09-11: "wins on a parlay needs to add to a
     // capper's ROI not fail silently and add nothing as there's no value
     // given." A parlay's combined price can ALWAYS be derived -- price
     // each leg (real research, or the accepted flat -110-per-leg estimate
@@ -23471,7 +23471,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         parlayNumber = n;
       }
     }
-    // CONFIRMED REAL BUG, direct report 2026-09-13: same root cause as
+    // CONFIRMED REAL BUG, direct report 2026-09-11: same root cause as
     // Add Pick's identical check -- a "Parlay" bet_type row only belongs
     // in this system as processParlayGroups()'s own synthesized summary
     // row (isSynthesizedParlaySummary), built FROM real linked legs. A
