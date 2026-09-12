@@ -25135,17 +25135,26 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // that already graded doesn't need this warning regardless of how it
   // got there).
   let dataQualityBannerExpanded = false;
+  // Direct question 2026-09-12, after confirming a real MMA pick's failure
+  // was genuinely "not automated for this bet type" and NOT the misspelled
+  // fighter name someone might have assumed: "if there are multiple reasons
+  // for a pick failure I need to know all of them as I don't want to
+  // resolve one and then have to duplicate work by doing it again." This
+  // used to return EARLY on schedule_sync's own categories the moment that
+  // flag was present, never even checking whether grading_status was ALSO
+  // 'ambiguous' on the exact same pick -- so a pick genuinely stuck on both
+  // an unmatched schedule AND an unsupported bet type would only ever show
+  // (and only ever get dismissed for) the schedule_sync half. Now returns
+  // the UNION of every category actually flagged, so "Mark resolved"
+  // clears everything currently showing for this pick, not just whichever
+  // one used to win the old either/or check.
   function dataQualityDismissCategories(p) {
-    // Mirrors the same "essentially never stuck on both at once" fallback
-    // order already used for display elsewhere (see the syncNoteCell
-    // comment in the picks-table row builder) -- prefer schedule_sync's
-    // own categories when both happen to be present, since that's the
-    // more actionable, earlier-stage fact.
+    const cats = [];
     if (p.schedule_sync_status === 'unmatched' || p.schedule_sync_status === 'not_supported') {
-      return ['teams_tournaments', 'pick_info'];
+      cats.push('teams_tournaments', 'pick_info');
     }
-    if (p.grading_status === 'ambiguous') return ['results', 'golf_results'];
-    return [];
+    if (p.grading_status === 'ambiguous') cats.push('results', 'golf_results');
+    return cats;
   }
   // Direct request 2026-09-13: "the instructions don't need to be so
   // descriptive which makes it harder to follow along and read a novel
@@ -25174,10 +25183,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // label stays a short phrase but still answers "why", not just "what kind
   // of why". Full original note is still the hover tooltip for anything this
   // doesn't manage to parse cleanly.
-  function dataQualityShortIssueLabel(p) {
-    const noteRaw = p.schedule_sync_note || p.grading_note || '';
+  // Classifies ONE note string (schedule_sync_note or grading_note) into a
+  // short label. Split out of the old dataQualityShortIssueLabel so it can
+  // be called once per note instead of once per pick -- see
+  // dataQualityIssueLabels below for why that split matters.
+  function dataQualityClassifyNote(noteRaw) {
     const note = noteRaw.toLowerCase();
-    if (!noteRaw) return 'Flagged, no note on file';
     if (note.includes('spelling issue') || note.includes('could not find')) return "Spelling doesn't match";
 
     const windowMatch = noteRaw.match(new RegExp('closest registered is \\u0022([^\\u0022]+)\\u0022 \\((\\d{4}-\\d{2}-\\d{2}) to (\\d{4}-\\d{2}-\\d{2})\\)', 'i'));
@@ -25195,6 +25206,30 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
     if (note.includes('ambiguous')) return 'Ambiguous match -- multiple candidates';
     return 'Flagged -- hover for detail';
+  }
+  // Direct question 2026-09-12, after confirming a real pick's failure was
+  // genuinely a bet-type-automation gap and NOT the misspelled name that
+  // was ALSO sitting on that same pick: "if there are multiple reasons for
+  // a pick failure I need to know all of them... I don't want to resolve
+  // one and then have to duplicate work by doing it again." schedule_sync
+  // and grading are two genuinely separate flag pairs, set by two separate
+  // processes at two separate stages -- a pick can be flagged by BOTH at
+  // once (a real name problem AND a real bet-type gap on the same pick),
+  // and the old single-label version only ever showed whichever one
+  // schedule_sync-vs-grading precedence happened to prefer, silently
+  // hiding the other until the first was fixed and grading re-run revealed
+  // it. Returns one label per flagged note instead of one label total, so
+  // every currently-known reason shows up together, not one at a time.
+  function dataQualityIssueLabels(p) {
+    const labels = [];
+    if ((p.schedule_sync_status === 'unmatched' || p.schedule_sync_status === 'not_supported') && p.schedule_sync_note) {
+      labels.push(dataQualityClassifyNote(p.schedule_sync_note));
+    }
+    if (p.grading_status === 'ambiguous' && p.grading_note) {
+      labels.push(dataQualityClassifyNote(p.grading_note));
+    }
+    if (!labels.length) labels.push('Flagged, no note on file');
+    return labels;
   }
   async function refreshDataQualityBanner() {
     const banner = $('dataQualityBanner');
@@ -25232,7 +25267,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
             <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
             <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
             <td>${escapeHtml(p.selection || '—')}</td>
-            <td title="${escapeHtml(p.schedule_sync_note || p.grading_note || '')}">${escapeHtml(dataQualityShortIssueLabel(p))}</td>
+            <td title="${escapeHtml([p.schedule_sync_note, p.grading_note].filter(Boolean).join(' | '))}">${(() => {
+              const labels = dataQualityIssueLabels(p);
+              return labels.length > 1
+                ? `<ul style="margin:0;padding-left:14px;">${labels.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
+                : escapeHtml(labels[0]);
+            })()}</td>
             <td><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Opens this pick in the manual editor on the Add Picks tab -- nothing is auto-corrected, you type the fix yourself.">Edit pick</button></td>
             <td><button type="button" class="dataQualityDismissBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Only for the genuinely unfixable ones (unsupported bet type, etc). If you just corrected a name, re-run the relevant Find & Update tool instead so it actually re-checks -- Mark resolved only hides this warning, it doesn't verify anything.">Mark resolved</button></td>
           </tr>`).join('')}</tbody>
@@ -25312,7 +25352,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 507; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 508; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
