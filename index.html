@@ -12594,13 +12594,35 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     panel.style.display = showing ? 'none' : 'block';
     $('toggleKboResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
-  // Direct request 2026-09-11: "it's got so much open... if we fix it like
-  // the other ones at least I can open and close the tools I need." Same
-  // wiring as the two handlers just above, generalized into one helper so
-  // every current and future bordered tool-box in Setup (and anywhere else
-  // this pattern gets used) wires up the same way instead of copy-pasting
-  // this block again -- see wireToolBoxToggle below for the standing
-  // convention this establishes going forward.
+  // STANDING CONVENTION, direct request 2026-09-11 ("can we double check
+  // that all tabs are uniform and make that a standard design choice as we
+  // add/remove tools"): audited every tab for this. There are, on purpose,
+  // TWO valid patterns here, not one -- they solve different situations and
+  // neither needs to change to match the other:
+  //   1. A tool that gets its OWN top-level `<div class="stub" data-tab=
+  //      "...">` (most of Reports/Tools/Pending/Publish/Add Picks already
+  //      work this way) needs nothing extra -- the .stub CSS class itself
+  //      already draws a dashed border/background around it, and the
+  //      existing convention there is an inline "Show X"/"Hide X" toggle
+  //      button right inside that tool's own <p class="stub-title"> row.
+  //      This was already consistent and is why those tabs never drew this
+  //      complaint.
+  //   2. Several related tools bundled INSIDE one shared stub/section (this
+  //      was Setup's whole problem -- one giant stub with a dozen tools and
+  //      only small uppercase text between them, no real boundary) use THIS
+  //      solid-border box + separate header row instead, one per tool,
+  //      collapsed by default, wired with wireToolBoxToggle() below. This
+  //      is the same pattern Prep & Publish/Grading (2026-08-30) and Tennis
+  //      draw cache/KBO results cache (2026-09-11) already used, now also
+  //      applied to the rest of Setup.
+  // Rule going forward: a brand new standalone report/tool gets pattern 1
+  // automatically (it's just how a new top-level stub already renders).
+  // A new tool being ADDED INTO an existing multi-tool section/stub gets
+  // pattern 2 -- wrap it in the bordered-box markup used elsewhere in this
+  // file and call wireToolBoxToggle(yourToggleBtnId, yourPanelId) here.
+  // Never leave a new addition to an existing section as a bare, unboxed
+  // block with no independent show/hide -- that's exactly how Setup got
+  // into the state that prompted this whole fix.
   function wireToolBoxToggle(btnId, panelId) {
     const btn = $(btnId);
     const panel = $(panelId);
@@ -25164,7 +25186,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 503; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 504; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
