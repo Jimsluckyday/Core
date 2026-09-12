@@ -592,26 +592,28 @@
         <div id="sportListWrap" style="margin-top:10px;"></div>
       </div>
 
+      <!-- Direct bug report 2026-09-11, screenshot of a cropped input box:
+           "why is the bet type not aligned?" The 4 checkboxes' long labels
+           (especially "Two-team matchup (Over/Under-style...)" and
+           "Long-term futures (resolves whenever...)") were sharing the same
+           flex-wrap line as the text input, competing for width and
+           squeezing the input down to its 140px minimum. Splitting the
+           input into its own full-width row and the checkboxes into their
+           own wrapping row below fixes that -- the input keeps real room
+           to type in regardless of how the checkboxes wrap, and the Add
+           button (in its own fixed add-row-btn column, unchanged from the
+           other rows) aligns with the input at the top instead of getting
+           dragged down by however tall the checkbox area gets. -->
       <div class="add-row" style="margin-top:14px;align-items:flex-start;">
-        <div class="add-row-fields">
-          <div class="field">
+        <div class="add-row-fields" style="flex-direction:column;align-items:stretch;">
+          <div class="field" style="max-width:420px;">
             <label>Add a new bet type (only if it's missing from the list below)</label>
             <input id="newBetTypeName" placeholder="e.g. First team to score" />
           </div>
-          <div class="field" style="flex:0 0 auto;">
-            <label>&nbsp;</label>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:10px;">
             <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesLine" checked /><label for="newBetTypeUsesLine">Has a line/number</label></div>
-          </div>
-          <div class="field" style="flex:0 0 auto;">
-            <label>&nbsp;</label>
             <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesProp" /><label for="newBetTypeUsesProp">Player prop style</label></div>
-          </div>
-          <div class="field" style="flex:0 0 auto;">
-            <label>&nbsp;</label>
             <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesMatchup" /><label for="newBetTypeUsesMatchup">Two-team matchup <span style="color:var(--ink-soft);font-weight:normal;">(Over/Under-style -- no single side picked)</span></label></div>
-          </div>
-          <div class="field" style="flex:0 0 auto;">
-            <label>&nbsp;</label>
             <div class="checkbox-row"><input type="checkbox" id="newBetTypeIsFutures" /><label for="newBetTypeIsFutures">Long-term futures <span style="color:var(--ink-soft);font-weight:normal;">(resolves whenever the event concludes, not a specific date -- e.g. Series Winner, Awards)</span></label></div>
           </div>
         </div>
@@ -25301,7 +25303,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 505; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 506; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
