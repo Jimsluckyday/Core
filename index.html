@@ -1399,6 +1399,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
         </div>
       </div>
 
+      <!-- Direct request 2026-09-12: "there's no way to build that into the
+           edit somewhere as I most likely got her name wrong but the first
+           place it goes is the edit and I would prefer it there to start as
+           it's where I'd catch early mistakes and not have to use a 2nd
+           tool to go find the info I need." Source Image previously only
+           existed as a Bulk Import upload column -- there was no way to see
+           OR fix it from the single-pick editor at all, for any pick. Now
+           editable here too. A parlay WRAPPER pick never carries its own
+           source_image (see linkLegToParlay -- it's a synthetic summary row,
+           never entered from one specific screenshot), so editing one shows
+           its LEGS' images as read-only context underneath instead of a
+           misleadingly-blank field with no explanation. -->
+      <div class="row">
+        <div class="field">
+          <label>Source image (optional)</label>
+          <input id="pickSourceImage" placeholder="e.g. 2025-06-29/1" />
+          <div id="pickSourceImageParlayNote" style="font-size:10px;color:var(--ink-soft);margin-top:6px;display:none;"></div>
+        </div>
+      </div>
+
       <div class="row" style="align-items:center;">
         <div class="checkbox-row">
           <span id="pickPublishedStatus" style="font-size:12px;color:var(--ink-soft);">Not published.</span>
@@ -8212,6 +8232,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       pick_tier: Number(pickTierVal),
       raw_unit_size: normalizeUnitSize($('pickRawUnitSize').value) || null,
       notes: $('pickNotes').value.trim() || null,
+      source_image: $('pickSourceImage').value.trim() || null,
       prop_player: isProp ? ($('propPlayer').value.trim() || null) : null,
       prop_stat: isProp ? ($('propStat').value.trim() || null) : null,
       prop_team: isProp ? ($('propTeam').value.trim() || null) : null,
@@ -8322,6 +8343,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickDoubleheaderGame').value = '';
         $('pickEventName').value = '';
         $('pickNotes').value = '';
+        $('pickSourceImage').value = '';
         $('propPlayer').value = '';
         $('propStat').value = '';
         $('propTeam').value = '';
@@ -8361,6 +8383,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         $('pickDoubleheaderGame').value = '';
         $('pickEventName').value = '';
         $('pickNotes').value = '';
+        $('pickSourceImage').value = '';
         $('propPlayer').value = '';
         $('propStat').value = '';
         $('propTeam').value = '';
@@ -8460,6 +8483,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickDoubleheaderGame').value = '';
     $('pickEventName').value = '';
     $('pickNotes').value = '';
+    $('pickSourceImage').value = '';
     $('propPlayer').value = '';
     $('propStat').value = '';
     $('propTeam').value = '';
@@ -8615,6 +8639,40 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('pickTier').value = String(p.pick_tier || 0);
     $('pickRawUnitSize').value = p.raw_unit_size || '';
     $('pickNotes').value = p.notes || '';
+    $('pickSourceImage').value = p.source_image || '';
+    // A parlay WRAPPER pick never has its own source_image (see
+    // linkLegToParlay -- it's a synthetic summary row, never entered from
+    // one specific screenshot). Direct request 2026-09-12, after having to
+    // run a separate SQL join just to find a leg's image while trying to
+    // verify a player's name: "the first place it goes is the edit and I
+    // would prefer it there to start... not have to use a 2nd tool." Shows
+    // the legs' own images as read-only context right here instead of
+    // leaving the field looking blank with no explanation.
+    const parlayImageNote = $('pickSourceImageParlayNote');
+    parlayImageNote.style.display = 'none';
+    parlayImageNote.textContent = '';
+    if (!p.source_image && editBt && normalizeForMatch(editBt.name) === 'parlay') {
+      try {
+        // Plain two-step lookup (parlay_legs -> picks) instead of a
+        // PostgREST embedded-resource join, since that would require
+        // knowing this table's exact foreign-key CONSTRAINT name (parlay_legs
+        // has two FKs into picks, so the embed needs one disambiguated by
+        // name) -- not worth guessing when a second REST call is just as
+        // simple and can't silently break if that name is ever wrong.
+        const legLinks = await rest(`parlay_legs?select=leg_pick_id&parlay_pick_id=eq.${p.id}`);
+        const legIds = [...new Set(legLinks.map(l => l.leg_pick_id).filter(Boolean))];
+        if (legIds.length) {
+          const legPicks = await rest(`picks?select=source_image&id=in.(${legIds.join(',')})`);
+          const legImages = [...new Set(legPicks.map(r => r.source_image).filter(Boolean))];
+          if (legImages.length) {
+            parlayImageNote.textContent = `This parlay's own source image is blank -- its legs point to: ${legImages.join(', ')}`;
+            parlayImageNote.style.display = 'block';
+          }
+        }
+      } catch (e) {
+        // Non-critical -- editing still works fine without this hint.
+      }
+    }
     if (p.is_published) {
       $('pickPublishedStatus').textContent = 'Currently published.';
       $('unpublishFromEditBtn').style.display = 'inline-block';
@@ -25639,7 +25697,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 513; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 514; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
