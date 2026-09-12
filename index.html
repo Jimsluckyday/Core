@@ -24950,8 +24950,8 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
             <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
             <td>${escapeHtml(p.selection || '—')}</td>
             <td title="${escapeHtml(p.schedule_sync_note || p.grading_note || '')}">${escapeHtml(dataQualityShortIssueLabel(p))}</td>
-            <td><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;">Fix</button></td>
-            <td><button type="button" class="dataQualityDismissBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;">Mark resolved</button></td>
+            <td><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Opens this pick in the manual editor on the Add Picks tab -- nothing is auto-corrected, you type the fix yourself.">Edit pick</button></td>
+            <td><button type="button" class="dataQualityDismissBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Only for the genuinely unfixable ones (unsupported bet type, etc). If you just corrected a name, re-run the relevant Find & Update tool instead so it actually re-checks -- Mark resolved only hides this warning, it doesn't verify anything.">Mark resolved</button></td>
           </tr>`).join('')}</tbody>
         </table>
       </div>` : '';
@@ -24959,6 +24959,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     banner.innerHTML = `
       <div style="background:#f7dede;color:#7a1f2b;border-left:4px solid var(--e-red, #b23b3b);border-radius:0 3px 3px 0;font-size:12px;padding:6px 12px;">
         <span style="cursor:pointer;font-weight:bold;" id="dataQualityBannerToggle">&#9888; ${flagged.length} pick${flagged.length === 1 ? '' : 's'} stuck on a spelling/schedule/grading problem -- fix or mark resolved before calling today's data done ${dataQualityBannerExpanded ? '&#9650;' : '&#9660;'}</span>
+        ${dataQualityBannerExpanded ? '<div style="font-size:10.5px;margin:4px 0 2px;">"Edit pick" opens the plain manual editor -- there\'s no auto-correct button here, you type the real name/date/whatever is wrong yourself. After fixing a name specifically, re-run that sport\'s "Find & Update" tool afterward to confirm it actually grades now -- "Mark resolved" just hides the row, it does not check anything, so save it for the ones that truly can\'t be fixed (an unsupported bet type, etc).</div>' : ''}
         ${listHtml}
       </div>`;
     $('dataQualityBannerToggle').addEventListener('click', () => {
@@ -24966,7 +24967,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       refreshDataQualityBanner();
     });
     banner.querySelectorAll('.dataQualityEditBtn').forEach(btn => {
-      btn.addEventListener('click', () => enterPickEditMode(btn.getAttribute('data-id')));
+      // CONFIRMED REAL BUG, direct report 2026-09-13: "I clicked on the
+      // first one and it did nothing." enterPickEditMode DOES call
+      // switchTab('addpicks') -- the bug isn't that nothing happens, it's
+      // that nothing ANNOUNCES it happened. This banner is visible on
+      // every tab by design, so a silent tab-switch with no scroll and no
+      // visual cue is easy to miss entirely, unlike the futures banner's
+      // own edit flow where this was never reported (same underlying
+      // function, but that one's only ever clicked from a state where the
+      // person is already anticipating a jump). Scrolls the Selection
+      // field into view and gives it a brief highlight so the jump is
+      // unmistakable regardless of which tab it was clicked from.
+      btn.addEventListener('click', async () => {
+        await enterPickEditMode(btn.getAttribute('data-id'));
+        const sel = $('pickSelection');
+        if (sel) {
+          sel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const prevOutline = sel.style.outline;
+          sel.style.outline = '3px solid var(--e-red, #b23b3b)';
+          setTimeout(() => { sel.style.outline = prevOutline; }, 1500);
+        }
+      });
     });
     banner.querySelectorAll('.dataQualityDismissBtn').forEach(btn => {
       const id = btn.getAttribute('data-id');
@@ -25007,7 +25028,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 499; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 500; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
