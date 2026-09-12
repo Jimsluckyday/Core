@@ -895,6 +895,25 @@
           <br /><br />
           <strong style="color:var(--ink);">Pulls the WHOLE tournament, not just one day</strong> — direct follow-up after a real miss: "this shouldn't be looking for specific players... the entire match draw should [be pulled]... this would avoid misses." The export below asks for every real match from every round of every tournament active that week, each tagged with its own real date — not just whatever's scheduled on the one date you pick here. Honest limitation: for a live/upcoming week, later rounds (QF/SF/F) genuinely don't exist yet until earlier rounds decide who advances, so a single pull early in the week only returns what's been drawn or played so far — re-running it later in the week fills in the rest. For a past/historical date, the whole bracket is already decided, so one pull gets everything.
         </div>
+        <!-- Direct request 2026-09-12, after a real whole-week pull came back
+             480+ rows: "if I'm asking for a day that we go no further back
+             than one day if even that... [but] if you pull a tennis draw it
+             will automatically pull and give me the entire draw which will
+             be cumbersome if I run this tomorrow for a multi day
+             tournament." The whole-draw pull above is still the right
+             default for backfill/catching up after a gap (that's exactly
+             the anti-miss behavior it was built for), but for routine daily
+             use once caught up, re-pulling an entire still-active
+             tournament's whole bracket every single day is genuinely
+             wasteful. This checkbox narrows the ask to just that one date's
+             real matches (any tournament, still cross-referencing
+             Challenger/125 sources, qualifying still included) instead of
+             the entire draw -- leave it unchecked for backfill/catch-up,
+             check it for "just today". -->
+        <div class="checkbox-row" style="margin-bottom:10px;">
+          <input type="checkbox" id="tennisDrawJustThisDate" />
+          <label for="tennisDrawJustThisDate" style="font-weight:normal;">Only matches played on this exact date <span style="color:var(--ink-soft);">(for routine daily use once caught up -- leave unchecked when backfilling or catching up after a gap, since that's when pulling the whole draw actually prevents misses)</span></label>
+        </div>
         <div class="row">
           <div class="field" style="flex:0 0 auto;">
             <label>Any date in the tournament week</label>
@@ -6330,26 +6349,33 @@ These are almost always the same day, so "Date entered" only fills in a starting
   $('exportTennisDrawRequestBtn').addEventListener('click', () => {
     const date = $('tennisDrawExportDate').value;
     if (!date) { alert('Pick a date to research first.'); return; }
+    const justThisDate = $('tennisDrawJustThisDate').checked;
 
     const instructions = [
       '=== INSTRUCTIONS FOR RESEARCHING TENNIS DRAWS (read this whole block first) ===',
       '',
-      `Please research real professional tennis tournaments active during the WEEK containing ${date} (Eastern Time, USA).`,
+      justThisDate
+        ? `Please research real professional tennis matches actually played on ${date} specifically (Eastern Time, USA) -- not the whole week's draws, just this one date's real matches, across any tournament active that day.`
+        : `Please research real professional tennis tournaments active during the WEEK containing ${date} (Eastern Time, USA).`,
       '',
       'Scope: ONLY ATP tour, WTA tour, and ATP Challenger Tour events. Do NOT include ITF-level events, exhibitions, or juniors -- that tier is explicitly out of scope.',
       '',
       'IMPORTANT -- there are typically SEVERAL Challenger-level events running concurrently in any given week worldwide, not just the headline ATP/WTA events. Do not stop after finding one or two. Check official ATP/WTA draw/schedule pages for the week, and cross-reference against a comprehensive week-by-week source (e.g. Wikipedia\'s "[year] ATP Challenger Tour" page and the WTA 125 equivalent) to catch concurrent Challenger events a single general search would miss.',
       '',
-      'IMPORTANT -- for EACH tournament found, report EVERY REAL MATCH FROM THE ENTIRE DRAW you can confirm (every round -- R32, R16, QF, SF, F -- not just one day\'s matches), not only matches on the exact date above. If this is a PAST/historical week, the full bracket is already decided -- report all of it. If this is the CURRENT or a FUTURE week, only report rounds that have actually been drawn or already played as of right now -- later rounds genuinely do not exist yet until the earlier rounds decide who advances, so do not guess or predict a hypothetical pairing.',
+      justThisDate
+        ? `IMPORTANT -- only report matches actually played on ${date} itself -- do NOT report the rest of any tournament's draw (earlier or later rounds on other dates). This mode is for routine daily use once you're caught up, not backfill -- if you're catching up after a gap of more than a day or two, use the other mode (uncheck "Only matches played on this exact date") instead, since a single date won't catch matches you missed on days in between.`
+        : 'IMPORTANT -- for EACH tournament found, report EVERY REAL MATCH FROM THE ENTIRE DRAW you can confirm (every round -- R32, R16, QF, SF, F -- not just one day\'s matches), not only matches on the exact date above. If this is a PAST/historical week, the full bracket is already decided -- report all of it. If this is the CURRENT or a FUTURE week, only report rounds that have actually been drawn or already played as of right now -- later rounds genuinely do not exist yet until the earlier rounds decide who advances, so do not guess or predict a hypothetical pairing.',
       '',
-      'IMPORTANT -- NEVER skip a tournament\'s QUALIFYING rounds (Q1, Q2, etc.). Real cappers bet on qualifying matches too -- it is real, bettable tennis, not noise. Qualifying is the single most commonly missed category here: it typically happens 1-3 days BEFORE a tournament\'s commonly-listed main-draw start date, and that qualifying window is usually NOT included in the tournament\'s own headline date range (a tournament listed as running "16-22 June", for example, very likely has real qualifying matches on the 14th and 15th that a search will completely miss if it only looks for tournaments whose LISTED dates cover the date being researched). So: also check any tournament whose MAIN DRAW starts within the next 2-3 days AFTER the week being researched, and include its real qualifying matches too, not just tournaments already fully underway.',
+      'IMPORTANT -- NEVER skip a tournament\'s QUALIFYING rounds (Q1, Q2, etc.) that fall on the date(s) in scope above. Real cappers bet on qualifying matches too -- it is real, bettable tennis, not noise. Qualifying typically happens 1-3 days BEFORE a tournament\'s commonly-listed main-draw start date, so a tournament whose own headline dates haven\'t started yet may still have real qualifying matches happening right now that a search focused only on already-underway tournaments would miss -- check for that too.',
       '',
       'OUTPUT FORMAT -- please return a CSV with exactly these columns: tour,tournament_name,round,player_a,player_b,match_date,start_time_et,tournament_play_start_et',
       '  - tour: exactly "ATP", "WTA", or "Challenger".',
       '  - tournament_name: the real tournament name.',
       '  - round: e.g. "R32", "QF", "Q1" -- best effort, leave blank if unknown.',
       '  - player_a and player_b: full player names, ALWAYS in "Given name(s) Family name" order (surname LAST) -- e.g. "Qinwen Zheng", not "Zheng Qinwen", even if the player\'s native name order puts the family name first. This matters: this system identifies a player by treating the LAST word of the stored name as their surname, since that is how a capper usually refers to them (e.g. just "Zheng"). Getting the order backwards on a name that is natively family-name-first (common for Chinese, Hungarian, and some other names) will make that player unmatchable by surname alone.',
-      `  - match_date: the REAL calendar date (US Eastern) THIS SPECIFIC match was actually played or is scheduled, as "YYYY-MM-DD" -- this will usually be a DIFFERENT date for different rounds of the same tournament (e.g. R32 early in the week, the Final on the last day). Required for every row -- do not leave blank, and do not just repeat ${date} for every match.`,
+      justThisDate
+        ? `  - match_date: should be ${date} for every row in this mode, since you were only asked for that one date's matches -- still required, still "YYYY-MM-DD".`
+        : `  - match_date: the REAL calendar date (US Eastern) THIS SPECIFIC match was actually played or is scheduled, as "YYYY-MM-DD" -- this will usually be a DIFFERENT date for different rounds of the same tournament (e.g. R32 early in the week, the Final on the last day). Required for every row -- do not leave blank, and do not just repeat ${date} for every match.`,
       `  - start_time_et: this SPECIFIC match's approximate start time in US Eastern time, as "YYYY-MM-DD HH:MM" (24-hour, matching match_date above) -- leave blank rather than guessing if genuinely unknown.`,
       `  - tournament_play_start_et: this tournament's daily "order of play" start time on THIS match's own match_date (when play begins at the venue that day, e.g. official schedules often say "Play begins at 10:00 local") -- convert to US Eastern time, "YYYY-MM-DD HH:MM". Fill this in for every match from the same tournament on the same match_date (repeat the same value for that day). This is used as a fallback whenever a specific match's own start_time_et isn't known, so it must NEVER be later than the earliest real match of that day -- leave blank rather than guessing if genuinely unknown.`,
       '',
@@ -6358,7 +6384,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
       '=== END INSTRUCTIONS ==='
     ].join('\r\n');
 
-    downloadCsv(`tennis-draw-request-week-of-${date}.csv`, ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'match_date', 'start_time_et', 'tournament_play_start_et'], [], instructions);
+    downloadCsv(
+      justThisDate ? `tennis-draw-request-${date}-only.csv` : `tennis-draw-request-week-of-${date}.csv`,
+      ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'match_date', 'start_time_et', 'tournament_play_start_et'], [], instructions
+    );
   });
 
   const TENNIS_DRAW_TOURS = ['ATP', 'WTA', 'Challenger'];
@@ -25587,7 +25616,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 511; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 512; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
