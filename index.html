@@ -627,10 +627,19 @@
       needed since "Series Winner"/"Awards"-style bet types were already
       registered before this flag existed, and because future new ones
       might get added without remembering to check this box up front. -->
+      <!-- Direct bug report 2026-09-12, screenshot of the live box: "the
+           button should be right below the search field like all the
+           others on this page not in the middle." This was the one
+           "Show X list" toggle that never followed that pattern -- it sat
+           inline after a sentence instead of on its own line underneath
+           like Cappers/Sports/Teams/Prop stats/Tournaments. No search field
+           exists for bet types, so there's nothing to put a matching
+           "search" label above it, but the button itself now sits on its
+           own line, left-aligned, exactly where every other one lives. -->
       <div style="font-size:10px;color:var(--ink-soft);margin:10px 0 4px;">
         Long-term futures bet types (checked = tracked by the pending-futures banner above the tabs):
-        <button type="button" class="ghost-list small" id="toggleBetTypeListBtn">Show bet types list</button>
       </div>
+      <button type="button" class="ghost-list small" id="toggleBetTypeListBtn">Show bet types list</button>
       <div id="betTypeListPanel" style="display:none;">
         <div id="betTypeFuturesListWrap"></div>
       </div>
@@ -25303,7 +25312,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 506; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 507; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
