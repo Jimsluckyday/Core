@@ -24892,6 +24892,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     if (p.grading_status === 'ambiguous') return ['results', 'golf_results'];
     return [];
   }
+  // Direct request 2026-09-13: "the instructions don't need to be so
+  // descriptive which makes it harder to follow along and read a novel
+  // for each one. Just a simple bullet point description of what is
+  // wrong." schedule_sync_note/grading_note are real, useful diagnostic
+  // sentences (kept in full as this row's title tooltip, one hover away)
+  // but were never meant to be the AT-A-GLANCE label for a list someone's
+  // scanning down -- this is a best-effort classifier over that same free
+  // text into the handful of categories that actually recur, not a
+  // guarantee of a perfect label every time. Direct confirmation that
+  // approximate is fine here: "if not they will either ask me or prompt
+  // you to ask what to do next" -- the tooltip is the fallback for
+  // exactly that case, not a reason to hold out for perfect classification.
+  function dataQualityShortIssueLabel(p) {
+    const note = (p.schedule_sync_note || p.grading_note || '').toLowerCase();
+    if (!note) return 'Flagged, no note on file';
+    if (note.includes('spelling issue') || note.includes('could not find')) return "Spelling doesn't match";
+    if (note.includes('does not appear to be playing on') || note.includes("doesn't fall within") || note.includes('wrong event_date') || note.includes('wrong date')) return "Date doesn't match";
+    if (note.includes('not supported') || note.includes('no player roster data source') || note.includes('needs manual grading') || note.includes('needs manual entry')) return 'Not supported -- manual only';
+    if (note.includes('ambiguous')) return 'Ambiguous match -- multiple candidates';
+    return 'Flagged -- hover for detail';
+  }
   async function refreshDataQualityBanner() {
     const banner = $('dataQualityBanner');
     if (!banner) return;
@@ -24919,8 +24940,6 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       banner.innerHTML = '';
       return;
     }
-    const issueText = p => p.schedule_sync_note ? p.schedule_sync_note
-      : (p.grading_note ? `Grading: ${p.grading_note}` : 'Flagged, no note on file.');
     const listHtml = dataQualityBannerExpanded ? `
       <div style="max-height:260px;overflow-y:auto;margin-top:6px;font-size:11px;">
         <table class="picks-table" style="width:100%;">
@@ -24930,7 +24949,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
             <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
             <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
             <td>${escapeHtml(p.selection || '—')}</td>
-            <td>${escapeHtml(issueText(p))}</td>
+            <td title="${escapeHtml(p.schedule_sync_note || p.grading_note || '')}">${escapeHtml(dataQualityShortIssueLabel(p))}</td>
             <td><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;">Fix</button></td>
             <td><button type="button" class="dataQualityDismissBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;">Mark resolved</button></td>
           </tr>`).join('')}</tbody>
@@ -24988,7 +25007,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 498; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 499; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
