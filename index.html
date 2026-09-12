@@ -668,7 +668,24 @@
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Keeps the list current without turning research into a data-entry task. Export a research request below, hand it to any AI chat, and paste the CSV it gives back into the import box — this includes every sport already in your system and everything already registered, so the AI knows what to add and what to skip.
       </div>
+      <!-- Direct request 2026-09-11: "when it comes to tournaments that may
+           be a common thing how do I make sure that we are adding them so
+           this isn't a common question/query going forwards." Root cause
+           this tool couldn't have caught the missing 2025 UEFA Nations
+           League Final: it only ever asked an AI chat about the real,
+           actual today's date onward -- useless while working through past
+           dates. "As of" lets the exact same tool be pointed at any date,
+           past or present, instead of only ever working for live/current
+           research. Defaults to today so the existing live workflow is
+           unchanged if this is left alone. -->
+      <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
+        &#9888; Working through an older date range (like the June 2025 backfill)? Set "As of" to a date near what you're working on, not today -- this tool only researches forward from that date, so leaving it on today's real date will never find a tournament that already happened in the past.
+      </div>
       <div class="row">
+        <div class="field" style="flex:0 0 auto;">
+          <label>As of</label>
+          <input id="tournamentRefreshAsOf" type="date" style="width:150px;" />
+        </div>
         <div class="field" style="flex:0 0 auto;">
           <label>Weeks ahead to research</label>
           <input id="tournamentRefreshWeeks" type="number" min="1" max="12" value="4" style="width:80px;" />
@@ -1380,6 +1397,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
                    required to cut down on having to duplicate work later." -->
               <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
                 &#9888; Tennis or KBO picks tonight? Populate the <strong>Tennis draw cache</strong> / <strong>KBO results cache</strong> (Setup tab) for this date FIRST, then run "Find &amp; Update Pick Info" below -- running Pick Info first means re-running it again afterward to pick up anything the cache would have caught.
+              </div>
+              <!-- Direct follow-up 2026-09-11, after a real Soccer pick got
+                   flagged unmatched solely because the 2025 UEFA Nations
+                   League Final had never been added to the Tournaments
+                   list: "how do I make sure that we are adding them so this
+                   isn't a common question/query going forwards." Same
+                   run-this-first habit as the Tennis/KBO reminder above,
+                   just for the sport that hits this the most (Soccer/Tennis/
+                   Golf tournament-window matching, not team schedules). -->
+              <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
+                &#9888; Soccer, Tennis, or Golf picks (or anything else tied to a specific tournament/event)? Run <strong>Bulk refresh tournaments</strong> (Setup tab) for this date FIRST -- a pick for a real tournament that isn't registered there yet will get flagged "unmatched" here even though nothing about the pick itself is wrong.
               </div>
               <div class="row">
                 <div style="align-self:flex-end;">
@@ -5762,8 +5790,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // ---------- Bulk refresh tournaments (export request / import results) ----------
   $('exportTournamentRefreshBtn').addEventListener('click', () => {
     const weeks = Number($('tournamentRefreshWeeks').value) || 4;
-    const today = new Date().toISOString().slice(0, 10);
-    const endWindow = new Date(Date.now() + weeks * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const today = $('tournamentRefreshAsOf').value || new Date().toISOString().slice(0, 10);
+    const isLive = today === new Date().toISOString().slice(0, 10);
+    const endWindow = new Date(new Date(today).getTime() + weeks * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
     const sportNames = sports.map(s => s.name);
     const existingList = tournaments.length
@@ -5774,9 +5803,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const rows = tournaments.map(t => [t.name, t.sports ? t.sports.name : '', t.start_date, t.end_date]);
 
     const instructions = [
-      '=== INSTRUCTIONS FOR RESEARCHING UPCOMING TOURNAMENTS/EVENTS (read this whole block first) ===',
+      '=== INSTRUCTIONS FOR RESEARCHING TOURNAMENTS/EVENTS (read this whole block first) ===',
       '',
-      `Today's date is ${today}. Please research real tournaments/events happening between now and ${endWindow} (the next ${weeks} week${weeks === 1 ? '' : 's'}) for these sports: ${sportNames.join(', ')}.`,
+      isLive
+        ? `Today's date is ${today}. Please research real tournaments/events happening between now and ${endWindow} (the next ${weeks} week${weeks === 1 ? '' : 's'}) for these sports: ${sportNames.join(', ')}.`
+        : `This is HISTORICAL research, not live -- please research real tournaments/events that actually happened between ${today} and ${endWindow} for these sports: ${sportNames.join(', ')}.`,
       '',
       'PRIORITY 1 -- individual-competitor sports (tennis, golf, and similar), where a tournament name is needed to identify which specific event a player is competing in.',
       'IMPORTANT -- do not stop at headline majors, and do not stop after finding just one or two smaller events either. General search reliably surfaces the big, well-covered events (majors, Masters 1000s) but is measurably weaker at surfacing smaller ones -- and there are typically SEVERAL Challenger/125-level tennis events running concurrently in any given week, worldwide, not just one. Checking a few names and stopping there will still miss real events. For TENNIS specifically, the systematic way to catch all of them is to check a comprehensive week-by-week calendar rather than scattered individual searches -- Wikipedia\'s "[year] ATP Challenger Tour" page (and the equivalent WTA 125/ITF calendar) lists every Challenger-level and 125-level event running in a given week in one place, and is far more complete than piecing it together from general search results one tournament at a time. Cross-reference this against the date window and list every concurrent event found, not just the first one or two that turn up.',
@@ -25030,6 +25061,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     if (mainAppInited) return;
     mainAppInited = true;
     $('pickDate').value = new Date().toISOString().slice(0, 10);
+    if ($('tournamentRefreshAsOf')) $('tournamentRefreshAsOf').value = new Date().toISOString().slice(0, 10);
     // CONFIRMED REQUEST, direct feedback 2026-08-22: "as the data grows...
     // it just keeps adding days which will get rather messy once we get
     // months of data in here... 1 month of data and the rest has to be
@@ -25056,7 +25088,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 501; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 502; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
