@@ -7638,6 +7638,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
     if (!capper_id) { showMsg($('pickMsg'), 'Add a capper first.', 'error'); return; }
     if (!bet_type_id) { showMsg($('pickMsg'), 'Add a bet type first.', 'error'); return; }
+    // CONFIRMED REAL BUG, direct report 2026-09-13: a parlay wrapper pick
+    // (bet_type "Parlay") should only ever come into existence as the
+    // byproduct of linkLegToParlay finding-or-creating it behind the
+    // scenes -- it is not a real, directly-enterable bet type the way
+    // Moneyline/Spread are. Selecting "Parlay" here for a brand-new pick
+    // (no editingId yet) let someone save a pick with zero linked legs at
+    // all -- real orphaned rows found this way had selections like "11-Leg
+    // Parlay" or "2-Leg Parlay (Pirates/Phillies)" typed straight from a
+    // capper's own summary line, with nothing in parlay_legs behind them.
+    // Editing an EXISTING parlay wrapper (editingId set) is untouched --
+    // that's the legitimate path for fixing its tier/odds/notes/result
+    // after linkLegToParlay already created it for real.
+    if (!editingId && bt && normalizeForMatch(bt.name) === 'parlay') {
+      showMsg($('pickMsg'), 'Don\'t select "Parlay" as the bet type directly -- pick each leg\'s OWN real bet type (Moneyline, Spread, etc.) and set "Part of a parlay?" below instead. The Parlay wrapper row gets created automatically once a leg is linked.', 'error');
+      return;
+    }
     if (!event_date) { showMsg($('pickMsg'), 'Pick a date.', 'error'); return; }
     if (!selection) { showMsg($('pickMsg'), 'Enter their selection.', 'error'); return; }
     if (isProp && !$('propPlayer').value.trim()) { showMsg($('pickMsg'), 'Player Props need a player name — otherwise there is no way to identify or research this pick later.', 'error'); return; }
@@ -23410,6 +23426,22 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         parlayNumber = n;
       }
     }
+    // CONFIRMED REAL BUG, direct report 2026-09-13: same root cause as
+    // Add Pick's identical check -- a "Parlay" bet_type row only belongs
+    // in this system as processParlayGroups()'s own synthesized summary
+    // row (isSynthesizedParlaySummary), built FROM real linked legs. A
+    // row typed with bet_type "Parlay" but no parlay column value (the
+    // capper's own combined description, e.g. "11-Leg Parlay" or
+    // "Multi-Leg Parlay", pasted straight into Selection) skipped
+    // processParlayGroups entirely and went out through the plain-row
+    // insert path with zero parlay_legs rows behind it -- a real,
+    // confirmed orphaned parlay, not a hypothetical. Each of THIS row's
+    // real legs needs its own row with bet_type = its actual bet type
+    // (Moneyline, Spread, etc.) and this same parlay number in the
+    // parlay column instead.
+    if (betType && normalizeForMatch(betType.name) === 'parlay' && !parlayNumber) {
+      errors.push('bet type "Parlay" can\'t be uploaded as its own row -- give each leg its own row with its real bet type (Moneyline, Spread, etc.) and a shared number in the parlay column; the combined Parlay row is generated automatically from those');
+    }
 
     const isPropBet = betType && betType.uses_prop_fields;
     const propStatRaw = row.prop_stat || row.stat || '';
@@ -24790,7 +24822,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 495; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 496; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
