@@ -499,7 +499,22 @@
 
     <!-- ADD CAPPER / SPORT / BET TYPE -->
     <div class="stub" data-tab="setup">
-      <p class="stub-title">Cappers, sports &amp; bet types</p>
+      <!-- Direct request 2026-09-11: "it's got so much open and the
+           typeface so small... the green buttons make it hard to know
+           where one tool begins and the other ends... if we fix it like
+           the other ones at least I can open and close the tools I need."
+           Same bordered-box + "Show tools"/"Hide tools" pattern already
+           used for Prep & Publish, Grading, Tennis draw cache, and KBO
+           results cache -- every tool group in this tab now gets one,
+           collapsed by default, instead of one long unbroken scroll of
+           forms. No IDs inside any group changed, only how they're
+           wrapped, so nothing about how these tools work is different. -->
+      <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="font-size:12px;">Cappers, sports &amp; bet types</strong>
+          <button type="button" class="ghost small" id="toggleCappersSetupToolsBtn">Show tools</button>
+        </div>
+        <div id="cappersSetupToolsPanel" style="display:none;margin-top:10px;">
       <div id="capperMsg"></div>
       <div class="row">
         <div class="field">
@@ -572,8 +587,15 @@
       <div id="betTypeListPanel" style="display:none;">
         <div id="betTypeFuturesListWrap"></div>
       </div>
+        </div>
+      </div>
 
-      <p class="stub-title" style="margin-top:24px;">Teams</p>
+      <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="font-size:12px;">Teams</strong>
+          <button type="button" class="ghost small" id="toggleTeamsSetupToolsBtn">Show tools</button>
+        </div>
+        <div id="teamsSetupToolsPanel" style="display:none;margin-top:10px;">
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Powers a dropdown for team selections in the Add Picks form, so a typo like "Milwuakee" or "Cincinatti" can't happen at all -- team names are a small, stable, known list per sport, exactly the kind of thing a dropdown is meant for instead of free typing.
       </div>
@@ -599,22 +621,43 @@
       <div id="teamListPanel" style="display:none;">
         <div id="teamListWrap" style="margin-top:10px;"></div>
       </div>
+        </div>
+      </div>
 
-      <p class="stub-title" style="margin-top:24px;">Find duplicate cappers / teams</p>
+      <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="font-size:12px;">Find duplicate cappers / teams</strong>
+          <button type="button" class="ghost small" id="toggleDuplicatesSetupToolsBtn">Show tools</button>
+        </div>
+        <div id="duplicatesSetupToolsPanel" style="display:none;margin-top:10px;">
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Direct request 2026-08-24, after finding "NC Sharp" registered twice with picks split across both records: a periodic check rather than relying on noticing by accident. <strong>Exact duplicates</strong> (identical name, just entered twice) get a one-click Merge -- reassigns every pick from the smaller record onto the larger one, then removes the empty duplicate, same steps already done by hand for NC Sharp. <strong>Similar names</strong> (a likely typo, not necessarily a real duplicate -- e.g. two genuinely different cappers could share a similar name on purpose) are only listed with pick counts for both, plus a Merge button in EITHER direction, so a human always decides which one to keep rather than this guessing.
       </div>
       <button id="findDuplicatesBtn">Scan for duplicates</button>
       <div id="duplicatesWrap" style="margin-top:12px;"></div>
+        </div>
+      </div>
 
-      <p class="stub-title" style="margin-top:24px;">Download entry template</p>
+      <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="font-size:12px;">Download entry template</strong>
+          <button type="button" class="ghost small" id="toggleTemplateSetupToolsBtn">Show tools</button>
+        </div>
+        <div id="templateSetupToolsPanel" style="display:none;margin-top:10px;">
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Direct request 2026-08-24: a spreadsheet for manual historical backfill entry, with Capper/Sport/Bet Type dropdowns and a live "does this match something on file" check next to Selection/Prop Team -- generated fresh from your CURRENT Cappers/Sports/Bet Types/Teams every time you click this, so it never goes stale the way a one-off file would. This is the only place in the whole app that loads anything from outside it -- a free spreadsheet library (ExcelJS, via jsDelivr's CDN) loads only at the moment you click the button below, never on a normal page visit, so it can't slow down or affect anything else here. If the CDN ever happens to be down when you click it, nothing else in the app is affected -- just try again shortly, or ask in chat and we'll sort it out another way.
       </div>
       <button id="downloadEntryTemplateBtn">&#8681; Download entry template (.xlsx)</button>
       <div id="downloadEntryTemplateMsg" style="margin-top:8px;"></div>
+        </div>
+      </div>
 
-      <p class="stub-title" style="margin-top:24px;">Prop stats</p>
+      <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="font-size:12px;">Prop stats</strong>
+          <button type="button" class="ghost small" id="togglePropStatsSetupToolsBtn">Show tools</button>
+        </div>
+        <div id="propStatsSetupToolsPanel" style="display:none;margin-top:10px;">
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Powers the Stat dropdown for Player Props in Add Picks, so common stats (Strikeouts, Points, Goals, etc.) don't need retyping every time -- add a new one here, or directly from Add Picks itself, any time a new stat type comes up.
       </div>
@@ -641,7 +684,8 @@
         <div id="propStatListWrap" style="margin-top:10px;"></div>
       </div>
 
-      <div style="font-size:10px;color:var(--ink-soft);margin:14px 0 8px;">
+      <p class="stub-title" style="margin-top:18px;">Copy stats between sports</p>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:8px;">
         Direct request 2026-09-06: for a new sport with a similar prop set to one already on file (e.g. adding NCAA Football after NFL, or UFL after NFL) -- copies every stat from an existing sport onto another one in bulk, instead of waiting for each stat to get called on a real pick and typing it in one at a time. Only copies stats the target sport doesn't already have (a name already covered there, sport-specific or any-sport, is skipped, never duplicated) -- each copy becomes its own independent, sport-specific entry, so editing/removing one afterward never touches the source sport's own list.
       </div>
       <div class="row">
@@ -658,8 +702,15 @@
         </div>
       </div>
       <div id="copyStatsMsg" style="margin-top:6px;"></div>
+        </div>
+      </div>
 
-      <p class="stub-title" style="margin-top:24px;">Tournaments / events</p>
+      <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="font-size:12px;">Tournaments / events</strong>
+          <button type="button" class="ghost small" id="toggleTournamentsSetupToolsBtn">Show tools</button>
+        </div>
+        <div id="tournamentsSetupToolsPanel" style="display:none;margin-top:10px;">
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Used to power the Event/Tournament dropdown when entering picks for tennis, golf, soccer, and similar event-based sports — the entry form only shows tournaments relevant to the sport and rough date being entered, so nobody has to already know what's currently happening in a given sport just to log a pick.
       </div>
@@ -744,6 +795,8 @@
       </p>
       <div id="tournamentListPanel" style="display:none;">
         <div id="tournamentListWrap" style="margin-top:10px;"></div>
+      </div>
+        </div>
       </div>
     </div>
 
@@ -12541,6 +12594,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     panel.style.display = showing ? 'none' : 'block';
     $('toggleKboResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
+  // Direct request 2026-09-11: "it's got so much open... if we fix it like
+  // the other ones at least I can open and close the tools I need." Same
+  // wiring as the two handlers just above, generalized into one helper so
+  // every current and future bordered tool-box in Setup (and anywhere else
+  // this pattern gets used) wires up the same way instead of copy-pasting
+  // this block again -- see wireToolBoxToggle below for the standing
+  // convention this establishes going forward.
+  function wireToolBoxToggle(btnId, panelId) {
+    const btn = $(btnId);
+    const panel = $(panelId);
+    if (!btn || !panel) return;
+    btn.addEventListener('click', () => {
+      const showing = panel.style.display !== 'none';
+      panel.style.display = showing ? 'none' : 'block';
+      btn.textContent = showing ? 'Show tools' : 'Hide tools';
+    });
+  }
+  wireToolBoxToggle('toggleCappersSetupToolsBtn', 'cappersSetupToolsPanel');
+  wireToolBoxToggle('toggleTeamsSetupToolsBtn', 'teamsSetupToolsPanel');
+  wireToolBoxToggle('toggleDuplicatesSetupToolsBtn', 'duplicatesSetupToolsPanel');
+  wireToolBoxToggle('toggleTemplateSetupToolsBtn', 'templateSetupToolsPanel');
+  wireToolBoxToggle('togglePropStatsSetupToolsBtn', 'propStatsSetupToolsPanel');
+  wireToolBoxToggle('toggleTournamentsSetupToolsBtn', 'tournamentsSetupToolsPanel');
 
   $('showAutomationInstructionsBtn').addEventListener('click', openAutomationInstructionsTab);
 
@@ -25088,7 +25164,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 502; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 503; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
