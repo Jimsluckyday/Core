@@ -139,6 +139,22 @@
 
   .row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
   .field { flex: 1; min-width: 140px; }
+  /* Direct request 2026-09-11: "the add button is fine the color and
+     placement of where it is but all aligned vertically on the right
+     side." A plain .row's action button sits wherever its preceding
+     field(s) happen to end -- fine for one row alone, clunky once several
+     "field(s) + one Add button" rows sit stacked in the same box (Setup's
+     actual complaint), since the button's own x-position drifts with the
+     label/field width above it. .add-row fixes the button's column width
+     so every one of these rows lines its button up at the same x-position,
+     independent of the field(s) beside it -- deliberately its own class
+     rather than changing .row itself, since .row is used everywhere for
+     unrelated multi-field layouts that were never part of this complaint. */
+  .add-row { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 10px; }
+  .add-row-fields { flex: 1; display: flex; gap: 10px; flex-wrap: wrap; }
+  .add-row-fields > .field { flex: 1; min-width: 140px; }
+  .add-row-btn { flex: 0 0 130px; }
+  .add-row-btn button { width: 100%; }
   label {
     display: block;
     font-size: 10px;
@@ -193,6 +209,20 @@
   }
   button.ghost:hover { background: rgba(35,77,53,0.1); }
   button.small { padding: 5px 9px; font-size: 10px; }
+  /* Direct request 2026-09-11, after rendering 5 color options and letting
+     the user pick live: "Dusty Mauve for the show cappers list... different
+     enough than the green we had." Scoped to the "Show X list"/"Hide X
+     list" reference-data toggles specifically (Cappers/Teams/Bet types/Prop
+     stats/Tournaments/Sports) -- NOT the "Show tools"/"Hide tools"
+     section-collapse toggles (a different role: revealing a whole toolset,
+     not a reference list), and not other unrelated ghost buttons -- so this
+     never got applied more broadly than what was actually asked for. */
+  button.ghost-list {
+    background: transparent;
+    color: #74495f;
+    border-color: #74495f;
+  }
+  button.ghost-list:hover { background: rgba(116,73,95,0.12); }
 
   .checkbox-row { display: flex; align-items: center; gap: 8px; }
   .checkbox-row input { width: auto; }
@@ -516,12 +546,14 @@
         </div>
         <div id="cappersSetupToolsPanel" style="display:none;margin-top:10px;">
       <div id="capperMsg"></div>
-      <div class="row">
-        <div class="field">
-          <label>Add a new capper</label>
-          <input id="newCapperName" placeholder="e.g. Dave from the sports desk" />
+      <div class="add-row">
+        <div class="add-row-fields">
+          <div class="field">
+            <label>Add a new capper</label>
+            <input id="newCapperName" placeholder="e.g. Dave from the sports desk" />
+          </div>
         </div>
-        <div style="align-self:flex-end;">
+        <div class="add-row-btn">
           <button id="addCapperBtn">Add capper</button>
         </div>
       </div>
@@ -535,42 +567,55 @@
       defaults open) since the whole point here is not hitting this wall of
       chips on every visit to Setup -- use Search cappers above if you just
       need to find one without expanding the full list. -->
-      <button type="button" class="ghost small" id="toggleCapperListBtn" style="margin-top:6px;">Show cappers list</button>
+      <button type="button" class="ghost-list small" id="toggleCapperListBtn" style="margin-top:6px;">Show cappers list</button>
       <div id="capperListPanel" style="display:none;">
         <div id="capperListWrap" style="margin-top:10px;"></div>
       </div>
       <div id="capperBlockedPicksWrap" style="margin-top:10px;"></div>
-      <div class="row">
-        <div class="field">
-          <label>Add a new sport (only if it's missing from the list below)</label>
-          <input id="newSportName" placeholder="e.g. Cricket" />
+      <div class="add-row">
+        <div class="add-row-fields">
+          <div class="field">
+            <label>Add a new sport (only if it's missing from the list below)</label>
+            <input id="newSportName" placeholder="e.g. Cricket" />
+          </div>
         </div>
-        <div style="align-self:flex-end;">
+        <div class="add-row-btn">
           <button id="addSportBtn">Add sport</button>
         </div>
       </div>
-      <div class="row">
-        <div class="field">
-          <label>Add a new bet type (only if it's missing from the list below)</label>
-          <input id="newBetTypeName" placeholder="e.g. First team to score" />
+      <div class="field" style="margin-top:10px;max-width:280px;">
+        <label>Search sports</label>
+        <input type="text" id="sportSearchInput" placeholder="e.g. NHL, Cricket...">
+      </div>
+      <button type="button" class="ghost-list small" id="toggleSportListBtn" style="margin-top:6px;">Show sports list</button>
+      <div id="sportListPanel" style="display:none;">
+        <div id="sportListWrap" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="add-row" style="margin-top:14px;align-items:flex-start;">
+        <div class="add-row-fields">
+          <div class="field">
+            <label>Add a new bet type (only if it's missing from the list below)</label>
+            <input id="newBetTypeName" placeholder="e.g. First team to score" />
+          </div>
+          <div class="field" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesLine" checked /><label for="newBetTypeUsesLine">Has a line/number</label></div>
+          </div>
+          <div class="field" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesProp" /><label for="newBetTypeUsesProp">Player prop style</label></div>
+          </div>
+          <div class="field" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesMatchup" /><label for="newBetTypeUsesMatchup">Two-team matchup <span style="color:var(--ink-soft);font-weight:normal;">(Over/Under-style -- no single side picked)</span></label></div>
+          </div>
+          <div class="field" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="checkbox-row"><input type="checkbox" id="newBetTypeIsFutures" /><label for="newBetTypeIsFutures">Long-term futures <span style="color:var(--ink-soft);font-weight:normal;">(resolves whenever the event concludes, not a specific date -- e.g. Series Winner, Awards)</span></label></div>
+          </div>
         </div>
-        <div class="field" style="flex:0 0 auto;">
-          <label>&nbsp;</label>
-          <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesLine" checked /><label for="newBetTypeUsesLine">Has a line/number</label></div>
-        </div>
-        <div class="field" style="flex:0 0 auto;">
-          <label>&nbsp;</label>
-          <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesProp" /><label for="newBetTypeUsesProp">Player prop style</label></div>
-        </div>
-        <div class="field" style="flex:0 0 auto;">
-          <label>&nbsp;</label>
-          <div class="checkbox-row"><input type="checkbox" id="newBetTypeUsesMatchup" /><label for="newBetTypeUsesMatchup">Two-team matchup <span style="color:var(--ink-soft);font-weight:normal;">(Over/Under-style -- no single side picked)</span></label></div>
-        </div>
-        <div class="field" style="flex:0 0 auto;">
-          <label>&nbsp;</label>
-          <div class="checkbox-row"><input type="checkbox" id="newBetTypeIsFutures" /><label for="newBetTypeIsFutures">Long-term futures <span style="color:var(--ink-soft);font-weight:normal;">(resolves whenever the event concludes, not a specific date -- e.g. Series Winner, Awards)</span></label></div>
-        </div>
-        <div style="align-self:flex-end;">
+        <div class="add-row-btn">
           <button id="addBetTypeBtn">Add bet type</button>
         </div>
       </div>
@@ -582,7 +627,7 @@
       might get added without remembering to check this box up front. -->
       <div style="font-size:10px;color:var(--ink-soft);margin:10px 0 4px;">
         Long-term futures bet types (checked = tracked by the pending-futures banner above the tabs):
-        <button type="button" class="ghost small" id="toggleBetTypeListBtn">Show bet types list</button>
+        <button type="button" class="ghost-list small" id="toggleBetTypeListBtn">Show bet types list</button>
       </div>
       <div id="betTypeListPanel" style="display:none;">
         <div id="betTypeFuturesListWrap"></div>
@@ -600,16 +645,18 @@
         Powers a dropdown for team selections in the Add Picks form, so a typo like "Milwuakee" or "Cincinatti" can't happen at all -- team names are a small, stable, known list per sport, exactly the kind of thing a dropdown is meant for instead of free typing.
       </div>
       <div id="teamMsg"></div>
-      <div class="row">
-        <div class="field">
-          <label>Sport</label>
-          <select id="teamBulkSport"></select>
+      <div class="add-row">
+        <div class="add-row-fields">
+          <div class="field">
+            <label>Sport</label>
+            <select id="teamBulkSport"></select>
+          </div>
+          <div class="field" style="flex:2;">
+            <label>Team names (one per line, or paste a comma-separated list)</label>
+            <textarea id="teamBulkInput" rows="4" style="width:100%;" placeholder="Boston Red Sox&#10;Baltimore Orioles&#10;New York Yankees&#10;..."></textarea>
+          </div>
         </div>
-        <div class="field" style="flex:2;">
-          <label>Team names (one per line, or paste a comma-separated list)</label>
-          <textarea id="teamBulkInput" rows="4" style="width:100%;" placeholder="Boston Red Sox&#10;Baltimore Orioles&#10;New York Yankees&#10;..."></textarea>
-        </div>
-        <div style="align-self:flex-end;">
+        <div class="add-row-btn">
           <button id="addTeamsBulkBtn">Add teams</button>
         </div>
       </div>
@@ -617,7 +664,7 @@
         <label>Search teams</label>
         <input type="text" id="teamSearchInput" placeholder="e.g. Reds, Milwaukee, NHL...">
       </div>
-      <button type="button" class="ghost small" id="toggleTeamListBtn" style="margin-top:6px;">Show teams list</button>
+      <button type="button" class="ghost-list small" id="toggleTeamListBtn" style="margin-top:6px;">Show teams list</button>
       <div id="teamListPanel" style="display:none;">
         <div id="teamListWrap" style="margin-top:10px;"></div>
       </div>
@@ -662,16 +709,18 @@
         Powers the Stat dropdown for Player Props in Add Picks, so common stats (Strikeouts, Points, Goals, etc.) don't need retyping every time -- add a new one here, or directly from Add Picks itself, any time a new stat type comes up.
       </div>
       <div id="propStatMsg"></div>
-      <div class="row">
-        <div class="field">
-          <label>Sport</label>
-          <select id="propStatSport"></select>
+      <div class="add-row">
+        <div class="add-row-fields">
+          <div class="field">
+            <label>Sport</label>
+            <select id="propStatSport"></select>
+          </div>
+          <div class="field" style="flex:2;">
+            <label>Stat name</label>
+            <input id="newPropStatName" placeholder="e.g. Strikeouts" />
+          </div>
         </div>
-        <div class="field" style="flex:2;">
-          <label>Stat name</label>
-          <input id="newPropStatName" placeholder="e.g. Strikeouts" />
-        </div>
-        <div style="align-self:flex-end;">
+        <div class="add-row-btn">
           <button id="addPropStatBtn">Add stat</button>
         </div>
       </div>
@@ -679,7 +728,7 @@
         <label>Search stats</label>
         <input type="text" id="propStatSearchInput" placeholder="e.g. Strikeouts, NHL...">
       </div>
-      <button type="button" class="ghost small" id="togglePropStatListBtn" style="margin-top:6px;">Show stats list</button>
+      <button type="button" class="ghost-list small" id="togglePropStatListBtn" style="margin-top:6px;">Show stats list</button>
       <div id="propStatListPanel" style="display:none;">
         <div id="propStatListWrap" style="margin-top:10px;"></div>
       </div>
@@ -688,16 +737,18 @@
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:8px;">
         Direct request 2026-09-06: for a new sport with a similar prop set to one already on file (e.g. adding NCAA Football after NFL, or UFL after NFL) -- copies every stat from an existing sport onto another one in bulk, instead of waiting for each stat to get called on a real pick and typing it in one at a time. Only copies stats the target sport doesn't already have (a name already covered there, sport-specific or any-sport, is skipped, never duplicated) -- each copy becomes its own independent, sport-specific entry, so editing/removing one afterward never touches the source sport's own list.
       </div>
-      <div class="row">
-        <div class="field">
-          <label>Copy stats from</label>
-          <select id="copyStatsFromSport"></select>
+      <div class="add-row">
+        <div class="add-row-fields">
+          <div class="field">
+            <label>Copy stats from</label>
+            <select id="copyStatsFromSport"></select>
+          </div>
+          <div class="field">
+            <label>Into</label>
+            <select id="copyStatsToSport"></select>
+          </div>
         </div>
-        <div class="field">
-          <label>Into</label>
-          <select id="copyStatsToSport"></select>
-        </div>
-        <div style="align-self:flex-end;">
+        <div class="add-row-btn">
           <button type="button" class="ghost" id="copyStatsBtn">Copy stats</button>
         </div>
       </div>
@@ -767,31 +818,33 @@
         &#9888; Don't guess the sport for an unfamiliar tournament name here. The two other ways to add a tournament already handle this correctly without needing any sports knowledge: the "+ Add a new tournament..." option right in the pick entry form automatically uses whatever sport is already selected for that pick, and the Bulk Refresh tool above has an AI do the actual sport identification. Use this form only when you already know for certain which sport a specific tournament belongs to.
       </div>
       <div id="tournamentMsg"></div>
-      <div class="row">
-        <div class="field">
-          <label>Tournament / event name</label>
-          <input id="newTournamentName" placeholder="e.g. Memorial Tournament" />
+      <div class="add-row">
+        <div class="add-row-fields">
+          <div class="field">
+            <label>Tournament / event name</label>
+            <input id="newTournamentName" placeholder="e.g. Memorial Tournament" />
+          </div>
+          <div class="field">
+            <label>Sport</label>
+            <select id="newTournamentSport"></select>
+          </div>
+          <div class="field">
+            <label>Start date</label>
+            <input id="newTournamentStart" type="date" />
+          </div>
+          <div class="field">
+            <label>End date</label>
+            <input id="newTournamentEnd" type="date" />
+          </div>
         </div>
-        <div class="field">
-          <label>Sport</label>
-          <select id="newTournamentSport"></select>
-        </div>
-        <div class="field">
-          <label>Start date</label>
-          <input id="newTournamentStart" type="date" />
-        </div>
-        <div class="field">
-          <label>End date</label>
-          <input id="newTournamentEnd" type="date" />
-        </div>
-        <div style="align-self:flex-end;">
+        <div class="add-row-btn">
           <button id="addTournamentBtn">Add tournament</button>
         </div>
       </div>
 
       <p class="stub-title" style="margin-top:20px;">
         Currently registered
-        <button type="button" class="ghost small" id="toggleTournamentListBtn">Show tournaments list</button>
+        <button type="button" class="ghost-list small" id="toggleTournamentListBtn">Show tournaments list</button>
       </p>
       <div id="tournamentListPanel" style="display:none;">
         <div id="tournamentListWrap" style="margin-top:10px;"></div>
@@ -4186,7 +4239,69 @@ These are almost always the same day, so "Date entered" only fills in a starting
       sel.innerHTML = sports.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
       if (sports.some(s => String(s.id) === String(keep))) sel.value = keep;
     });
+
+    renderSportList();
   }
+
+  // Direct request 2026-09-11, after building the "Show X list" style
+  // options: "am I just missing it or is the sports button to show what
+  // sports I have in the system missing... I see show cappers and show
+  // bet types but don't see that one." Confirmed a real gap -- Cappers,
+  // Teams, Bet types and Prop stats all have one, Sports never did. Same
+  // flat-list pattern as renderCapperList (no sub-grouping needed, since
+  // sports themselves are the top-level category everything else groups
+  // by).
+  let sportSearchListenerBound = false;
+  function renderSportList() {
+    const wrap = $('sportListWrap');
+    const searchInput = $('sportSearchInput');
+    if (!wrap || !searchInput) return;
+
+    if (!sportSearchListenerBound) {
+      searchInput.addEventListener('input', () => {
+        $('sportListPanel').style.display = 'block';
+        $('toggleSportListBtn').textContent = 'Hide sports list';
+        renderSportList();
+      });
+      sportSearchListenerBound = true;
+    }
+
+    if (!sports.length) {
+      wrap.innerHTML = '<div class="empty-state">No sports added yet.</div>';
+      return;
+    }
+
+    const query = searchInput.value.trim().toLowerCase();
+    const filtered = query ? sports.filter(s => s.name.toLowerCase().includes(query)) : sports;
+
+    if (query && !filtered.length) {
+      wrap.innerHTML = `<div class="empty-state">No sports matching "${escapeHtml(searchInput.value)}".</div>`;
+      return;
+    }
+
+    const sportChipHtml = s => `
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
+        ${escapeHtml(s.name)}
+        <button type="button" class="delete-sport-btn" data-id="${s.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;">&times;</button>
+      </span>`;
+    wrap.innerHTML = letterBandGroupsHtml(filtered, s => s.name, items => items.map(sportChipHtml).join(''));
+    wrap.querySelectorAll('.delete-sport-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          await rest(`sports?id=eq.${btn.getAttribute('data-id')}`, { method: 'DELETE' });
+          await refreshSports();
+        } catch (e) {
+          alert('Could not delete: ' + e.message);
+        }
+      });
+    });
+  }
+  $('toggleSportListBtn').addEventListener('click', () => {
+    const panel = $('sportListPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleSportListBtn').textContent = showing ? 'Show sports list' : 'Hide sports list';
+  });
 
   $('addSportBtn').addEventListener('click', async () => {
     const name = $('newSportName').value.trim();
@@ -25186,7 +25301,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 504; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 505; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
