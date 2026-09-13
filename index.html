@@ -948,59 +948,8 @@
           <div id="tennisDrawImportWrap" style="margin-top:12px;"></div>
         </div>
 
-        <div style="margin-top:24px;padding-top:16px;border-top:1px dashed var(--field);">
-          <p class="stub-title" style="margin-bottom:4px;">Import results <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— the day after, for grading</span></p>
-          <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-            ADDED 2026-09-11, direct follow-up: "the day after ask it for the results... which my grading tool could compare against instead of coming up with a blank result." Same ESPN gap on the grading side -- a Challenger match ESPN never carried the draw for, it also never carries the result for, so those picks sit pending forever. Export lists the matches already cached for this date and asks the chatbot specifically for their outcomes (narrower and more reliable than an open-ended ask); paste the result CSV back in below. Updates the SAME cached match rather than creating a new one, so this works whether or not you ran the draws import above for this date.
-          </div>
-          <div class="row">
-            <div class="field" style="flex:0 0 auto;">
-              <label>Date matches were played</label>
-              <input id="tennisResultsExportDate" type="date" />
-            </div>
-            <div style="align-self:flex-end;">
-              <button id="exportTennisResultsRequestBtn">&#8681; Export results request</button>
-            </div>
-          </div>
-          <div id="tennisResultsExportWarnWrap" style="margin-top:10px;"></div>
-          <div style="margin-top:14px;">
-            <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
-            <textarea id="tennisResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,winner,set_scores,status&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Taro Daniel,A,6-4,3-6,6-2,completed"></textarea>
-            <div style="margin-top:8px;">
-              <button id="parseTennisResultsImportBtn">Parse &amp; preview</button>
-            </div>
-            <div id="tennisResultsImportWrap" style="margin-top:12px;"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-        <strong style="font-size:12px;">KBO results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— KBO has no automated grading source at all today</span></strong>
-        <button type="button" class="ghost small" id="toggleKboResultsToolsBtn">Show tools</button>
-      </div>
-      <div id="kboResultsToolsPanel" style="display:none;margin-top:10px;">
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          ADDED 2026-09-11, direct follow-up: "could this not work for all these outliers like KBO, Soccer etc?" Checked directly -- unlike Tennis (partial ESPN coverage), KBO has ZERO automated grading today; every KBO result has been entered by hand. Same free bulk-paste pattern: export a request (lists the real team names this system expects), paste a chatbot's real KBO scores back in, confirm. "Find & Update Results" then checks this cache for Moneyline/Spread/Total/First 5 KBO picks instead of leaving them pending indefinitely.
-        </div>
-        <div class="row">
-          <div class="field" style="flex:0 0 auto;">
-            <label>Date games were played</label>
-            <input id="kboResultsExportDate" type="date" />
-          </div>
-          <div style="align-self:flex-end;">
-            <button id="exportKboResultsRequestBtn">&#8681; Export results request</button>
-          </div>
-        </div>
-        <div id="kboResultsExportWarnWrap" style="margin-top:10px;"></div>
-        <div style="margin-top:14px;">
-          <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
-          <textarea id="kboResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="home_team,away_team,home_score,away_score,home_score_f5,away_score_f5,status&#10;KIA Tigers,Doosan Bears,5,3,2,1,completed"></textarea>
-          <div style="margin-top:8px;">
-            <button id="parseKboResultsImportBtn">Parse &amp; preview</button>
-          </div>
-          <div id="kboResultsImportWrap" style="margin-top:12px;"></div>
+        <div style="margin-top:24px;padding-top:16px;border-top:1px dashed var(--field);font-size:10px;color:var(--ink-soft);">
+          MOVED 2026-09-13, direct request after a real grading run silently skipped 7 real Challenger matches whose draws were pulled here but whose results never got pasted anywhere: "we need to add the button to the grading section of the automation tools so just like Golf we run that, then the Tennis results, KBO results etc so anything that needs data to grade is done in the same place to reduce the situation where we don't do this." The "Import results" tool that used to sit right here now lives in the <strong>2. Grading</strong> section instead, alongside KBO results cache and directly above "Find &amp; Update Results" -- the day-of-drawing step (above) and the day-after-results step are genuinely two different points in the workflow, and burying the results step in the same box as the draws step (sharing this box's own toggle) was exactly how it went unnoticed. Draws still belong here -- this is where you'd come to pull them.
         </div>
       </div>
     </div>
@@ -1682,12 +1631,85 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button type="button" class="ghost small" id="toggleGradingToolsBtn">Show tools</button>
             </div>
             <div id="gradingToolsPanel" style="display:none;margin-top:10px;">
-              <!-- Direct request 2026-09-11, same reasoning as the Prep &
-                   publish note above: run the cache-import step BEFORE
-                   grading, not after, to avoid a duplicate grading run. -->
-              <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
-                &#9888; Grading Tennis or KBO picks? Paste in results via <strong>Tennis draw cache &gt; Import results</strong> / <strong>KBO results cache</strong> (Setup tab) for this date FIRST, then run "Find &amp; Update Results" below -- grading first just means running it again afterward to pick up anything the cache would have caught.
+              <!-- RESTRUCTURED 2026-09-13, direct request after a real
+                   grading run silently skipped 7 real Challenger tennis
+                   matches: "we need to add the button to the grading
+                   section of the automation tools so just like Golf we
+                   run that, then the Tennis results, KBO results etc so
+                   anything that needs data to grade is done in the same
+                   place to reduce the situation where we don't do this."
+                   Golf already works this way by construction -- its
+                   grading button (below) reads live from ESPN's own PGA
+                   leaderboard, no separate manual pull required. Tennis
+                   and KBO couldn't, because their required data-pull step
+                   (Import results / KBO results cache) lived on a
+                   completely different tab (Setup), reachable only via a
+                   plain text reminder easy to skim past -- exactly what
+                   happened here. Both tools are now physically inside
+                   this section, ordered before the buttons that need
+                   their data, each still collapsed by default with its
+                   own toggle so this section doesn't turn into a wall of
+                   text when you don't need them. -->
+              <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <strong style="font-size:12px;">Tennis: Import results <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading Tennis picks</span></strong>
+                  <button type="button" class="ghost small" id="toggleTennisResultsToolsBtn">Show tools</button>
+                </div>
+                <div id="tennisResultsToolsPanel" style="display:none;margin-top:10px;">
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+                    ADDED 2026-09-11, direct follow-up: "the day after ask it for the results... which my grading tool could compare against instead of coming up with a blank result." Same ESPN gap on the grading side -- a Challenger match ESPN never carried the draw for, it also never carries the result for, so those picks sit pending forever. Export lists the matches already cached for this date and asks the chatbot specifically for their outcomes (narrower and more reliable than an open-ended ask); paste the result CSV back in below. Updates the SAME cached match rather than creating a new one, so this works whether or not you ran the draws import (Setup tab) for this date.
+                  </div>
+                  <div class="row">
+                    <div class="field" style="flex:0 0 auto;">
+                      <label>Date matches were played</label>
+                      <input id="tennisResultsExportDate" type="date" />
+                    </div>
+                    <div style="align-self:flex-end;">
+                      <button id="exportTennisResultsRequestBtn">&#8681; Export results request</button>
+                    </div>
+                  </div>
+                  <div id="tennisResultsExportWarnWrap" style="margin-top:10px;"></div>
+                  <div style="margin-top:14px;">
+                    <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+                    <textarea id="tennisResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,winner,set_scores,status&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Taro Daniel,A,6-4,3-6,6-2,completed"></textarea>
+                    <div style="margin-top:8px;">
+                      <button id="parseTennisResultsImportBtn">Parse &amp; preview</button>
+                    </div>
+                    <div id="tennisResultsImportWrap" style="margin-top:12px;"></div>
+                  </div>
+                </div>
               </div>
+
+              <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <strong style="font-size:12px;">KBO results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading KBO picks, no automated source exists</span></strong>
+                  <button type="button" class="ghost small" id="toggleKboResultsToolsBtn">Show tools</button>
+                </div>
+                <div id="kboResultsToolsPanel" style="display:none;margin-top:10px;">
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+                    ADDED 2026-09-11, direct follow-up: "could this not work for all these outliers like KBO, Soccer etc?" Checked directly -- unlike Tennis (partial ESPN coverage), KBO has ZERO automated grading today; every KBO result has been entered by hand. Same free bulk-paste pattern: export a request (lists the real team names this system expects), paste a chatbot's real KBO scores back in, confirm. "Find & Update Results" below then checks this cache for Moneyline/Spread/Total/First 5 KBO picks instead of leaving them pending indefinitely.
+                  </div>
+                  <div class="row">
+                    <div class="field" style="flex:0 0 auto;">
+                      <label>Date games were played</label>
+                      <input id="kboResultsExportDate" type="date" />
+                    </div>
+                    <div style="align-self:flex-end;">
+                      <button id="exportKboResultsRequestBtn">&#8681; Export results request</button>
+                    </div>
+                  </div>
+                  <div id="kboResultsExportWarnWrap" style="margin-top:10px;"></div>
+                  <div style="margin-top:14px;">
+                    <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+                    <textarea id="kboResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="home_team,away_team,home_score,away_score,home_score_f5,away_score_f5,status&#10;KIA Tigers,Doosan Bears,5,3,2,1,completed"></textarea>
+                    <div style="margin-top:8px;">
+                      <button id="parseKboResultsImportBtn">Parse &amp; preview</button>
+                    </div>
+                    <div id="kboResultsImportWrap" style="margin-top:12px;"></div>
+                  </div>
+                </div>
+              </div>
+
               <div class="row">
                 <div style="align-self:flex-end;">
                   <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
@@ -13024,6 +13046,21 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const showing = panel.style.display !== 'none';
     panel.style.display = showing ? 'none' : 'block';
     $('toggleKboResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+  });
+  // ADDED 2026-09-13, direct request: "we need to add the button to the
+  // grading section of the automation tools so just like Golf we run
+  // that, then the Tennis results, KBO results etc so anything that
+  // needs data to grade is done in the same place." Tennis's own
+  // "Import results" sub-tool used to live nested inside the Tennis draw
+  // cache box (Setup tab) sharing ITS toggle -- moved into its own
+  // top-level box in the Grading section (see gradingToolsPanel's own
+  // markup), so it needs its own independent toggle now, same pattern as
+  // every other tool box on this page.
+  $('toggleTennisResultsToolsBtn').addEventListener('click', () => {
+    const panel = $('tennisResultsToolsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleTennisResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
   // STANDING CONVENTION, direct request 2026-09-11 ("can we double check
   // that all tabs are uniform and make that a standard design choice as we
@@ -25750,7 +25787,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 515; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 516; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
