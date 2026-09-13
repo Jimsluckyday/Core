@@ -13248,7 +13248,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return {
       totalChecked: successCount + failureCount + pendingCount + dateMismatchCount,
       successCount, failureCount, pendingCount, dateMismatchCount,
-      failureGroups, pendingGroups, dateMismatchGroups, skippedSports: uniqueSkippedSports
+      failureGroups, pendingGroups, dateMismatchGroups, skippedSports: uniqueSkippedSports, runDate
     };
   }
   window.summarizeAutomationResult = summarizeAutomationResult;
@@ -13268,13 +13268,23 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const uniqueIds = [...new Set(ids)];
     if (!uniqueIds.length) return null;
     try {
-      const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,cappers(name),automation_dismissed_flags`);
+      // event_date added 2026-09-13, direct request after a real 58-row
+      // grading-failure review: a failure item whose own pick's real
+      // event_date differs from the date this run searched (an early-
+      // entered pick for a later event, same date_entered-OR-event_date
+      // widening every schedule/grading query already relies on) read as
+      // an unexplained miss for "today," when it isn't really about today
+      // at all. Same enrichment pass already fetching capper names --
+      // zero extra requests.
+      const rows = await restAllPages(`picks?id=in.(${uniqueIds.join(',')})&select=id,event_date,cappers(name),automation_dismissed_flags`);
       const nameById = {};
       const dismissedById = {};
-      rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; dismissedById[r.id] = r.automation_dismissed_flags || []; });
+      const eventDateById = {};
+      rows.forEach(r => { nameById[r.id] = r.cappers ? r.cappers.name : null; dismissedById[r.id] = r.automation_dismissed_flags || []; eventDateById[r.id] = r.event_date || null; });
       groups.forEach(g => g.items.forEach(it => {
         it.capperName = it.id ? (nameById[it.id] || null) : null;
         it.dismissedFlags = it.id ? (dismissedById[it.id] || []) : [];
+        it.eventDate = it.id ? (eventDateById[it.id] || null) : null;
       }));
       return null;
     } catch (e) {
@@ -13309,7 +13319,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return clean.length > maxLen ? clean.slice(0, maxLen - 1).trim() + '…' : clean;
   }
 
-  function automationGroupListHtml(groups, category) {
+  function automationGroupListHtml(groups, category, runDate) {
     // Direct request 2026-08-21: "25 on one page all for the same capper"
     // with the name repeated on every single line made it hard to see
     // where one capper's block ends and the next begins. Flattened across
@@ -13431,10 +13441,19 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const permanentBadgeHtml = it.permanent
         ? `<span style="display:inline-block;background:#55584d;color:#eae5d6;font-size:9px;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;padding:1px 6px;border-radius:8px;white-space:nowrap;margin-left:6px;" title="This grader has no logic for this bet type/sport at all -- will fail the same way every run, forever, regardless of any data fix. Needs manual grading, not a re-run.">Always manual</span>`
         : '';
+      // ADDED 2026-09-13, direct request after a real production review:
+      // a failure item whose own pick's real event_date differs from the
+      // date this run searched (see enrichAutomationGroupsWithCapperNames'
+      // own comment on why that's possible) reads as an unexplained miss
+      // for "today" otherwise -- same visual treatment as the existing
+      // "Always manual" badge, different color so the two aren't confused.
+      const differentDayBadgeHtml = (it.eventDate && it.eventDate !== runDate)
+        ? `<span style="display:inline-block;background:#a3730a;color:#eae5d6;font-size:9px;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;padding:1px 6px;border-radius:8px;white-space:nowrap;margin-left:6px;" title="This pick's own event_date is ${escapeHtml(it.eventDate)}, not ${escapeHtml(runDate || 'the date you searched')} -- found because it was entered on that date, not because its real event is today. Not really part of this batch.">Different day (${escapeHtml(it.eventDate)})</span>`
+        : '';
       html += `<tr data-capper-name="${escapeHtml(it.capperName || '')}">
         <td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;" class="automation-capper-cell">${capperCellHtml}</td>
         <td style="padding:3px 8px 3px 0;white-space:nowrap;color:#55584d;vertical-align:top;">${it.sport ? escapeHtml(it.sport) : ''}</td>
-        <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}${permanentBadgeHtml}</td>
+        <td style="padding:3px 8px 3px 0;vertical-align:top;">${escapeHtml(it.label)}${permanentBadgeHtml}${differentDayBadgeHtml}</td>
         <td style="${reasonCellStyle}" ${reasonCellAttrs}>${escapeHtml(shortReason)}</td>
         <td style="padding:3px 0;vertical-align:top;text-align:right;white-space:nowrap;">${fixSuggestionBtnHtml}${refreshBtnHtml}${editBtnHtml}${dismissBtnHtml}</td>
       </tr>`;
@@ -13471,12 +13490,32 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const activeFailureCount = s.failureGroups.reduce((sum, g) => sum + g.items.length, 0);
     const activePendingCount = s.pendingGroups.reduce((sum, g) => sum + g.items.length, 0);
     const activeDateMismatchCount = s.dateMismatchGroups.reduce((sum, g) => sum + g.items.length, 0);
+    // ADDED 2026-09-13, direct report after a real 58-row grading-failure
+    // review: "when there were a bunch it was becoming just noise and I
+    // assumed I could pass over most of it." Every failure item rendered
+    // with equal visual weight regardless of whether it had a ready
+    // one-click fix (it.suggestion, see schedule-sync-backfill's own
+    // `suggestion` field) or could never resolve no matter what (CFL,
+    // Method of Victory -- it.permanent) -- a long list dominated by
+    // permanent noise buried the handful of real, one-click-fixable typos.
+    // Splitting into three buckets up front (fix-now / needs-a-look /
+    // never-resolves) lets the render below put the actionable ones first
+    // and collapse the permanent ones out of the way, instead of one flat
+    // list sorted only by capper name.
+    const allFailureItems = [];
+    s.failureGroups.forEach(g => g.items.forEach(it => allFailureItems.push(Object.assign({}, it, { sport: it.sport || g.sport }))));
+    const fixNowItems = allFailureItems.filter(it => it.suggestion && !it.permanent);
+    const permanentItems = allFailureItems.filter(it => it.permanent);
+    const needsLookItems = allFailureItems.filter(it => !it.suggestion && !it.permanent);
     let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
     html += `<div style="font-size:13px;margin-bottom:10px;">
       <strong>${s.totalChecked}</strong> checked &middot;
       <span style="color:#2d6a4f;font-weight:bold;">${s.successCount} updated</span> &middot;
       <span style="color:#8a2f3a;font-weight:bold;">${activeFailureCount} failed</span>${activeDateMismatchCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${activeDateMismatchCount} on a different day</span>` : ''}${activePendingCount ? ` &middot; <span style="color:#a3730a;font-weight:bold;">${activePendingCount} not final yet</span>` : ''}
     </div>`;
+    if (fixNowItems.length) {
+      html += `<div style="font-size:13px;margin-bottom:10px;padding:6px 10px;background:rgba(35,77,53,0.08);border-left:3px solid #234d35;"><strong style="color:#234d35;">&#9889; ${fixNowItems.length} of these can be fixed with one click below -- look here first.</strong></div>`;
+    }
     if (dismissedHiddenCount) {
       html += `<div style="font-size:11px;color:#55584d;margin-bottom:8px;">${dismissedHiddenCount} already marked resolved on a past run -- hidden from the list below (still visible in "View raw JSON").</div>`;
     }
@@ -13559,15 +13598,29 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // value instead, so the output renders identically regardless of
       // which of the two documents it lands in.
       html += `<div style="font-size:12px;margin-bottom:6px;padding:6px 8px;background:rgba(163,115,10,0.08);border-left:3px solid #a3730a;"><strong style="color:#a3730a;">Belongs to a different day -- move these out of today's batch:</strong></div>`;
-      html += automationGroupListHtml(s.dateMismatchGroups, category);
+      html += automationGroupListHtml(s.dateMismatchGroups, category, s.runDate);
     }
-    if (activeFailureCount) {
-      html += '<div style="font-size:12px;margin-bottom:6px;"><strong>What failed:</strong></div>';
-      html += automationGroupListHtml(s.failureGroups, category);
+    // RESTRUCTURED 2026-09-13 -- see the fixNowItems/permanentItems/
+    // needsLookItems split above for the full story. Fix-now items lead
+    // (the ones this exists for), needs-a-look items follow (real per-
+    // pick problems worth a human's attention), and permanent items are
+    // collapsed under a closed-by-default <details> -- still fully
+    // visible on demand, just not competing for attention with the two
+    // categories that actually benefit from being looked at today.
+    if (fixNowItems.length) {
+      html += '<div style="font-size:12px;margin-bottom:6px;"><strong>Fix now:</strong></div>';
+      html += automationGroupListHtml([{ sport: '', items: fixNowItems }], category, s.runDate);
+    }
+    if (needsLookItems.length) {
+      html += '<div style="font-size:12px;margin-bottom:6px;"><strong>Needs a look:</strong></div>';
+      html += automationGroupListHtml([{ sport: '', items: needsLookItems }], category, s.runDate);
+    }
+    if (permanentItems.length) {
+      html += `<details style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:12px;color:#55584d;">${permanentItems.length} will never auto-resolve (bet type/sport not supported) -- click to view</summary><div style="margin-top:6px;">${automationGroupListHtml([{ sport: '', items: permanentItems }], category, s.runDate)}</div></details>`;
     }
     if (activePendingCount) {
       html += '<div style="font-size:12px;margin-bottom:6px;"><strong>Still waiting on:</strong></div>';
-      html += automationGroupListHtml(s.pendingGroups, category);
+      html += automationGroupListHtml(s.pendingGroups, category, s.runDate);
     }
     html += `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11px;color:#55584d;">View raw JSON</summary><pre style="white-space:pre-wrap;font-size:11px;background:#fff;border:1px solid #234d35;padding:10px;border-radius:2px;max-height:400px;overflow:auto;margin-top:6px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre></details>`;
     return html;
@@ -25697,7 +25750,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 514; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 515; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
