@@ -1710,6 +1710,88 @@ These are almost always the same day, so "Date entered" only fills in a starting
                 </div>
               </div>
 
+              <!-- ADDED 2026-09-13, direct request: "if we can upload
+                   anything to make any bet easier to grade for the next
+                   day then yes we should take that opportunity." Same
+                   free bulk-paste pattern as KBO above -- ESPN's CFL
+                   scoreboard is confirmed 100% dead for every date tested
+                   (see grade_picks_espn_backfill's own header comment),
+                   so there was never going to be a live-data fix here,
+                   only a paste-in one. -->
+              <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <strong style="font-size:12px;">CFL results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading CFL picks, ESPN has no CFL data at all</span></strong>
+                  <button type="button" class="ghost small" id="toggleCflResultsToolsBtn">Show tools</button>
+                </div>
+                <div id="cflResultsToolsPanel" style="display:none;margin-top:10px;">
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+                    ESPN's public CFL scoreboard feed returns zero events for literally every date tested -- confirmed dead, not a per-date gap. Same free bulk-paste pattern as KBO: export a request, paste a chatbot's real CFL scores back in, confirm. "Find & Update Results" below then checks this cache for Moneyline/Spread/Total CFL picks instead of leaving them pending indefinitely.
+                  </div>
+                  <div class="row">
+                    <div class="field" style="flex:0 0 auto;">
+                      <label>Date games were played</label>
+                      <input id="cflResultsExportDate" type="date" />
+                    </div>
+                    <div style="align-self:flex-end;">
+                      <button id="exportCflResultsRequestBtn">&#8681; Export results request</button>
+                    </div>
+                  </div>
+                  <div id="cflResultsExportWarnWrap" style="margin-top:10px;"></div>
+                  <div style="margin-top:14px;">
+                    <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+                    <textarea id="cflResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="home_team,away_team,home_score,away_score,status&#10;Calgary Stampeders,Saskatchewan Roughriders,27,24,completed"></textarea>
+                    <div style="margin-top:8px;">
+                      <button id="parseCflResultsImportBtn">Parse &amp; preview</button>
+                    </div>
+                    <div id="cflResultsImportWrap" style="margin-top:12px;"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ADDED 2026-09-13, direct follow-up: "how do we get
+                   something automatic that does the same and compares
+                   against what we have as we should be able to do that
+                   instead of me prompting an outside AI then manually
+                   updating each result." ESPN's own MMA data has no
+                   method-of-victory or scorecard detail at all (confirmed
+                   directly -- the scoreboard only exposes winner:true/
+                   false, round, and clock), so "Method of Victory" bet-
+                   type picks (a real, recurring, high-volume MMA bet
+                   type) could never be graded no matter how good the
+                   Moneyline matching got. Same free bulk-paste pattern --
+                   confirmed directly this same session that Gemini
+                   returns a full, accurate method/round/scorecard
+                   breakdown for a real 13-fight card instantly. -->
+              <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <strong style="font-size:12px;">MMA results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading Method of Victory picks</span></strong>
+                  <button type="button" class="ghost small" id="toggleMmaResultsToolsBtn">Show tools</button>
+                </div>
+                <div id="mmaResultsToolsPanel" style="display:none;margin-top:10px;">
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+                    ESPN's own MMA data has no method-of-victory or scorecard detail -- only Moneyline (winner) is automated from ESPN directly. Export a request for the card's real fight-by-fight breakdown (method, round, scorecards), paste a chatbot's response back in, confirm. "Find & Update Results" below then grades Method of Victory picks (wins by Submission/TKO/KO, goes/doesn't go the distance, wins in Round N, win with at least a named scorecard margin) against this cache -- Moneyline picks are unaffected, they still grade from ESPN directly as before.
+                  </div>
+                  <div class="row">
+                    <div class="field" style="flex:0 0 auto;">
+                      <label>Event date</label>
+                      <input id="mmaResultsExportDate" type="date" />
+                    </div>
+                    <div style="align-self:flex-end;">
+                      <button id="exportMmaResultsRequestBtn">&#8681; Export results request</button>
+                    </div>
+                  </div>
+                  <div id="mmaResultsExportWarnWrap" style="margin-top:10px;"></div>
+                  <div style="margin-top:14px;">
+                    <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+                    <textarea id="mmaResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="event_name,fighter_a,fighter_b,winner,method,round,scorecards,status&#10;UFC Fight Night: Usman vs. Buckley,Raoni Barcelos,Cody Garbrandt,A,Decision,3,&quot;29-28,29-28,29-28&quot;,completed"></textarea>
+                    <div style="margin-top:8px;">
+                      <button id="parseMmaResultsImportBtn">Parse &amp; preview</button>
+                    </div>
+                    <div id="mmaResultsImportWrap" style="margin-top:12px;"></div>
+                  </div>
+                </div>
+              </div>
+
               <div class="row">
                 <div style="align-self:flex-end;">
                   <button id="autoGradeEspnBtn">Find &amp; Update Results</button>
@@ -7012,6 +7094,332 @@ These are almost always the same day, so "Date entered" only fills in a starting
         alert('Could not cache: ' + e.message);
         btn.disabled = false;
         btn.textContent = `Cache ${rows.length} game(s)`;
+      }
+    });
+  });
+
+  // ---------- CFL results cache (export request / import results) ----------
+  // ADDED 2026-09-13, direct request: "if we can upload anything to make
+  // any bet easier to grade for the next day then yes we should take that
+  // opportunity." Modeled directly on the KBO results cache just above --
+  // same shape, minus the First-5-innings columns (not an MMA/CFL concept).
+  async function fetchCachedCflGamesForDate(date) {
+    if (!date) return [];
+    try {
+      return await rest(`cfl_results_cache?select=home_team,away_team&game_date=eq.${date}`);
+    } catch (e) { return []; }
+  }
+
+  $('exportCflResultsRequestBtn').addEventListener('click', async () => {
+    const date = $('cflResultsExportDate').value;
+    if (!date) { alert('Pick the date the games were played first.'); return; }
+    const btn = $('exportCflResultsRequestBtn');
+    btn.disabled = true;
+    try {
+      await checkScheduleSyncFlags('CFL', date, 'cflResultsExportWarnWrap');
+      const cached = await fetchCachedCflGamesForDate(date);
+      const cachedLine = cached.length
+        ? `Already cached for this date (confirm/find scores for these):\n${cached.map(g => `  - ${g.home_team} vs ${g.away_team}`).join('\n')}`
+        : 'No games currently cached for this date yet -- research and report any real CFL games played this date.';
+
+      const instructions = [
+        '=== INSTRUCTIONS FOR RESEARCHING CFL (Canadian Football League) RESULTS ===',
+        '',
+        `Please find the real final scores of CFL games played on ${date} (Eastern Time, USA).`,
+        '',
+        'Use the real, full team names (e.g. "Calgary Stampeders", "Saskatchewan Roughriders", "Hamilton Tiger-Cats").',
+        '',
+        cachedLine,
+        '',
+        'OUTPUT FORMAT -- please return a CSV with exactly these columns: home_team,away_team,home_score,away_score,status',
+        '  - home_score/away_score: final score.',
+        '  - status: "completed" normally, or "voided" if the game was postponed/canceled and not completed (leave scores blank in that case).',
+        '',
+        'Only include games you are reasonably confident actually happened as described -- if uncertain, leave it out rather than guessing.',
+        '',
+        '=== END INSTRUCTIONS ==='
+      ].join('\r\n');
+
+      downloadCsv(`cfl-results-request-${date}.csv`, ['home_team', 'away_team', 'home_score', 'away_score', 'status'], [], instructions);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function parseCflResultsImportCsv(text, gameDate) {
+    const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
+    if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
+    function looksLikeHeader(line) {
+      const delim = line.includes('\t') ? '\t' : ',';
+      const tokens = splitCsvLine(line, delim).map(t => t.trim().toLowerCase());
+      return tokens.includes('home_team') && tokens.includes('away_team');
+    }
+    const headerRowIndex = allLines.findIndex(looksLikeHeader);
+    if (headerRowIndex === -1) return { error: 'Missing required columns: home_team and/or away_team.' };
+    const lines = allLines.slice(headerRowIndex);
+    const delimiter = lines[0].includes('\t') ? '\t' : ',';
+    const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
+    const homeIdx = headers.indexOf('home_team');
+    const awayIdx = headers.indexOf('away_team');
+    const homeScoreIdx = headers.indexOf('home_score');
+    const awayScoreIdx = headers.indexOf('away_score');
+    const statusIdx = headers.indexOf('status');
+    if (homeIdx === -1 || awayIdx === -1) return { error: 'Missing required columns: home_team and/or away_team.' };
+
+    const rows = [];
+    const errors = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i], delimiter).map(c => c.trim());
+      const home_team = cells[homeIdx];
+      const away_team = cells[awayIdx];
+      if (!home_team || !away_team) { errors.push(`Row ${i + 1}: missing home_team or away_team -- skipped.`); continue; }
+      const statusRaw = ((statusIdx !== -1 && cells[statusIdx]) || 'completed').toLowerCase();
+      const isVoided = statusRaw === 'voided';
+      function parseScore(idx) {
+        if (idx === -1 || !cells[idx]) return null;
+        const n = Number(cells[idx]);
+        return Number.isFinite(n) ? n : null;
+      }
+      let home_score = null, away_score = null;
+      if (!isVoided) {
+        home_score = parseScore(homeScoreIdx);
+        away_score = parseScore(awayScoreIdx);
+        if (home_score === null || away_score === null) {
+          errors.push(`Row ${i + 1}: missing or non-numeric home_score/away_score (or set status to "voided") -- skipped.`);
+          continue;
+        }
+      }
+      rows.push({ game_date: gameDate, home_team, away_team, home_score, away_score, result_status: isVoided ? 'voided' : 'completed' });
+    }
+    return { rows, errors };
+  }
+
+  $('parseCflResultsImportBtn').addEventListener('click', async () => {
+    const wrap = $('cflResultsImportWrap');
+    const gameDate = $('cflResultsExportDate').value;
+    if (!gameDate) { wrap.innerHTML = '<div class="msg error">Pick the date the games were played first.</div>'; return; }
+
+    await checkScheduleSyncFlags('CFL', gameDate, 'cflResultsExportWarnWrap');
+
+    if (isBlankResultsPaste($('cflResultsImportInput').value, ['home_team', 'away_team'])) {
+      logResultsCheck('cfl_results', gameDate, 0);
+      wrap.innerHTML = `<div class="msg ok">Results check complete for ${escapeHtml(gameDate)}: no games found to update. Safe to run "Find & Update Results" now.</div>`;
+      alert(`Results ran -- no games to update for ${gameDate}. Safe for you to run Find & Update Results.`);
+      $('cflResultsImportInput').value = '';
+      return;
+    }
+
+    const { rows, errors, error } = parseCflResultsImportCsv($('cflResultsImportInput').value, gameDate);
+    if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
+
+    const errorsHtml = errors.length
+      ? `<div class="msg error" style="margin-bottom:10px;">${errors.map(e => `<div>${escapeHtml(e)}</div>`).join('')}</div>` : '';
+
+    if (!rows.length) {
+      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import -- this doesn\'t look like a clean "no games" response, check the errors above before assuming there\'s nothing to do tonight.</div>';
+      return;
+    }
+
+    const rowsHtml = rows.map(r => `
+      <tr><td>${escapeHtml(r.home_team)}</td><td>${escapeHtml(r.away_team)}</td><td>${r.home_score ?? '—'}</td><td>${r.away_score ?? '—'}</td><td>${escapeHtml(r.result_status)}</td></tr>`).join('');
+
+    wrap.innerHTML = `
+      ${errorsHtml}
+      <div style="font-size:12px;margin-bottom:10px;"><strong>${rows.length}</strong> game(s) ready to cache:</div>
+      <table class="picks-table" style="margin-bottom:14px;">
+        <thead><tr><th>Home</th><th>Away</th><th>Home score</th><th>Away score</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <button id="confirmCflResultsImportBtn">Cache ${rows.length} game(s)</button>`;
+
+    $('confirmCflResultsImportBtn').addEventListener('click', async () => {
+      const btn = $('confirmCflResultsImportBtn');
+      btn.disabled = true;
+      btn.textContent = 'Caching...';
+      try {
+        await rest('cfl_results_cache?on_conflict=game_date,home_team,away_team', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows)
+        });
+        logResultsCheck('cfl_results', gameDate, rows.length);
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} game(s). "Find & Update Results" will now check these for CFL picks on ${gameDate}.</div>`;
+        $('cflResultsImportInput').value = '';
+      } catch (e) {
+        alert('Could not cache: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = `Cache ${rows.length} game(s)`;
+      }
+    });
+  });
+
+  // ---------- MMA results cache (export request / import results) ----------
+  // ADDED 2026-09-13, direct request: "how do we get something automatic
+  // that does the same and compares against what we have as we should be
+  // able to do that instead of me prompting an outside AI then manually
+  // updating each result." ESPN's own MMA data has no method-of-victory or
+  // scorecard detail at all -- confirmed directly this session that Gemini
+  // returns a full, accurate method/round/scorecard breakdown for a real
+  // 13-fight card instantly, same free bulk-paste pattern as Tennis/KBO/CFL.
+  const MMA_VALID_METHODS = ['Decision', 'KO/TKO', 'Submission', 'DQ', 'No Contest', 'Draw'];
+
+  async function fetchCachedMmaFightsForDate(date) {
+    if (!date) return [];
+    try {
+      return await rest(`mma_results_cache?select=fighter_a_name,fighter_b_name&event_date=eq.${date}`);
+    } catch (e) { return []; }
+  }
+
+  $('exportMmaResultsRequestBtn').addEventListener('click', async () => {
+    const date = $('mmaResultsExportDate').value;
+    if (!date) { alert('Pick the event date first.'); return; }
+    const btn = $('exportMmaResultsRequestBtn');
+    btn.disabled = true;
+    try {
+      await checkScheduleSyncFlags('MMA', date, 'mmaResultsExportWarnWrap');
+      const cached = await fetchCachedMmaFightsForDate(date);
+      const cachedLine = cached.length
+        ? `Already cached for this date (confirm/find full detail for these):\n${cached.map(f => `  - ${f.fighter_a_name} vs ${f.fighter_b_name}`).join('\n')}`
+        : 'No fights currently cached for this date yet -- research and report every fight on the real card(s) held this date.';
+
+      const instructions = [
+        '=== INSTRUCTIONS FOR RESEARCHING MMA (UFC/Bellator/PFL) RESULTS ===',
+        '',
+        `Please find the real results of every fight on any MMA card held on ${date} (Eastern Time, USA), including preliminary card fights, not just the main card.`,
+        '',
+        'For EACH fight, report: both fighters\' full names, who won, the method of victory (Decision / KO/TKO / Submission / DQ), the round it ended in, and -- if the fight went to a judges\' decision -- each judge\'s scorecard.',
+        '',
+        cachedLine,
+        '',
+        'OUTPUT FORMAT -- please return a CSV with exactly these columns: event_name,fighter_a,fighter_b,winner,method,round,scorecards,status',
+        '  - fighter_a/fighter_b: full real names.',
+        '  - winner: "A" if fighter_a won, "B" if fighter_b won, or blank for a draw/no contest.',
+        `  - method: one of ${MMA_VALID_METHODS.join(', ')}.`,
+        '  - round: the round the fight ended in (the last round for a decision).',
+        '  - scorecards: each judge\'s score as "W-L" (winner\'s score first), separated by commas -- e.g. "30-27,29-28,29-28". Leave blank if the fight didn\'t go to a decision, or if you can\'t find the real cards.',
+        '  - status: "completed" normally, or "voided" if the fight was canceled outright before happening (a No Contest is still "completed" -- use method "No Contest" for that instead).',
+        '',
+        'Only include fights you are reasonably confident actually happened as described -- if uncertain about a specific detail (e.g. exact scorecards), leave that field blank rather than guessing, but still report the fight itself if the winner/method/round are solid.',
+        '',
+        '=== END INSTRUCTIONS ==='
+      ].join('\r\n');
+
+      downloadCsv(`mma-results-request-${date}.csv`, ['event_name', 'fighter_a', 'fighter_b', 'winner', 'method', 'round', 'scorecards', 'status'], [], instructions);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function parseMmaResultsImportCsv(text, eventDate) {
+    const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
+    if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
+    function looksLikeHeader(line) {
+      const delim = line.includes('\t') ? '\t' : ',';
+      const tokens = splitCsvLine(line, delim).map(t => t.trim().toLowerCase());
+      return tokens.includes('fighter_a') && tokens.includes('fighter_b');
+    }
+    const headerRowIndex = allLines.findIndex(looksLikeHeader);
+    if (headerRowIndex === -1) return { error: 'Missing required columns: fighter_a and/or fighter_b.' };
+    const lines = allLines.slice(headerRowIndex);
+    const delimiter = lines[0].includes('\t') ? '\t' : ',';
+    const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
+    const eventIdx = headers.indexOf('event_name');
+    const aIdx = headers.indexOf('fighter_a');
+    const bIdx = headers.indexOf('fighter_b');
+    const winnerIdx = headers.indexOf('winner');
+    const methodIdx = headers.indexOf('method');
+    const roundIdx = headers.indexOf('round');
+    const scorecardsIdx = headers.indexOf('scorecards');
+    const statusIdx = headers.indexOf('status');
+    if (aIdx === -1 || bIdx === -1) return { error: 'Missing required columns: fighter_a and/or fighter_b.' };
+
+    const rows = [];
+    const errors = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i], delimiter).map(c => c.trim());
+      const fighter_a_name = cells[aIdx];
+      const fighter_b_name = cells[bIdx];
+      if (!fighter_a_name || !fighter_b_name) { errors.push(`Row ${i + 1}: missing fighter_a or fighter_b -- skipped.`); continue; }
+      const statusRaw = ((statusIdx !== -1 && cells[statusIdx]) || 'completed').toLowerCase();
+      const isVoided = statusRaw === 'voided';
+      const winnerRaw = (winnerIdx !== -1 ? (cells[winnerIdx] || '') : '').trim().toUpperCase();
+      const winner_side = winnerRaw === 'A' ? 'a' : winnerRaw === 'B' ? 'b' : null;
+      let method = (methodIdx !== -1 ? (cells[methodIdx] || '') : '').trim();
+      if (method) {
+        const matched = MMA_VALID_METHODS.find(m => m.toLowerCase() === method.toLowerCase());
+        if (!matched) { errors.push(`Row ${i + 1}: "${method}" isn't one of ${MMA_VALID_METHODS.join(', ')} -- skipped.`); continue; }
+        method = matched;
+      } else if (!isVoided) {
+        errors.push(`Row ${i + 1}: missing method (or set status to "voided") -- skipped.`); continue;
+      }
+      const roundRaw = roundIdx !== -1 ? cells[roundIdx] : '';
+      const ending_round = roundRaw && Number.isFinite(Number(roundRaw)) ? Number(roundRaw) : null;
+      const scorecards = (scorecardsIdx !== -1 && cells[scorecardsIdx]) ? cells[scorecardsIdx] : null;
+      const event_name = (eventIdx !== -1 && cells[eventIdx]) ? cells[eventIdx] : null;
+      rows.push({
+        event_date: eventDate, event_name, fighter_a_name, fighter_b_name,
+        winner_side, method: isVoided ? (method || 'No Contest') : method,
+        ending_round, scorecards, result_status: isVoided ? 'voided' : 'completed'
+      });
+    }
+    return { rows, errors };
+  }
+
+  $('parseMmaResultsImportBtn').addEventListener('click', async () => {
+    const wrap = $('mmaResultsImportWrap');
+    const eventDate = $('mmaResultsExportDate').value;
+    if (!eventDate) { wrap.innerHTML = '<div class="msg error">Pick the event date first.</div>'; return; }
+
+    await checkScheduleSyncFlags('MMA', eventDate, 'mmaResultsExportWarnWrap');
+
+    if (isBlankResultsPaste($('mmaResultsImportInput').value, ['fighter_a', 'fighter_b'])) {
+      logResultsCheck('mma_results', eventDate, 0);
+      wrap.innerHTML = `<div class="msg ok">Results check complete for ${escapeHtml(eventDate)}: no fights found to update. Safe to run "Find & Update Results" now.</div>`;
+      alert(`Results ran -- no fights to update for ${eventDate}. Safe for you to run Find & Update Results.`);
+      $('mmaResultsImportInput').value = '';
+      return;
+    }
+
+    const { rows, errors, error } = parseMmaResultsImportCsv($('mmaResultsImportInput').value, eventDate);
+    if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
+
+    const errorsHtml = errors.length
+      ? `<div class="msg error" style="margin-bottom:10px;">${errors.map(e => `<div>${escapeHtml(e)}</div>`).join('')}</div>` : '';
+
+    if (!rows.length) {
+      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import -- this doesn\'t look like a clean "no fights" response, check the errors above before assuming there\'s nothing to do tonight.</div>';
+      return;
+    }
+
+    const rowsHtml = rows.map(r => `
+      <tr><td>${escapeHtml(r.fighter_a_name)}</td><td>${escapeHtml(r.fighter_b_name)}</td><td>${r.winner_side ? r.winner_side.toUpperCase() : '—'}</td><td>${escapeHtml(r.method || '—')}</td><td>${r.ending_round ?? '—'}</td><td>${escapeHtml(r.scorecards || '—')}</td><td>${escapeHtml(r.result_status)}</td></tr>`).join('');
+
+    wrap.innerHTML = `
+      ${errorsHtml}
+      <div style="font-size:12px;margin-bottom:10px;"><strong>${rows.length}</strong> fight(s) ready to cache:</div>
+      <table class="picks-table" style="margin-bottom:14px;">
+        <thead><tr><th>Fighter A</th><th>Fighter B</th><th>Winner</th><th>Method</th><th>Round</th><th>Scorecards</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <button id="confirmMmaResultsImportBtn">Cache ${rows.length} fight(s)</button>`;
+
+    $('confirmMmaResultsImportBtn').addEventListener('click', async () => {
+      const btn = $('confirmMmaResultsImportBtn');
+      btn.disabled = true;
+      btn.textContent = 'Caching...';
+      try {
+        await rest('mma_results_cache?on_conflict=event_date,fighter_a_name,fighter_b_name', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows)
+        });
+        logResultsCheck('mma_results', eventDate, rows.length);
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} fight(s). "Find & Update Results" will now check these for Method of Victory picks on ${eventDate}.</div>`;
+        $('mmaResultsImportInput').value = '';
+      } catch (e) {
+        alert('Could not cache: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = `Cache ${rows.length} fight(s)`;
       }
     });
   });
@@ -13061,6 +13469,20 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const showing = panel.style.display !== 'none';
     panel.style.display = showing ? 'none' : 'block';
     $('toggleTennisResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+  });
+  // ADDED 2026-09-13, same pattern as toggleTennisResultsToolsBtn above --
+  // CFL/MMA results cache tools also live in the Grading section now.
+  $('toggleCflResultsToolsBtn').addEventListener('click', () => {
+    const panel = $('cflResultsToolsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleCflResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+  });
+  $('toggleMmaResultsToolsBtn').addEventListener('click', () => {
+    const panel = $('mmaResultsToolsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleMmaResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
   // STANDING CONVENTION, direct request 2026-09-11 ("can we double check
   // that all tabs are uniform and make that a standard design choice as we
@@ -25787,7 +26209,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 516; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 517; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
