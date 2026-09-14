@@ -1977,6 +1977,85 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- ADDED 2026-09-14, direct request: "Data validation and Data
+         Analysis so they should be split up into separate buttons and
+         tasks." Part of building a real weekly habit ahead of a full
+         year's worth of data collection -- "this will be used in tandem
+         once the year is done as my goal is to put in the years worth of
+         data, refine my metrics/scoring etc and then do a weekly check
+         with the new metrics to see week by week the changes and if they
+         stuck." One shared date range per box, each button below sets
+         that ONE report's own from/to fields (never touching sport/
+         capper filters, which stay at their own "All" defaults) and
+         triggers it directly, exactly as if its own native button were
+         clicked -- same already-proven pattern (fetch, then open a
+         pop-out tab) every one of these reports already uses on its own,
+         so this introduces no new popup-blocker risk. Two buttons (Dup
+         Checker, Results Audit) live on other tabs -- those switch tabs
+         and scroll to the tool instead, same as goDataValidationBtn's own
+         established jump+prefill pattern, since Results Audit specifically
+         needs a manual paste-in step that can't be automated. -->
+    <div class="stub" data-tab="reports" style="border:1.5px solid var(--stamp-green, #2d6a4f);">
+      <p class="stub-title">
+        Weekly Data Validation <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this checklist first: is the pipeline/data actually correct?</span>
+        <button class="ghost small" id="toggleWeeklyValidationBtn">Show checklist</button>
+      </p>
+      <div id="weeklyValidationPanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Looking for problems, not conclusions -- catches data-entry mistakes, silent grading bugs, and counting inconsistencies before they compound across weeks. Each button below opens that report for the SAME date range, using its own "all cappers/all sports" view.
+        </div>
+        <div class="row">
+          <div class="field" style="flex:0 0 auto;">
+            <label>From date</label>
+            <input id="weeklyValidationFrom" type="date" />
+          </div>
+          <div class="field" style="flex:0 0 auto;">
+            <label>To date</label>
+            <input id="weeklyValidationTo" type="date" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
+          <button type="button" id="weeklyValRunAuditBtn">Results Audit (Player Props) &rarr;</button>
+          <button type="button" id="weeklyValRunDupBtn">Duplicate Pick Checker</button>
+          <button type="button" id="weeklyValRunStreaksBtn">Capper Streaks</button>
+          <button type="button" id="weeklyValRunLeaderboardBtn">Capper Leaderboard</button>
+          <button type="button" id="weeklyValRunConsensusBtn">Consensus</button>
+          <button type="button" id="weeklyValRunAnalysisBtn">Capper Analysis (all cappers)</button>
+        </div>
+        <div style="font-size:10px;color:var(--ink-soft);margin-top:10px;">
+          Not included here: the Data Validation Tool (Grading tab) -- that's a single-day, pre-publish gate, not a date-range retrospective check, so it stays its own daily habit rather than part of this weekly one.
+        </div>
+      </div>
+    </div>
+
+    <div class="stub" data-tab="reports" style="border:1.5px solid var(--gold-dark, #8a6d1a);">
+      <p class="stub-title">
+        Weekly Data Analysis <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— performance tracking: watch the trend, don't conclude yet (sample's too small until a year's in)</span>
+        <button class="ghost small" id="toggleWeeklyAnalysisBtn">Show checklist</button>
+      </p>
+      <div id="weeklyAnalysisPanel" style="display:none;">
+        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+          Same shared date range, opens the reports that speak to capper/formula performance rather than data correctness. The point right now is building the habit and noticing what's worth glancing at each week -- not drawing real conclusions off two weeks of data.
+        </div>
+        <div class="row">
+          <div class="field" style="flex:0 0 auto;">
+            <label>From date</label>
+            <input id="weeklyAnalysisFrom" type="date" />
+          </div>
+          <div class="field" style="flex:0 0 auto;">
+            <label>To date</label>
+            <input id="weeklyAnalysisTo" type="date" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
+          <button type="button" id="weeklyAnRunTopBottomBtn">Top &amp; Bottom Cappers</button>
+          <button type="button" id="weeklyAnRunTierPerfBtn">Pick Tier Performance</button>
+          <button type="button" id="weeklyAnRunBetTypeBtn">Performance by Bet Type</button>
+          <button type="button" id="weeklyAnRunAnalysisBtn">Capper Analysis (all cappers)</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ANALYTICS (internal only) -->
     <div class="stub" data-tab="reports">
       <p class="stub-title">
@@ -7737,6 +7816,120 @@ These are almost always the same day, so "Date entered" only fills in a starting
       panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   }
+
+  // ---------- Weekly Data Validation / Data Analysis checklists ----------
+  // ADDED 2026-09-14 -- see the two new boxes' own HTML comment. Each
+  // button below just sets ONE existing report's own date fields and
+  // calls its own existing run function -- never new report logic, just a
+  // shared front door so a weekly habit doesn't require remembering where
+  // every individual tool lives.
+  $('toggleWeeklyValidationBtn').addEventListener('click', () => {
+    const panel = $('weeklyValidationPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleWeeklyValidationBtn').textContent = showing ? 'Show checklist' : 'Hide checklist';
+  });
+  $('toggleWeeklyAnalysisBtn').addEventListener('click', () => {
+    const panel = $('weeklyAnalysisPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleWeeklyAnalysisBtn').textContent = showing ? 'Show checklist' : 'Hide checklist';
+  });
+
+  function weeklyChecklistRange(prefix) {
+    return { from: $(`${prefix}From`).value, to: $(`${prefix}To`).value };
+  }
+
+  $('weeklyValRunAuditBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyValidation');
+    switchTab('pending');
+    $('resultsAuditFrom').value = from;
+    $('resultsAuditTo').value = to;
+    const panel = $('resultsAuditPanel');
+    if (panel && panel.style.display === 'none') $('toggleResultsAuditBtn').click();
+    panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  $('weeklyValRunDupBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyValidation');
+    switchTab('tools');
+    $('dupFrom').value = from;
+    $('dupTo').value = to;
+    $('dupSport').value = '';
+    $('dupCapper').value = '';
+    const panel = $('dupCheckPanel');
+    if (panel && panel.style.display === 'none') $('toggleDupCheckBtn').click();
+    runDupScan();
+    panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  $('weeklyValRunStreaksBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyValidation');
+    $('streaksFrom').value = from;
+    $('streaksTo').value = to;
+    $('streaksSport').value = '';
+    runStreaks();
+  });
+
+  $('weeklyValRunLeaderboardBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyValidation');
+    $('analyticsFrom').value = from;
+    $('analyticsTo').value = to;
+    $('analyticsSport').value = '';
+    runAnalytics();
+  });
+
+  $('weeklyValRunConsensusBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyValidation');
+    $('consensusFrom').value = from;
+    $('consensusTo').value = to;
+    $('consensusSport').value = '';
+    runConsensus();
+  });
+
+  $('weeklyValRunAnalysisBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyValidation');
+    $('capperAnalysisCapper').value = '';
+    $('capperAnalysisFrom').value = from;
+    $('capperAnalysisTo').value = to;
+    $('capperAnalysisSport').value = '';
+    runCapperAnalysis();
+  });
+
+  $('weeklyAnRunTopBottomBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyAnalysis');
+    $('topBottomFrom').value = from;
+    $('topBottomTo').value = to;
+    $('topBottomSport').value = '';
+    runTopBottom();
+  });
+
+  $('weeklyAnRunTierPerfBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyAnalysis');
+    $('potdCapper').value = '';
+    $('potdFrom').value = from;
+    $('potdTo').value = to;
+    $('potdSport').value = '';
+    runPotdPerf();
+  });
+
+  $('weeklyAnRunBetTypeBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyAnalysis');
+    $('btbFrom').value = from;
+    $('btbTo').value = to;
+    $('btbSport').value = '';
+    $('btbPickType').value = '';
+    runBetTypeBreakdown();
+  });
+
+  $('weeklyAnRunAnalysisBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyAnalysis');
+    $('capperAnalysisCapper').value = '';
+    $('capperAnalysisFrom').value = from;
+    $('capperAnalysisTo').value = to;
+    $('capperAnalysisSport').value = '';
+    runCapperAnalysis();
+  });
 
   function updateActiveCapperBanner() {
     const sel = $('pickCapper');
@@ -26683,7 +26876,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 522; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 523; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
