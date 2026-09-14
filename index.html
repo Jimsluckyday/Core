@@ -14859,7 +14859,15 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     }
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
     try {
-      const picks = await restAllPages(`picks?select=result,event_date,id&capper_id=eq.${capperId}&is_parlay_leg=eq.false&result=in.(win,loss,push)&order=event_date.asc,id.asc`);
+      // Redesigned 2026-09-13 to use fetchCapperDistinctPicks -- see its
+      // own comment (near runAnalytics) -- so this reconciles with Capper
+      // Streaks: a parlay leg is its own real pick, a parlay wrapper's own
+      // result is never counted, and a repeated call across multiple
+      // parlays/straight bets counts once. computeAllStreaks already keeps
+      // only win/loss internally, so pending/push distinct picks passed in
+      // here are harmless -- no need to pre-filter them out.
+      const byCapper = await fetchCapperDistinctPicks({ capperId });
+      const picks = (byCapper[capperId] || { distinctPicks: [] }).distinctPicks;
       const streaks = computeAllStreaks(picks);
       if (!streaks.length) {
         wrap.innerHTML = '<div class="empty-state">No graded picks yet for this capper.</div>';
@@ -14886,15 +14894,11 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const wrap = $('allTimeStreaksWrap');
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
     try {
-      const picks = await restAllPages(`picks?select=result,event_date,id,capper_id,cappers(name)&is_parlay_leg=eq.false&result=in.(win,loss,push)&order=capper_id.asc,event_date.asc,id.asc`);
-      const byCapper = new Map();
-      picks.forEach(p => {
-        if (!byCapper.has(p.capper_id)) byCapper.set(p.capper_id, { name: p.cappers ? p.cappers.name : '—', picks: [] });
-        byCapper.get(p.capper_id).picks.push(p);
-      });
+      // Redesigned 2026-09-13 -- see runStreakHistoryBtn's comment just above.
+      const byCapper = await fetchCapperDistinctPicks({});
       const allStreaks = [];
-      byCapper.forEach(({ name, picks: capperPicks }) => {
-        computeAllStreaks(capperPicks).forEach(s => allStreaks.push({ ...s, capperName: name }));
+      Object.values(byCapper).forEach(b => {
+        computeAllStreaks(b.distinctPicks).forEach(s => allStreaks.push({ ...s, capperName: b.capper_name }));
       });
       const topWins = allStreaks.filter(s => s.type === 'win').sort((a, b) => b.length - a.length).slice(0, 10);
       const topLosses = allStreaks.filter(s => s.type === 'loss').sort((a, b) => b.length - a.length).slice(0, 10);
@@ -15571,39 +15575,41 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const filterSummary = summaryParts.join(' · ');
 
     try {
-      const parlayBetType = findByNameCI(betTypes, 'Parlay');
-      const parlayBetTypeId = parlayBetType ? String(parlayBetType.id) : null;
-
-      let query = 'picks?select=capper_id,bet_type_id,result,event_date,cappers(name),bet_types(name)&is_parlay_leg=eq.false';
-      if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
-      if (from) query += `&event_date=gte.${from}`;
-      if (to) query += `&event_date=lte.${to}`;
-      if (pickType === 'parlay' && parlayBetTypeId) query += `&bet_type_id=eq.${parlayBetTypeId}`;
-      else if (pickType === 'straight' && parlayBetTypeId) query += `&bet_type_id=neq.${parlayBetTypeId}`;
-      query += '&order=id.asc';
-
-      const picks = await restAllPages(query);
+      // Redesigned 2026-09-13 to use fetchCapperDistinctPicks -- see its
+      // own comment (near runAnalytics). A parlay leg now groups under its
+      // OWN real bet type (Moneyline/Spread/whatever it actually is), not
+      // invisible the way it used to be, since the old query excluded
+      // every leg outright. "Parlays only" now means "distinct calls that
+      // came from a parlay" (matching every other redesigned report), not
+      // the old meaning of "rows whose own bet_type_id is literally
+      // Parlay" -- that used to put every parlay into one meaningless
+      // bucket instead of its real bet type.
+      const byCapper = await fetchCapperDistinctPicks({ sportFilter, from, to });
       const byGroup = {};
-      for (const p of picks) {
-        // group by capper + bet type together, so the same capper can show
-        // up once per bet type with an independent win/loss record
-        const key = `${p.capper_id}::${p.bet_type_id}`;
-        if (!byGroup[key]) {
-          byGroup[key] = {
-            capper_id: p.capper_id,
-            capper_name: p.cappers ? p.cappers.name : '—',
-            bet_type_id: p.bet_type_id,
-            bet_type_name: p.bet_types ? p.bet_types.name : '—',
-            total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0
-          };
-        }
-        const b = byGroup[key];
-        b.total_picks++;
-        if (p.result === 'win') b.wins++;
-        else if (p.result === 'loss') b.losses++;
-        else if (p.result === 'push') b.pushes++;
-        else b.pending++;
-      }
+      Object.values(byCapper).forEach(b => {
+        b.distinctPicks.forEach(p => {
+          if (pickType === 'straight' && p.source !== 'straight') return;
+          if (pickType === 'parlay' && p.source !== 'parlay') return;
+          // group by capper + bet type together, so the same capper can show
+          // up once per bet type with an independent win/loss record
+          const key = `${b.capper_id}::${p.bet_type_id}`;
+          if (!byGroup[key]) {
+            byGroup[key] = {
+              capper_id: b.capper_id,
+              capper_name: b.capper_name,
+              bet_type_id: p.bet_type_id,
+              bet_type_name: p.bet_types ? p.bet_types.name : '—',
+              total_picks: 0, wins: 0, losses: 0, pushes: 0, pending: 0
+            };
+          }
+          const g = byGroup[key];
+          g.total_picks++;
+          if (p.result === 'win') g.wins++;
+          else if (p.result === 'loss') g.losses++;
+          else if (p.result === 'push') g.pushes++;
+          else g.pending++;
+        });
+      });
       const rows = Object.values(byGroup).map(b => ({
         ...b,
         win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null
@@ -15986,29 +15992,32 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const from = $('potdFrom').value;
     const to = $('potdTo').value;
 
-    let baseQuery = 'picks?select=capper_id,pick_tier,raw_unit_size,result,cappers(name),bet_types(name)&result=in.(win,loss,push)';
-    if (capperFilter) baseQuery += `&capper_id=eq.${capperFilter}`;
-    if (sportFilter) baseQuery += `&sport_id=eq.${sportFilter}`;
-    if (from) baseQuery += `&event_date=gte.${from}`;
-    if (to) baseQuery += `&event_date=lte.${to}`;
-    const picks = await restAllPages(baseQuery + '&is_parlay_leg=eq.false');
-    // Legs never show up mixed into the standalone/parlay numbers above
-    // (that would double-count the same real game alongside its own
-    // parlay), but they're fetched separately so a capper's tier tags on
-    // his parlay legs are still visible somewhere -- otherwise a capper
-    // who tags a parlay Tier 3 would look like he's never called a Tier 3
-    // pick at all, even though the tier data genuinely exists and already
-    // feeds Publish Ranking's scoring.
-    const legPicks = await restAllPages(baseQuery + '&is_parlay_leg=eq.true');
-    return { picks, legPicks, capperFilter, sportFilter, from, to };
+    // Redesigned 2026-09-13 to use fetchCapperDistinctPicks -- see its own
+    // comment (near runAnalytics). Direct request: "if a capper picks a
+    // negative tier but goes 5/6 on Parlay picks within a single wrapper
+    // we need to know how he does overall and just counting he was wrong
+    // on a parlay is not correct." The old design fed the main Parlay row
+    // the WRAPPER's own single win/loss (misleading -- it doesn't reflect
+    // how the real legs performed) and fetched legs separately into a
+    // second "volume only" table that never fed the actual win% picture.
+    // Now there's one list of distinct picks (deduped, each tagged
+    // straight/parlay, each carrying its own real result and its own real
+    // pick_tier), and the Parlay row uses that directly -- no separate
+    // legs-volume table needed anymore, since its data now lives correctly
+    // in the real Parlay row itself.
+    const byCapper = await fetchCapperDistinctPicks({ capperId: capperFilter || undefined, sportFilter, from, to });
+    let picks = [];
+    Object.values(byCapper).forEach(b => picks.push(...b.distinctPicks));
+    picks = picks.filter(p => p.result === 'win' || p.result === 'loss' || p.result === 'push');
+    return { picks, capperFilter, sportFilter, from, to };
   }
 
   async function runPotdPerf() {
     const wrap = $('potdPerfWrap');
     wrap.innerHTML = '<div class="empty-state">Loading...</div>';
     try {
-      const { picks, legPicks, capperFilter } = await fetchPotdPerfPicks();
-      renderPotdPerf(picks, legPicks, !capperFilter);
+      const { picks, capperFilter } = await fetchPotdPerfPicks();
+      renderPotdPerf(picks, !capperFilter);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
     }
@@ -16042,7 +16051,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const straight = [];
     const parlay = [];
     picks.forEach(p => {
-      if (p.bet_types && p.bet_types.name === 'Parlay') parlay.push(p);
+      if (p.source === 'parlay') parlay.push(p);
       else straight.push(p);
     });
     return { straight, parlay };
@@ -16180,64 +16189,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:20px;">${filterNote}</div>`;
   }
 
-  // Parlay LEGS volume table -- every entry here is, by definition,
-  // already part of a parlay (there's no "straight" version of a leg),
-  // so this keeps the original single-row-per-capper+tier shape with no
-  // Straight/Parlay split at all.
-  function potdPerfLegRows(picks) {
-    const byKey = new Map();
-    picks.forEach(p => {
-      const tier = Number(p.pick_tier) || 0;
-      const capperName = p.cappers ? p.cappers.name : '—';
-      const key = capperName + ' ' + tier;
-      if (!byKey.has(key)) byKey.set(key, { capper_name: capperName, tier, picks: [] });
-      byKey.get(key).picks.push(p);
-    });
-    const rows = [];
-    byKey.forEach(bucket => rows.push({ capper_name: bucket.capper_name, tier: bucket.tier, ...potdPerfComputeRecord(bucket.picks) }));
-    return rows;
-  }
-
-  function potdPerfLegsTableHtml(rows, title, tierLabel, filterNote, tableId) {
-    if (!rows.length) {
-      return `<p class="stub-title" style="margin-bottom:8px;">${title}</p><div class="empty-state" style="margin-bottom:20px;">No picks match these filters.</div>`;
-    }
-    const sorted = [...rows].sort((a, b) => a.capper_name.localeCompare(b.capper_name) || a.tier - b.tier);
-
-    function row(r) {
-      const winPctVal = (r.win_pct !== null && r.win_pct !== undefined) ? r.win_pct : -1;
-      return `<tr>
-        <td data-value="${escapeHtml(r.capper_name).toLowerCase()}">${escapeHtml(r.capper_name)}</td>
-        <td data-value="${r.tier}">${escapeHtml(tierLabel(r.tier))}</td>
-        <td data-value="${r.total_picks}">${r.total_picks}</td>
-        <td data-value="${r.wins}">${r.wins}</td>
-        <td data-value="${r.losses}">${r.losses}</td>
-        <td data-value="${r.pushes}">${r.pushes}</td>
-        <td data-value="${winPctVal}">${r.win_pct !== null && r.win_pct !== undefined ? r.win_pct + '%' : '—'}</td>
-      </tr>`;
-    }
-
-    const cols = [{ label: 'Capper', type: 'str' }, { label: 'Tier', type: 'num' }, { label: 'Total picks', type: 'num' },
-      { label: 'Wins', type: 'num' }, { label: 'Losses', type: 'num' }, { label: 'Pushes', type: 'num' }, { label: 'Win %', type: 'num' }];
-
-    const body = sorted.map(row).join('');
-    return `
-      <p class="stub-title" style="margin-bottom:8px;">${title}</p>
-      <table class="picks-table sortable-table" id="${tableId}">
-        <thead>
-          <tr class="header-row">
-            ${cols.map((c, i) => `<th data-col="${i}" data-type="${c.type}">
-              <span class="th-label">${c.label}</span>
-              <button type="button" class="filter-btn" data-col="${i}">&#9662;</button>
-            </th>`).join('')}
-          </tr>
-        </thead>
-        <tbody>${body}</tbody>
-      </table>
-      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:20px;">${filterNote}</div>`;
-  }
-
-  function openPotdPerfTab(picks, legPicks, filterSummary) {
+  function openPotdPerfTab(picks, filterSummary) {
     const win = window.open('', '_blank');
     if (!win) {
       alert('Your browser blocked the new tab. Allow pop-ups for this page and try again.');
@@ -16246,18 +16198,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const tierLabel = t => t === 0 ? 'Tier 0 (base picks)' : (t < 0 ? `Tier ${t} (below base)` : `Tier ${t}`);
     const totalRows = potdPerfRowsTotalByTier(picks);
     const totalHtml = potdPerfTotalTableHtml(totalRows, 'Totals — every capper combined', tierLabel,
-      'Every capper combined into one row per tier, split into Straight and Parlay -- a parlay\'s win/loss behaves very differently from a straight bet\'s, so this keeps the two from blending into one misleading combined win%.',
+      'Every capper combined into one row per tier, split into Straight and Parlay -- a parlay\'s Parlay row is now that tier\'s real, deduped LEG record (each leg graded by its own result, a repeated leg across multiple parlays counted once), not the whole parlay wrapper\'s single win/loss, so a capper going 5/6 on his legs at a tier shows as 5/6, not 0/1 because the combo itself lost.',
       'dataTableTotal');
     const mainRows = potdPerfRowsByCapper(picks);
-    const legRows = potdPerfLegRows(legPicks);
     const mainHtml = potdPerfByCapperTableHtml(mainRows, 'By capper', tierLabel,
-      'Same Straight/Parlay split as the totals table above, per capper and tier. A parlay\'s own tier comes from what the capper called the whole combo, not guessed from its legs. Click the arrow on any column to sort or filter — e.g. check one tier to compare every capper at that confidence level side by side.',
+      'Same Straight/Parlay split as the totals table above, per capper and tier. A parlay\'s own tier comes from what the capper called the whole combo, not guessed from its legs -- but each Parlay row\'s win/loss is the real, deduped leg record, not the wrapper\'s own result. Click the arrow on any column to sort or filter — e.g. check one tier to compare every capper at that confidence level side by side.',
       'dataTableMain');
-    const legHtml = legRows.length
-      ? potdPerfLegsTableHtml(legRows, 'By tier — parlay legs (individual games inside a parlay)', tierLabel,
-          'Every leg shares its parlay\'s own tier, so this isn\'t a separate confidence signal from the tables above — it\'s about volume: how many games a capper is packaging at each level.',
-          'dataTableLegs')
-      : '';
 
     win.document.open();
     win.document.write(`<!DOCTYPE html>
@@ -16296,7 +16242,6 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">${escapeHtml(filterSummary)}</div>
   ${totalHtml}
   ${mainHtml}
-  ${legHtml}
   ${csvExportPopoutScript('pick-tier-performance', true)}
 <script>
 (function() {
@@ -16488,12 +16433,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     btn.disabled = true;
     btn.textContent = 'Loading...';
     try {
-      const { picks, legPicks, capperFilter, sportFilter, from, to } = await fetchPotdPerfPicks();
+      const { picks, capperFilter, sportFilter, from, to } = await fetchPotdPerfPicks();
       const capperName = capperFilter ? ($('potdCapper').selectedOptions[0]?.textContent || '') : 'All cappers';
       const sportName = sportFilter ? ($('potdSport').selectedOptions[0]?.textContent || '') : 'All sports';
       const summaryParts = [capperName, sportName];
       summaryParts.push(from || to ? `${from || 'earliest'} → ${to || 'latest'}` : 'All time');
-      openPotdPerfTab(picks, legPicks, summaryParts.join(' · '));
+      openPotdPerfTab(picks, summaryParts.join(' · '));
     } catch (e) {
       alert('Could not open pop-out: ' + e.message);
     } finally {
@@ -16519,7 +16464,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         const s = potdStats(arr);
         let spText;
         if (showStraightParlay) {
-          const straightCount = arr.filter(p => !(p.bet_types && p.bet_types.name === 'Parlay')).length;
+          const straightCount = arr.filter(p => p.source !== 'parlay').length;
           spText = `${straightCount}/${arr.length - straightCount}`;
         }
         return potdTierRow(prefix ? `${escapeHtml(prefix)} — ${tierLabel(t)}` : tierLabel(t), s.wins, s.losses, s.pushes, spText);
@@ -16550,9 +16495,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:20px;">${filterNote}</div>`;
   }
 
-  function renderPotdPerf(picks, legPicks, groupByCapper) {
+  function renderPotdPerf(picks, groupByCapper) {
     const wrap = $('potdPerfWrap');
-    if (!picks.length && !legPicks.length) {
+    if (!picks.length) {
       wrap.innerHTML = '<div class="empty-state">No graded picks match these filters.</div>';
       return;
     }
@@ -16573,16 +16518,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       : '';
 
     const mainSection = potdTierTableHtml(picks, tiers, tierLabel, groupByCapper ? 'By tier — by capper' : 'By tier',
-      'Straight bets and parlays (counted as one unit each) together -- the Straight/Parlay column shows how many of that tier\'s picks were which. A parlay\'s own tier comes from what the capper called the WHOLE combo, not guessed from its legs -- every leg in a parlay shares that same tier by default. See the table below for how the individual legs did.',
+      'Straight bets and parlay legs, each counted as its own distinct pick (deduped -- a leg repeated across multiple parlays counts once) -- the Straight/Parlay column shows how many of that tier\'s picks were which. A parlay\'s own tier comes from what the capper called the WHOLE combo, not guessed from its legs -- every leg in a parlay shares that same tier by default -- but the Parlay row\'s wins/losses/pushes are the real leg-by-leg results, not the wrapper\'s own single win/loss.',
       { groupByCapper, showStraightParlay: true });
 
-    const legSection = legPicks.length
-      ? potdTierTableHtml(legPicks, tiers, tierLabel, 'By tier — parlay legs (individual games inside a parlay)',
-          'Every leg shares its parlay\'s own tier, so this isn\'t a separate confidence signal from the table above -- it\'s about volume: how many games he\'s packaging at each level. Useful for noticing when something\'s unusual for him, like a much bigger parlay than normal at his top tier.',
-          { groupByCapper, showStraightParlay: false })
-      : '';
-
-    wrap.innerHTML = combinedSection + mainSection + legSection;
+    wrap.innerHTML = combinedSection + mainSection;
   }
 
   $('runPotdPerfBtn').addEventListener('click', runPotdPerf);
@@ -16754,7 +16693,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // never the wrapper's, so every occurrence of a truly identical call
   // should already agree once graded.
   async function fetchCapperDistinctPicks({ capperId, capperIds, sportFilter, from, to } = {}) {
-    let query = 'picks?select=id,capper_id,event_date,created_at,sport_id,bet_type_id,selection,line,prop_player,prop_stat,doubleheader_game,result,is_parlay_leg,cappers(name),bet_types(name)';
+    let query = 'picks?select=id,capper_id,event_date,created_at,sport_id,bet_type_id,selection,line,prop_player,prop_stat,doubleheader_game,result,pick_tier,raw_unit_size,is_parlay_leg,cappers(name),bet_types(name)';
     if (capperId) query += `&capper_id=eq.${capperId}`;
     else if (capperIds && capperIds.length) query += `&capper_id=in.(${capperIds.join(',')})`;
     if (sportFilter) query += `&sport_id=eq.${sportFilter}`;
@@ -17131,7 +17070,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       return `<tr>
       <td>${i + 1}</td>
       <td>${escapeHtml(r.capper_name)}</td>
-      <td>${r.total_picks}</td>
+      <td>${r.distinct_total_picks}</td>
       <td>${r.wins}</td>
       <td>${r.losses}</td>
       <td>${r.pushes}</td>
@@ -17180,7 +17119,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   ${topBottomTableHtml('Bottom 5', bottomRows)}
   ${csvExportPopoutScript('top-bottom-cappers')}
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
-    Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show. "Value @ $100" treats every pick as the same size; "Unit-Adjusted Value" weights each pick's profit by that pick's own recorded unit size, so a capper who correctly saves bigger sizing for their best picks shows it here even when their flat win rate doesn't — a capper with no numeric unit size recorded defaults to 1 for that pick (shown in the "X/Y sized" count), never guessed at a specific weight. Both value columns cap any single Parlay win's counted payout at +1000 odds — a real hit still counts as a full, large win, it just can't single-handedly make a lottery-ticket-parlay capper look historically great off one outcome ("X parlays capped" shows how often that actually applied).
+    Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show. REDESIGNED 2026-09-13: "Total picks" now counts distinct calls (a parlay leg is its own pick, a repeated call across multiple parlays/straight bets counts once), matching Capper Streaks/Scorecard Summary/Leaderboard — so a capper spamming dozens of duplicated parlays a night doesn't look like he's hit a real validation sample when he's really made far fewer distinct calls. "Value @ $100" and "Unit-Adjusted Value" stay based on real wagers (each actual stake keeps its own real payout, deliberately not deduped — the money was really on the table each time), so their own "X/Y have odds"/"X/Y sized" coverage ratios are still out of the real wager count, not the distinct-pick count above. "Value @ $100" treats every pick as the same size; "Unit-Adjusted Value" weights each pick's profit by that pick's own recorded unit size, so a capper who correctly saves bigger sizing for their best picks shows it here even when their flat win rate doesn't — a capper with no numeric unit size recorded defaults to 1 for that pick (shown in the "X/Y sized" count), never guessed at a specific weight. Both value columns cap any single Parlay win's counted payout at +1000 odds — a real hit still counts as a full, large win, it just can't single-handedly make a lottery-ticket-parlay capper look historically great off one outcome ("X parlays capped" shows how often that actually applied).
   </div>
 <script>
 (function() {
@@ -17370,7 +17309,28 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const unitVal = val !== null ? val * unitMultiplier : null;
       if (unitVal !== null) { b.unitValueSum += unitVal; b.unitValuedCount++; }
     }
+
+    // Added 2026-09-13, direct request: "the math for this shows total
+    // picks including distinct picks from legs we should look at it and
+    // change it as that is a big flag that if someone has a high total #
+    // of picks and is at the top or the bottom... they will be the first
+    // to hit the 100 pick threshold." Deliberately scoped to ONLY the
+    // displayed pick count -- confirmed separately to keep every dollar/
+    // ROI number here wager-based (each real stake keeps its own real
+    // payout, unchanged), so wins/losses/win_pct/value/unit_value/
+    // reuseFactor and the existing parlayUniqueLegs reuse-discount system
+    // above are all untouched. distinct_total_picks uses the same shared
+    // fetchCapperDistinctPicks/dupKey as every other redesigned report, so
+    // it reconciles with Capper Streaks/Scorecard Summary/Leaderboard,
+    // while b.total_picks (the real wager count) keeps its original job as
+    // the denominator for the "odds coverage"/"unit-sized" ratios below --
+    // those are genuinely about wager-level data completeness, not
+    // distinct-call counting, so they must stay wager-based.
+    const distinctByCapperTopBottom = await fetchCapperDistinctPicks({ sportFilter, from, to });
+
     const rows = Object.values(byCapper).map(b => {
+      const distinctEntry = distinctByCapperTopBottom[b.capper_id];
+      const distinct_total_picks = distinctEntry ? distinctEntry.distinctPicks.length : 0;
       // CONFIRMED REQUEST 2026-09-06 (see the parlay_legs fetch above for
       // the full reasoning): reuseFactor is "on average, how many different
       // parlays did each of this capper's real underlying leg picks end up
@@ -17398,6 +17358,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const weightedDecided = straightWins + straightLosses + weightedParlayWins + weightedParlayLosses;
       return {
         ...b,
+        distinct_total_picks,
         win_pct: weightedDecided > 0 ? Math.round((1000 * (straightWins + weightedParlayWins)) / weightedDecided) / 10 : null,
         heavyParlayReuse,
         reuseFactor,
@@ -18135,8 +18096,21 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       </table>`;
   }
 
-  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper, legRows, legLinks, capperId, sportFilter, from, to) {
+  function openCapperAnalysisTab(picks, filterSummary, isSingleCapper, legRows, legLinks, capperId, sportFilter, from, to, distinctPicks) {
     const overall = totalAndUnique(picks);
+    // Added 2026-09-13, direct request: "we need to analyze this but both
+    // total parlays and distinct parlay legs are super important here to
+    // know how a capper does with parlays overall their percentage." The
+    // straight/parlay-bet/parlay-games breakdown below already answers
+    // that in detail and is untouched -- this adds ONE reconciling
+    // headline number on top, via the same fetchCapperDistinctPicks/
+    // dupKey every other redesigned report uses, so it matches Capper
+    // Streaks/Capper Scorecard Summary/Capper Leaderboard for the same
+    // capper and date range.
+    distinctPicks = distinctPicks || [];
+    const distinctTally = tallyRows(distinctPicks);
+    const distinctStraightCount = distinctPicks.filter(p => p.source !== 'parlay').length;
+    const distinctParlayCount = distinctPicks.filter(p => p.source === 'parlay').length;
 
     // A capper who calls one straight bet and one 10-leg parlay has made two
     // BETS, not eleven picks -- but grading him 1-1 on that hides that the
@@ -18276,6 +18250,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
          <table class="picks-table" style="margin-bottom:20px;">
            <thead><tr><th></th><th>Picks / Bets</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
            <tbody>
+             ${statsRowHtml('Total distinct picks (straight + parlay legs, deduped)', distinctTally)}
              ${statsRowHtml('Total bets (straight + parlay)', totalBetsStats)}
              ${statsRowHtml('Straight bets', straightStats)}
              ${statsRowHtml('Parlay bets (whole combo)', parlayStats)}
@@ -18283,18 +18258,19 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
            </tbody>
          </table>
          <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
-           "Total bets" is straight bets plus parlays counted as one bet each (matches the Leaderboard's Straight/Parlay split), so it grows with volume without needing to be added up by hand. "Parlay bets" grades the whole combo as one bet (all-or-nothing). "Parlay games" is a separate lens: every individual game inside every parlay, graded on its own -- a shared game used in more than one parlay that day is still counted once, not once per parlay. A capper who goes 9-for-10 on a losing parlay shows 1 parlay loss AND 9 parlay-game wins, so heavy parlay volume with a weak parlay-bet record but a strong parlay-game record means the underlying picks are sound even though the combo rarely cashes.
+           REDESIGNED 2026-09-13: "Total distinct picks" is the new reconciling headline number -- straight bets plus every real parlay leg, each counted once even if the same call repeats across multiple parlays or between a straight bet and a parlay (Straight ${distinctStraightCount} / Parlay ${distinctParlayCount}) -- this should match Capper Streaks/Capper Scorecard Summary/Capper Leaderboard for the same capper and date range. Everything below it is the original breakdown, unchanged: "Total bets" is straight bets plus parlays counted as one bet each. "Parlay bets" grades the whole combo as one bet (all-or-nothing). "Parlay games" is every individual game inside every parlay, graded on its own -- a shared game used in more than one parlay that day is still counted once, not once per parlay. A capper who goes 9-for-10 on a losing parlay shows 1 parlay loss AND 9 parlay-game wins, so heavy parlay volume with a weak parlay-bet record but a strong parlay-game record means the underlying picks are sound even though the combo rarely cashes.
          </div>`
       : `<p class="stub-title" style="margin-bottom:8px;">Overall: total vs. unique</p>
          <table class="picks-table" style="margin-bottom:20px;">
            <thead><tr><th></th><th>Picks / Bets</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Pending</th><th>Win %</th></tr></thead>
            <tbody>
-             ${statsRowHtml('Total (every pick)', overall.total)}
-             ${statsRowHtml('Unique (same bet counted once)', overall.unique)}
+             ${statsRowHtml('Total distinct picks (straight + parlay legs, deduped)', distinctTally)}
+             ${statsRowHtml('Total (straight bets + parlay wrappers only)', overall.total)}
+             ${statsRowHtml('Unique (same straight bet counted once)', overall.unique)}
            </tbody>
          </table>
          <div style="font-size:10px;color:#55584d;margin-bottom:20px;">
-           Unique collapses picks that match exactly on date, sport, bet type, selection, and line — so five cappers agreeing on the same spread counts as 1 unique bet, not 5.
+           REDESIGNED 2026-09-13: "Total distinct picks" (Straight ${distinctStraightCount} / Parlay ${distinctParlayCount}) is the new reconciling headline number -- every straight bet plus every real parlay leg across every matching capper, each counted once even if repeated across multiple parlays or between a straight bet and a parlay. The two rows below are the original, narrower comparison: "Total"/"Unique" only ever look at straight bets and whole parlay wrappers, never individual legs -- Unique collapses picks that match exactly on date, sport, bet type, selection, and line, so five cappers agreeing on the same spread counts as 1 unique bet, not 5.
          </div>`;
     win.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Capper Analysis</title>
@@ -18384,7 +18360,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           legLinks = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&leg_pick_id=in.(${legRows.map(l => l.id).join(',')})`);
         }
       }
-      openCapperAnalysisTab(picks, filterSummary, !!capperFilter, legRows, legLinks, capperFilter, sportFilter, from, to);
+      // Added 2026-09-13 -- see openCapperAnalysisTab's own comment. Reuses
+      // the same shared distinct-pick function every other redesigned
+      // report calls, so the new headline number reconciles across all of
+      // them for the same capper/date range.
+      const distinctByCapper = await fetchCapperDistinctPicks({ capperId: capperFilter || undefined, sportFilter, from, to });
+      const distinctPicks = [];
+      Object.values(distinctByCapper).forEach(b => distinctPicks.push(...b.distinctPicks));
+      openCapperAnalysisTab(picks, filterSummary, !!capperFilter, legRows, legLinks, capperFilter, sportFilter, from, to, distinctPicks);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -18837,7 +18820,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       if (legRows.length) {
         legLinks = await restAllPages(`parlay_legs?select=parlay_pick_id,leg_pick_id&leg_pick_id=in.(${legRows.map(l => l.id).join(',')})`);
       }
-      openCapperAnalysisTab(picks, filterSummary, true, legRows, legLinks, capperId, sportFilter, from, to);
+      const distinctByCapper = await fetchCapperDistinctPicks({ capperId, sportFilter, from, to });
+      const distinctPicks = (distinctByCapper[capperId] || { distinctPicks: [] }).distinctPicks;
+      openCapperAnalysisTab(picks, filterSummary, true, legRows, legLinks, capperId, sportFilter, from, to, distinctPicks);
     } catch (e) {
       alert('Could not calculate analysis: ' + e.message);
     }
@@ -19068,6 +19053,35 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         });
       }
 
+      // NEW CHECK, 2026-09-13, direct request after the parlay-leg
+      // counting redesign: "it's the dangerous one for me in that it's
+      // scanning for duplicates already but we need to make sure it stays
+      // away from flagging them on parlays as this is where we are ok with
+      // duplication. The only duplication error could be mislabeling a
+      // parlay so the same pick ends up multiple times on the same parlay
+      // wrapper." The dupGroups scan below is completely untouched -- it
+      // still never looks inside a parlay's own legs at all, so ordinary,
+      // expected duplication (the same call reused across separate
+      // parlays, or between a straight bet and a parlay) is never flagged
+      // here, exactly as before. This is a SEPARATE, narrower check: within
+      // ONE parlay's own linked legs only, does the same leg signature
+      // (sport/bet type/selection/line/prop) appear more than once? That's
+      // never legitimate -- it means the same pick was mistakenly entered
+      // twice on one slip, not that two different slips happen to agree.
+      const withinParlayDupes = [];
+      parlayRows.forEach(p => {
+        const legs = legsByParlayId[p.id];
+        if (!legs || legs.length < 2) return;
+        const bySig = {};
+        legs.forEach(l => {
+          const sig = [l.sport_id, l.bet_type_id, l.selection, l.line, l.prop_player, l.prop_stat].join('~');
+          (bySig[sig] = bySig[sig] || []).push(l);
+        });
+        Object.values(bySig).forEach(sigLegs => {
+          if (sigLegs.length > 1) withinParlayDupes.push({ parlay: p, legs: sigLegs });
+        });
+      });
+
       const groups = {};
       picks.forEach(p => {
         const key = dupKey(p, legSigByParlayId[p.id]);
@@ -19075,16 +19089,52 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         groups[key].push(p);
       });
       const dupGroups = Object.values(groups).filter(g => g.length > 1);
-      renderDupGroups(dupGroups, legsByParlayId);
+      renderDupGroups(dupGroups, legsByParlayId, withinParlayDupes);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
     }
   }
 
-  function renderDupGroups(dupGroups, legsByParlayId) {
+  function renderDupGroups(dupGroups, legsByParlayId, withinParlayDupes) {
     const wrap = $('dupWrap');
+    withinParlayDupes = withinParlayDupes || [];
+    // Rendered first and separately, deliberately styled as a warning (not
+    // just another numbered group) -- see runDupScan's own comment. This
+    // is the ONLY category here that's ever a real mistake; every group
+    // below it is ordinary, expected duplication across separate parlays/
+    // straight bets, which is fine and untouched by this section.
+    const withinParlayHtml = withinParlayDupes.length
+      ? `<div style="margin-bottom:20px;border:1.5px solid #8a2f3a;border-radius:2px;padding:10px;background:rgba(138,47,58,0.06);">
+           <div style="font-size:11px;font-weight:bold;color:#8a2f3a;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">&#9888; ${withinParlayDupes.length} parlay${withinParlayDupes.length === 1 ? '' : 's'} with the same pick entered twice on one slip</div>
+           <div style="font-size:11px;color:var(--ink-soft);margin-bottom:8px;">A real mislabeling mistake, not ordinary parlay reuse (which is expected and never flagged) -- the exact same selection/bet type/line shows up more than once as a leg on the SAME parlay wrapper below.</div>
+           ${withinParlayDupes.map(d => {
+             const propBit = (d.legs[0].prop_player || d.legs[0].prop_stat) ? ` — ${escapeHtml(d.legs[0].prop_player || '')} ${escapeHtml(d.legs[0].prop_stat || '')}`.trim() : '';
+             return `<div style="font-size:12px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed #b9b09a;">
+               <strong>${escapeHtml(d.parlay.cappers ? d.parlay.cappers.name : '—')}</strong> — ${escapeHtml(d.parlay.event_date || '')} — "${escapeHtml(d.parlay.selection || 'Parlay')}" —
+               ${d.legs.length}&times; ${escapeHtml(d.legs[0].selection || '')}${d.legs[0].line !== null && d.legs[0].line !== undefined ? ` (${d.legs[0].line})` : ''}${propBit}
+               ${d.legs.map(l => `<button type="button" class="ghost small dup-leg-delete-btn" data-id="${l.id}" data-summary="${escapeHtml(d.parlay.cappers ? d.parlay.cappers.name : '—')} · ${escapeHtml(d.parlay.event_date || '')} · ${escapeHtml(l.selection || '')}" style="border-color:#8a2f3a;color:#8a2f3a;margin-left:6px;">Delete leg #${l.id}</button>`).join('')}
+             </div>`;
+           }).join('')}
+         </div>`
+      : '';
+    // .dup-leg-delete-btn (within-parlay duplicates above) is wired here,
+    // separately from .dup-delete-btn below -- these buttons sit inside a
+    // plain <div>, not a <tr>, so the row-based summary/removal logic
+    // further down doesn't apply to them.
+    function wireLegDeleteButtons() {
+      wrap.querySelectorAll('.dup-leg-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-id');
+          const summary = btn.getAttribute('data-summary') || `leg #${id}`;
+          deletePickWithConfirm(id, summary, btn, async () => {
+            btn.closest('div').remove();
+          });
+        });
+      });
+    }
     if (!dupGroups.length) {
-      wrap.innerHTML = '<div class="empty-state">No exact duplicates found for these filters.</div>';
+      wrap.innerHTML = withinParlayHtml || '<div class="empty-state">No exact duplicates found for these filters.</div>';
+      wireLegDeleteButtons();
       return;
     }
     legsByParlayId = legsByParlayId || {};
@@ -19119,10 +19169,11 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           </table>
         </div>`;
     }).join('');
-    wrap.innerHTML = `
+    wrap.innerHTML = withinParlayHtml + `
       <div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">
         ${dupGroups.length} duplicate group${dupGroups.length === 1 ? '' : 's'} found, ${totalRows} rows involved. Nothing has been deleted — review each group and remove the extra copy yourself.
       </div>${groupsHtml}`;
+    wireLegDeleteButtons();
     wrap.querySelectorAll('.dup-delete-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-id');
@@ -26332,7 +26383,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 519; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 520; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
