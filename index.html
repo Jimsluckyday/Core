@@ -1846,9 +1846,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
                       <label>To date</label>
                       <input id="resultsAuditTo" type="date" />
                     </div>
+                    <div class="field" style="flex:0 0 auto;max-width:140px;">
+                      <label title="Grading here is 100% automated, never manual -- a real grading bug hits a whole CATEGORY of picks the same way every time, so a random sample catches it just as reliably as checking every single one, for a fraction of the research time.">Sample size</label>
+                      <input id="resultsAuditSampleSize" type="number" min="1" value="25" />
+                    </div>
                     <div style="align-self:flex-end;">
                       <button id="exportResultsAuditRequestBtn">&#8681; Export audit request</button>
                     </div>
+                  </div>
+                  <div style="font-size:10px;color:var(--ink-soft);margin-top:6px;">
+                    <!-- ADDED 2026-09-15, direct request: "random samples are
+                         better as I do not grade anything manually so if
+                         multiple are wrong they are all wrong so a random
+                         sample would work best." Since grading is never
+                         manual, an error is a code bug, not a one-off human
+                         mistake -- it hits every pick in that category
+                         identically, so a random sample of the eligible
+                         picks finds it exactly as reliably as auditing all
+                         of them, without the export ballooning to 100+ rows
+                         on a busy week. -->
+                    Randomly samples this many distinct player/stat lookups when more are eligible -- since grading is never manual, a real bug hits a whole category of picks the same way every time, so a sample catches it just as reliably as checking every single one.
                   </div>
                   <div id="resultsAuditExportWrap" style="margin-top:10px;"></div>
                   <div style="font-size:11px;font-weight:bold;color:var(--ink);margin-top:16px;margin-bottom:4px;">Step 2 — take the downloaded file to any chatbot:</div>
@@ -7598,10 +7615,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
     return [eventDate, normalizeForMatch(player || ''), normalizeForMatch(stat || '')].join('|');
   }
 
+  // Plain Fisher-Yates shuffle -- used to pick a random sample below.
+  // Shuffles a COPY, never the array passed in.
+  function shuffledCopy(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
   $('exportResultsAuditRequestBtn').addEventListener('click', async () => {
     const from = $('resultsAuditFrom').value;
     const to = $('resultsAuditTo').value;
     if (!from || !to) { alert('Pick both a From and To date first.'); return; }
+    const sampleSize = Math.max(1, Number($('resultsAuditSampleSize').value) || 25);
     const wrap = $('resultsAuditExportWrap');
     wrap.innerHTML = '';
     const btn = $('exportResultsAuditRequestBtn');
@@ -7613,13 +7642,23 @@ These are almost always the same day, so "Date entered" only fills in a starting
         return;
       }
       const seen = new Set();
-      const groups = [];
+      const allGroups = [];
       picks.forEach(p => {
         const key = resultsAuditGroupKey(p.event_date, p.prop_player, p.prop_stat);
         if (seen.has(key)) return;
         seen.add(key);
-        groups.push({ event_date: p.event_date, sport: p.sports ? p.sports.name : 'Unknown', player: p.prop_player, stat: p.prop_stat });
+        allGroups.push({ event_date: p.event_date, sport: p.sports ? p.sports.name : 'Unknown', player: p.prop_player, stat: p.prop_stat });
       });
+
+      // Direct request 2026-09-15: "random samples are better as I do not
+      // grade anything manually so if multiple are wrong they are all
+      // wrong so a random sample would work best." Grading here is never
+      // manual, so a real bug hits a whole category of picks identically
+      // -- a random sample finds it exactly as reliably as auditing every
+      // eligible pick, without the export ballooning to 100+ rows on a
+      // busy week. Only samples DOWN -- never pads a small week up.
+      const wasSampled = allGroups.length > sampleSize;
+      const groups = wasSampled ? shuffledCopy(allGroups).slice(0, sampleSize) : allGroups;
 
       const instructions = [
         '=== INSTRUCTIONS FOR AN INDEPENDENT RESULTS AUDIT ===',
@@ -7631,7 +7670,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
         '',
         'If you cannot find a real, confident answer for a row, leave actual_value blank rather than guessing.',
         '',
-        'Rows to research:',
+        wasSampled
+          ? `Rows to research (a random sample of ${groups.length}, out of ${allGroups.length} eligible this range):`
+          : 'Rows to research:',
         ...groups.map(g => `  - ${g.event_date} | ${g.sport} | ${g.player} | ${g.stat}`),
         '',
         'OUTPUT FORMAT -- please return a CSV with exactly these columns: event_date,player,stat,actual_value',
@@ -7640,7 +7681,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       ].join('\r\n');
 
       downloadCsv(`results-audit-request-${from}-to-${to}.csv`, ['event_date', 'player', 'stat', 'actual_value'], [], instructions);
-      wrap.innerHTML = `<div class="msg ok">Exported ${groups.length} distinct player/stat lookup(s) covering ${picks.length} graded pick(s). Paste the chatbot's response below once you have it.</div>`;
+      wrap.innerHTML = `<div class="msg ok">Exported a ${wasSampled ? `random sample of ${groups.length} (out of ${allGroups.length} eligible)` : `${groups.length}`} distinct player/stat lookup(s) covering ${picks.length} graded pick(s). Paste the chatbot's response below once you have it.</div>`;
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">${e.message}</div>`;
     } finally {
@@ -26906,7 +26947,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 526; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 527; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
