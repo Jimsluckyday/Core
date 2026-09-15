@@ -7822,6 +7822,12 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>`;
     $('resultsAuditBannerGoBtn').addEventListener('click', () => {
       switchTab('pending');
+      // FIXED 2026-09-15, same fix as weeklyValRunAuditBtn's own comment --
+      // resultsAuditPanel is nested inside the Grading section's shared
+      // gradingToolsPanel, which also has to be expanded or nothing here
+      // becomes visible.
+      const gradingPanel = $('gradingToolsPanel');
+      if (gradingPanel && gradingPanel.style.display === 'none') $('toggleGradingToolsBtn').click();
       const panel = $('resultsAuditPanel');
       if (panel && panel.style.display === 'none') $('toggleResultsAuditBtn').click();
       panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -7854,6 +7860,17 @@ These are almost always the same day, so "Date entered" only fills in a starting
   $('weeklyValRunAuditBtn').addEventListener('click', () => {
     const { from, to } = weeklyChecklistRange('weeklyValidation');
     switchTab('pending');
+    // FIXED 2026-09-15, direct report: "I am not seeing the export audit
+    // request button anywhere." Results Audit lives nested inside the
+    // Grading section's own shared "gradingToolsPanel" (Show tools/Hide
+    // tools) -- expanding resultsAuditPanel alone did nothing visible if
+    // that OUTER panel was still collapsed, since a hidden ancestor hides
+    // everything inside it regardless of its own children's display
+    // state. Duplicate Pick Checker/Capper Analysis/etc. don't have this
+    // problem -- they're each their own top-level stub with no such
+    // wrapper -- so this was specific to Results Audit's own placement.
+    const gradingPanel = $('gradingToolsPanel');
+    if (gradingPanel && gradingPanel.style.display === 'none') $('toggleGradingToolsBtn').click();
     $('resultsAuditFrom').value = from;
     $('resultsAuditTo').value = to;
     const panel = $('resultsAuditPanel');
@@ -26887,7 +26904,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 524; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 525; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
