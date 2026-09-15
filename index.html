@@ -1828,6 +1828,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
                   <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
                     Checks already-graded Player Prop picks against a fresh, independent source -- a chatbot researches ONLY the raw fact (the player's real stat number, or a plain yes/no), never our line or selection, so it can't just agree with what we already recorded. A separate comparison then recomputes the correct result from scratch and flags any pick where that disagrees with what's stored. Meant to run weekly (see the banner reminder above) -- one prompt covers the whole date range at once, not one pick at a time.
                   </div>
+                  <!-- ADDED 2026-09-15, direct report: clicking the Weekly
+                       Data Validation checklist's jump-in button landed
+                       here with dates pre-filled and nothing else visibly
+                       different, read as "did this do anything?" This tool
+                       is the one exception in that checklist that can't
+                       auto-run (needs a real chatbot round-trip), so it
+                       needed its own explicit numbered steps instead of
+                       relying on the surrounding prose to make that clear. -->
+                  <div style="font-size:11px;font-weight:bold;color:var(--ink);margin-bottom:8px;">Step 1 — export a request for this date range:</div>
                   <div class="row">
                     <div class="field" style="flex:0 0 auto;">
                       <label>From date</label>
@@ -1842,8 +1851,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
                     </div>
                   </div>
                   <div id="resultsAuditExportWrap" style="margin-top:10px;"></div>
-                  <div style="margin-top:14px;">
-                    <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to compare</label>
+                  <div style="font-size:11px;font-weight:bold;color:var(--ink);margin-top:16px;margin-bottom:4px;">Step 2 — take the downloaded file to any chatbot:</div>
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">Paste its contents (or upload the file) into ChatGPT, Gemini, Claude, or whichever you normally use, and send it as-is -- the instructions for what to research are already inside the file.</div>
+                  <div style="font-size:11px;font-weight:bold;color:var(--ink);margin-bottom:4px;">Step 3 — paste its CSV answer back here and compare:</div>
+                  <div>
                     <textarea id="resultsAuditImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="event_date,player,stat,actual_value&#10;2026-09-08,LeBron James,Points,31&#10;2026-09-08,Connor McDavid,Anytime Goal,No"></textarea>
                     <div style="margin-top:8px;">
                       <button id="compareResultsAuditBtn">Compare</button>
@@ -26876,7 +26887,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 523; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 524; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
