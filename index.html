@@ -19164,15 +19164,24 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // straight into Supabase (same login/RLS as everything else in this app)
   // instead of the earlier Claude-Artifact-DB flow, so ledger.html (a new,
   // separate hosted page, same repo/deploy as this file) can show it to
-  // anyone signed in here, live, with zero extra setup. on_conflict on
-  // week_start keeps this idempotent -- re-saving the same week overwrites
-  // rather than duplicating, same upsert pattern used everywhere else in
-  // this file (tennis_draw_cache, kbo_results_cache, tournaments, etc.).
+  // anyone signed in here, live, with zero extra setup.
+  //
+  // FIXED 2026-09-18: on_conflict was week_start ALONE, so saving a
+  // month-long period (e.g. Jun 1-30) that happens to START on the same
+  // day as an already-saved WEEK (Jun 1-7) silently overwrote that week's
+  // row instead of creating a second one -- real report, real data loss
+  // (the week 1 row was gone until re-run and re-saved). week_start+
+  // week_end together are what actually identify a distinct saved period
+  // (needs the matching unique constraint added via SQL, see chat).
+  // updated_at is sent explicitly since PostgREST's merge-duplicates only
+  // updates columns present in the payload -- without this, re-saving the
+  // same period would silently keep showing its ORIGINAL save time in
+  // ledger.html's "Saved: ..." line instead of the latest one.
   async function saveLedgerSnapshot(doc) {
-    await rest('weekly_ledger_snapshots?on_conflict=week_start', {
+    await rest('weekly_ledger_snapshots?on_conflict=week_start,week_end', {
       method: 'POST',
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ week_start: doc.weekStart, week_end: doc.weekEnd, data: doc })
+      body: JSON.stringify({ week_start: doc.weekStart, week_end: doc.weekEnd, data: doc, updated_at: new Date().toISOString() })
     });
   }
   window.saveLedgerSnapshot = saveLedgerSnapshot;
@@ -27609,7 +27618,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 535; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 536; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
