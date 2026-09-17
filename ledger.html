@@ -115,8 +115,10 @@
   <div class="signed-in-bar"><span>Signed in as <strong id="signedInEmail"></strong></span><button id="logoutBtn">Sign out</button></div>
   <div class="eyebrow">Core Betting Solutions — internal, not public</div>
   <h1>Weekly Ledger</h1>
-  <p class="sub"><span id="weekSubText">Loading&hellip;</span><select id="weekPicker" hidden></select></p>
+  <p class="sub"><span id="weekSubText">Loading&hellip;</span><select id="periodTypeFilter" hidden><option value="">All periods</option><option value="week">Weekly</option><option value="month">Monthly</option><option value="quarter">Quarterly</option><option value="year">Yearly</option><option value="custom">Custom range</option></select><select id="weekPicker" hidden></select></p>
+  <p class="sub" id="savedAtLine" style="margin-top:-14px;font-size:11.5px;"></p>
   <div class="example-banner" id="exampleBanner" hidden></div>
+  <div id="completenessBanner" hidden style="background:var(--accent-soft);border:1.5px solid var(--accent);border-radius:3px;padding:10px 14px;margin-bottom:16px;font-size:12.5px;"></div>
 
   <section>
     <h2>Published vs. the wider group<span class="n"></span></h2>
@@ -401,14 +403,42 @@
     '</div>';
   }
 
-  function render(weeks) {
+  // Same checks as admin.html's checkDataCompleteness -- duplicated (not
+  // shared) since this page can't import from index.html, but kept
+  // deliberately small and in sync by hand. Older saved snapshots (from
+  // before 2026-09-18) won't carry doc.completenessWarnings at all, so this
+  // recomputes it client-side rather than only trusting what was saved.
+  function checkDataCompleteness(w) {
+    var warnings = [];
+    if (w.published && w.published.pending > 0) warnings.push(w.published.pending + ' published pick(s) still pending grading.');
+    if (w.group && w.group.pending > 0) warnings.push(w.group.pending + ' group pick(s) still pending grading.');
+    if (!(w.topCappers || []).length && !(w.bottomCappers || []).length) warnings.push('Top & Bottom Cappers came back empty for this period.');
+    if (!(w.hotStreaks || []).length && !(w.coldStreaks || []).length) warnings.push('No streaks of 3+ picks found for this period.');
+    if (!(w.notableHot || []).length && !(w.notableCold || []).length) warnings.push('Notable Statistics came back empty for this period.');
+    if (!(w.consensus || []).length) warnings.push('No consensus picks found for this period.');
+    return warnings;
+  }
+
+  function applyPeriodFilter(weeks) {
+    var filterSel = document.getElementById('periodTypeFilter');
+    var wanted = filterSel.value;
+    var filtered = wanted ? weeks.filter(function (w) { return (w.periodType || 'week') === wanted; }) : weeks;
+    if (!filtered.length) filtered = weeks; // never leave the picker with nothing to show
     var picker = document.getElementById('weekPicker');
-    picker.innerHTML = weeks.map(function(w, i){ return '<option value="' + i + '">' + esc(w.label) + '</option>'; }).join('');
-    picker.hidden = weeks.length < 2;
-    var idx = weeks.length - 1;
+    picker.innerHTML = filtered.map(function(w, i){ return '<option value="' + i + '">' + esc(w.label) + '</option>'; }).join('');
+    picker.hidden = filtered.length < 2;
+    var idx = filtered.length - 1;
     picker.value = idx;
-    picker.onchange = function () { renderWeek(weeks, Number(picker.value)); };
-    renderWeek(weeks, idx);
+    picker.onchange = function () { renderWeek(filtered, Number(picker.value)); };
+    renderWeek(filtered, idx);
+  }
+
+  function render(weeks) {
+    var filterSel = document.getElementById('periodTypeFilter');
+    var hasMixedTypes = weeks.some(function (w) { return w.periodType && w.periodType !== 'week'; });
+    filterSel.hidden = !hasMixedTypes;
+    filterSel.onchange = function () { applyPeriodFilter(weeks); };
+    applyPeriodFilter(weeks);
 
     var rollupMode = document.getElementById('rollupMode');
     rollupMode.onchange = function () { renderRollups(weeks, rollupMode.value); };
@@ -424,7 +454,25 @@
     } else {
       banner.hidden = true;
     }
-    document.getElementById('weekSubText').textContent = w.label + ' — ' + weeks.length + ' week' + (weeks.length === 1 ? '' : 's') + ' logged so far';
+    document.getElementById('weekSubText').textContent = w.label + ' — ' + weeks.length + ' period' + (weeks.length === 1 ? '' : 's') + ' logged so far';
+
+    var savedLine = document.getElementById('savedAtLine');
+    if (w.isExample || !w._savedAt) {
+      savedLine.textContent = '';
+    } else {
+      var loadedText = w._pageLoadedAt ? w._pageLoadedAt.toLocaleString() : new Date().toLocaleString();
+      savedLine.textContent = 'Saved to dashboard: ' + new Date(w._savedAt).toLocaleString() + '  ·  page loaded: ' + loadedText + ' (reload the page for anything saved since)';
+    }
+
+    var completeness = document.getElementById('completenessBanner');
+    var warnings = w.isExample ? [] : (w.completenessWarnings || checkDataCompleteness(w));
+    if (warnings.length) {
+      completeness.hidden = false;
+      completeness.innerHTML = '<strong style="color:var(--accent);">⚠ Before you trust this: ' + warnings.length + ' thing' + (warnings.length === 1 ? '' : 's') + ' to check</strong>' +
+        '<ul style="margin:6px 0 0 18px;padding:0;">' + warnings.map(function (msg) { return '<li style="margin-bottom:3px;">' + esc(msg) + '</li>'; }).join('') + '</ul>';
+    } else {
+      completeness.hidden = true;
+    }
 
     document.getElementById('compareTiles').innerHTML =
       renderCompareTile('Published (what we posted)', w.published, true) +
@@ -591,8 +639,15 @@
 
   async function boot() {
     try {
-      var rows = await restAllPages('weekly_ledger_snapshots?select=data&order=week_start.asc');
-      var weeks = rows.map(function (r) { return r.data; });
+      var rows = await restAllPages('weekly_ledger_snapshots?select=data,updated_at&order=week_start.asc');
+      // _savedAt/_pageLoadedAt answer "am I looking at new data or do we
+      // need to re-run it" (direct request 2026-09-18) -- _savedAt is when
+      // THIS period was last written by admin.html's Save to dashboard;
+      // _pageLoadedAt is when this page itself last asked Supabase (this
+      // page has no realtime subscription, so a stale view only ever means
+      // "reload the page", never a background sync you'd have to wait on).
+      var loadedAt = new Date();
+      var weeks = rows.map(function (r) { var w = r.data; w._savedAt = r.updated_at; w._pageLoadedAt = loadedAt; return w; });
       safeRender(weeks.length ? weeks : EXAMPLE_WEEKS);
     } catch (e) {
       console.error('Could not load weekly_ledger_snapshots:', e);
