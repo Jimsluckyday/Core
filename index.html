@@ -13979,17 +13979,25 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // prompt for a base name (not one per file, even in SEPARATE_FILES
     // mode) -- Cancel or leaving it blank keeps the original default, so
     // this can never block or lose an export, only optionally rename it.
-    const baseName = (prompt('Save this export as (base name, no extension):', '${filenamePrefix}') || '').trim() || '${filenamePrefix}';
+    const rawInput = (prompt('Save this export as (base name, no extension):', '${filenamePrefix}') || '').trim();
+    // Direct request 2026-09-17: renaming the file still got today's date
+    // glued on, forcing a manual delete every time. Only append the date
+    // when the user kept the default name (so an un-renamed export still
+    // sorts/identifies itself by date); a deliberately typed custom name
+    // is treated as already-final and left alone.
+    const userRenamed = rawInput !== '' && rawInput !== '${filenamePrefix}';
+    const baseName = rawInput || '${filenamePrefix}';
+    const suffix = userRenamed ? '' : ('-' + dateSuffix);
     if (SEPARATE_FILES) {
       tables.forEach(function(table, i) {
         const heading = table.previousElementSibling;
         const label = (heading && heading.textContent ? heading.textContent : ('table-' + (i + 1))).trim();
         const safeLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
-        downloadCsvBlob(tableToCsv(table), baseName + '-' + (safeLabel || ('part-' + (i + 1))) + '-' + dateSuffix + '.csv');
+        downloadCsvBlob(tableToCsv(table), baseName + '-' + (safeLabel || ('part-' + (i + 1))) + suffix + '.csv');
       });
     } else {
       const blocks = tables.map(tableToCsv);
-      downloadCsvBlob(blocks.join('\\r\\n\\r\\n'), baseName + '-' + dateSuffix + '.csv');
+      downloadCsvBlob(blocks.join('\\r\\n\\r\\n'), baseName + suffix + '.csv');
     }
   });
 })();
@@ -27008,7 +27016,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 529; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 530; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
