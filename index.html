@@ -2081,6 +2081,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <button type="button" id="weeklyAnRunBetTypeBtn">Performance by Bet Type</button>
           <button type="button" id="weeklyAnRunAnalysisBtn">Capper Analysis (all cappers)</button>
           <button type="button" id="weeklyAnRunNotableBtn">Notable Statistics</button>
+          <button type="button" id="weeklyAnRunWeeklyRecordBtn">Weekly Record (Group vs. Published)</button>
         </div>
       </div>
     </div>
@@ -8040,6 +8041,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
     $('notableStatsFrom').value = from;
     $('notableStatsTo').value = to;
     $('runNotableStatsBtn').click();
+  });
+
+  // ADDED 2026-09-17 -- direct request to fold the weekly presentation
+  // workflow together. Weekly Record (Group vs. Published) was a real,
+  // already-used report that had never been added to either checklist box.
+  $('weeklyAnRunWeeklyRecordBtn').addEventListener('click', () => {
+    const { from, to } = weeklyChecklistRange('weeklyAnalysis');
+    $('wrFrom').value = from;
+    $('wrTo').value = to;
+    $('runWeeklyRecordBtn').click();
   });
 
   function updateActiveCapperBanner() {
@@ -26997,7 +27008,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 528; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 529; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
