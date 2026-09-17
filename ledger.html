@@ -426,7 +426,15 @@
     if (!filtered.length) filtered = weeks; // never leave the picker with nothing to show
     var picker = document.getElementById('weekPicker');
     picker.innerHTML = filtered.map(function(w, i){ return '<option value="' + i + '">' + esc(w.label) + '</option>'; }).join('');
-    picker.hidden = filtered.length < 2;
+    // FIXED 2026-09-18: this used to hide the picker whenever the FILTERED
+    // count dropped below 2 -- so picking "Weekly" specifically to cycle
+    // through weeks could make the cycling control disappear the moment
+    // only one week happened to match, exactly backwards from why someone
+    // picks a specific period type in the first place. Once any specific
+    // type is chosen (not "All periods"), always show the picker -- more
+    // weeks/months/etc. accumulate over time and the control shouldn't
+    // flicker in and out based on how many exist right now.
+    picker.hidden = !wanted && filtered.length < 2;
     var idx = filtered.length - 1;
     picker.value = idx;
     picker.onchange = function () { renderWeek(filtered, Number(picker.value)); };
