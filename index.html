@@ -18821,10 +18821,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const tierHtml = ledgerTierTableHtml(doc.tierCalibration.map(r => ({ tier: r.tier, type: r.type, total_picks: r.picks, wins: r.wins, losses: r.losses, pushes: r.pushes, win_pct: r.winPct })));
     const notesHtml = ledgerNotesHtml(doc.notes);
     // Double-stringified and de-angle-bracketed per this file's own pop-out
-    // safety rule (see project_popup_syntax_verification) -- neutralizes
-    // both a literal </script> appearing inside any real text field AND
+    // safety rule (see project_popup_syntax_verification) -- neutralizes a
+    // literal script-closing tag appearing inside any real text field, plus
     // any stray backslash-escape issue, since JSON.stringify of the JSON
-    // text itself handles all of that automatically.
+    // text itself handles all of that automatically. (Deliberately not
+    // writing that literal tag out even here in a comment -- writing it
+    // literally anywhere in this file's own outer <script> block ends that
+    // whole block right there, exactly the bug this code exists to avoid.)
     const jsonForClaude = JSON.stringify(doc, null, 2);
     const safeJsonLiteral = JSON.stringify(jsonForClaude).replace(/</g, '\\u003c');
 
