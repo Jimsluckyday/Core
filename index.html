@@ -18711,6 +18711,11 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const dir = doc.volume.picksChangePct >= 0 ? 'up' : 'down';
       notes.push(`Pick volume is ${dir} ${Math.abs(doc.volume.picksChangePct)}% vs. the prior ${doc.volume.priorFrom} → ${doc.volume.priorTo} period (${doc.volume.picks} vs. ${doc.volume.priorPicks} picks, ${doc.volume.images} vs. ${doc.volume.priorImages} distinct screenshots) — worth a look at whether data-entry/pipeline capacity needs to flex with it.`);
     }
+    if (doc.volume.transcription && doc.volume.transcription.costChangePct !== null && Math.abs(doc.volume.transcription.costChangePct) >= 20) {
+      const t = doc.volume.transcription;
+      const dir = t.costChangePct >= 0 ? 'up' : 'down';
+      notes.push(`Transcription cost is ${dir} ${Math.abs(t.costChangePct)}% vs. the prior period ($${t.costUsd.toFixed(2)} vs. $${t.priorCostUsd.toFixed(2)}, ${t.imagesTotal} vs. ${t.priorImagesTotal} images) — worth folding into the budget if this level holds.`);
+    }
     return notes;
   }
 
@@ -18751,6 +18756,32 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return Math.round(((curr - prior) / prior) * 1000) / 10;
   }
 
+  // Reads the actual transcription cost logged by 2_transcribe_images.py /
+  // 4_live_listener.py (added 2026-09-18, see pipeline_usage_log) -- the
+  // real inbound image count here (every image sent to Claude, pick or
+  // not) is more accurate than fetchVolumeStats' distinct-source_image-on-
+  // picks proxy, since it also counts images that never became a saved
+  // pick at all. Table may not exist yet for anyone who hasn't run the
+  // matching SQL -- fails soft to all-null/zero rather than breaking the
+  // whole Ledger build over an optional feature.
+  async function fetchTranscriptionCost(from, to) {
+    let q = 'pipeline_usage_log?select=images_total,images_pick,cost_usd,input_tokens,output_tokens';
+    if (from) q += `&event_date=gte.${from}`;
+    if (to) q += `&event_date=lte.${to}`;
+    try {
+      const rows = await restAllPages(q);
+      return rows.reduce((acc, r) => ({
+        imagesTotal: acc.imagesTotal + (r.images_total || 0),
+        imagesPick: acc.imagesPick + (r.images_pick || 0),
+        costUsd: acc.costUsd + (Number(r.cost_usd) || 0),
+        inputTokens: acc.inputTokens + (r.input_tokens || 0),
+        outputTokens: acc.outputTokens + (r.output_tokens || 0)
+      }), { imagesTotal: 0, imagesPick: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 });
+    } catch (e) {
+      return null; // table doesn't exist yet, or a real fetch error -- either way, degrade gracefully
+    }
+  }
+
   async function buildWeeklyLedgerData(from, to) {
     let wrQuery = 'picks?select=id,capper_id,result,is_published,opening_odds,closing_odds,grading_multiplier,event_date&is_parlay_leg=eq.false';
     if (from) wrQuery += `&event_date=gte.${from}`;
@@ -18775,9 +18806,11 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const tierRows = potdPerfRowsTotalByTier(tierPicks);
 
     const { priorFrom, priorTo } = priorPeriodRange(from, to);
-    const [currentVolume, priorVolume] = await Promise.all([
+    const [currentVolume, priorVolume, currentCost, priorCost] = await Promise.all([
       fetchVolumeStats(from, to),
-      fetchVolumeStats(priorFrom, priorTo)
+      fetchVolumeStats(priorFrom, priorTo),
+      fetchTranscriptionCost(from, to),
+      fetchTranscriptionCost(priorFrom, priorTo)
     ]);
 
     const doc = {
@@ -18815,7 +18848,16 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         picks: currentVolume.picks, images: currentVolume.images,
         priorFrom, priorTo, priorPicks: priorVolume.picks, priorImages: priorVolume.images,
         picksChangePct: ledgerPctChange(currentVolume.picks, priorVolume.picks),
-        imagesChangePct: ledgerPctChange(currentVolume.images, priorVolume.images)
+        imagesChangePct: ledgerPctChange(currentVolume.images, priorVolume.images),
+        // From pipeline_usage_log (2_transcribe_images.py / 4_live_listener.py's
+        // own real API usage), not the picks table -- null until that table
+        // exists and at least one real transcription run has logged to it.
+        transcription: (currentCost && priorCost) ? {
+          imagesTotal: currentCost.imagesTotal, imagesPick: currentCost.imagesPick, costUsd: Math.round(currentCost.costUsd * 100) / 100,
+          priorImagesTotal: priorCost.imagesTotal, priorCostUsd: Math.round(priorCost.costUsd * 100) / 100,
+          imagesChangePct: ledgerPctChange(currentCost.imagesTotal, priorCost.imagesTotal),
+          costChangePct: ledgerPctChange(currentCost.costUsd, priorCost.costUsd)
+        } : null
       }
     };
     doc.notes = buildLedgerAutoNotes(doc);
@@ -18854,12 +18896,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const color = pct >= 0 ? '#2d6a4f' : '#8a2f3a';
       return ` <span style="color:${color};font-weight:bold;">${dir} ${Math.abs(pct)}%</span>`;
     }
+    const t = v.transcription;
+    const transcriptionHtml = t
+      ? `<strong>$${t.costUsd.toFixed(2)}</strong> transcription cost${changeText(t.costChangePct)} vs. <strong>$${t.priorCostUsd.toFixed(2)}</strong> prior, from <strong>${t.imagesTotal}</strong> images sent to Claude${changeText(t.imagesChangePct)} (${t.imagesPick} became real picks)<br/>`
+      : `<span style="font-style:italic;color:var(--ink-soft);">No transcription cost logged for this range yet -- either pipeline_usage_log hasn't been created, or no transcription ran in this window. See 2_transcribe_images.py / 4_live_listener.py.</span><br/>`;
     return `
       <p class="stub-title" style="margin-bottom:8px;">Volume — resource/capacity planning, not performance</p>
       <div style="font-size:13px;line-height:1.9;margin-bottom:20px;">
         <strong>${v.picks}</strong> picks recorded (incl. parlay legs)${changeText(v.picksChangePct)} vs. <strong>${v.priorPicks}</strong> in the prior period (${escapeHtml(v.priorFrom)} → ${escapeHtml(v.priorTo)})<br/>
-        <strong>${v.images}</strong> distinct screenshots processed${changeText(v.imagesChangePct)} vs. <strong>${v.priorImages}</strong> prior<br/>
-        <span style="font-size:10px;color:var(--ink-soft);">"Screenshots" is a distinct-<code>source_image</code> count on picks entered for the period -- a proxy for pipeline throughput (fetch/transcribe/upload load), not a public-facing number. The prior period is the same number of days immediately before this range, so this only reads as a fair comparison when this range itself is a normal week.</span>
+        <strong>${v.images}</strong> distinct screenshots on saved picks${changeText(v.imagesChangePct)} vs. <strong>${v.priorImages}</strong> prior<br/>
+        ${transcriptionHtml}
+        <span style="font-size:10px;color:var(--ink-soft);">"Screenshots on saved picks" is a distinct-<code>source_image</code> count on picks entered for the period -- undercounts true inbound volume, since a non-pick image never reaches the picks table. The transcription line above (from <code>pipeline_usage_log</code>) is the real, complete number once that's logging -- every image actually sent to Claude, pick or not. The prior period is the same number of days immediately before this range, so this only reads as a fair comparison when this range itself is a normal week.</span>
       </div>`;
   }
 
@@ -27441,7 +27488,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 532; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 533; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
