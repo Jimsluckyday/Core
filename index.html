@@ -2524,8 +2524,22 @@ These are almost always the same day, so "Date entered" only fills in a starting
           <button type="button" class="ghost small" id="wlPresetYtdBtn">Year to date</button>
           <button type="button" class="ghost small" id="wlPresetAllTimeBtn">All time</button>
         </div>
+        <div class="row" style="margin-top:6px;">
+          <div class="field">
+            <label>Notable: min. sample = this % of avg. volume</label>
+            <input id="wlNotableMinPct" type="number" min="0.1" step="0.1" value="5" style="width:80px;" />
+          </div>
+          <div class="field">
+            <label>Notable: absolute floor (min. picks)</label>
+            <input id="wlNotableAbsMin" type="number" min="1" value="5" style="width:80px;" />
+          </div>
+          <div class="field">
+            <label>Notable: confidence bar %</label>
+            <input id="wlNotableBar" type="number" min="50" max="99" value="55" style="width:80px;" />
+          </div>
+        </div>
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Builds the same weekly summary previously assembled by hand from six separate CSVs (Weekly Record, Top &amp; Bottom Cappers, Capper Streaks, Notable Statistics, Consensus, Pick Tier Performance) into one report -- Published vs. Group record, top/bottom cappers, hot/cold streaks, notable hot/cold slices, top consensus picks per day, and tier calibration -- computed live from the same date range, no exports or pasting required. Both dates are required. This works for ANY range, not just a 7-day week -- use the quick-range buttons above to pull a whole month, year-to-date, or everything on file, and it computes correctly for that period directly from Supabase (not by adding up already-saved weeks, which the Rollups section on the dashboard already does separately as a quick estimate). Uses the same default thresholds as each source report (2+ picks to rank, 3+ length to count as a streak, 5%-of-average/floor-5/65% confidence for Notable Statistics, 2+ cappers agreeing for consensus) so the numbers match what those reports would show if run separately with their own defaults. The pop-out flags anything worth double-checking before you trust it (pending picks, empty sections), shows a "Save to dashboard" button that writes straight to the shared dashboard, and a "Copy for Claude" button for updating the separate shareable Claude Artifact instead.
+          Builds the same weekly summary previously assembled by hand from six separate CSVs (Weekly Record, Top &amp; Bottom Cappers, Capper Streaks, Notable Statistics, Consensus, Pick Tier Performance) into one report -- Published vs. Group record, top/bottom cappers, hot/cold streaks, notable hot/cold slices, top consensus picks per day, and tier calibration -- computed live from the same date range, no exports or pasting required. Both dates are required. This works for ANY range, not just a 7-day week -- use the quick-range buttons above to pull a whole month, year-to-date, or everything on file, and it computes correctly for that period directly from Supabase (not by adding up already-saved weeks, which the Rollups section on the dashboard already does separately as a quick estimate). Uses the same default thresholds as each source report (2+ picks to rank, 3+ length to count as a streak, 2+ cappers agreeing for consensus) so the numbers match what those reports would show if run separately with their own defaults. Notable Statistics' three fields above are adjustable HERE specifically -- direct request 2026-09-18: "not a lot of people would have anything notable to present early on... we should see something there even if it's low volume in the beginning." Defaults to a 55% confidence bar (looser than the standalone Notable Statistics report's own 65% default) so a single week has a real chance of showing something at all; raise it back toward 65%+ once more history makes the stricter bar achievable. The pop-out flags anything worth double-checking before you trust it (pending picks, empty sections), shows a "Save to dashboard" button that writes straight to the shared dashboard, and a "Copy for Claude" button for updating the separate shareable Claude Artifact instead.
         </div>
       </div>
     </div>
@@ -18817,7 +18831,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     }
   }
 
-  async function buildWeeklyLedgerData(from, to) {
+  async function buildWeeklyLedgerData(from, to, notableSettings) {
+    // Direct request 2026-09-18: "not a lot of people would have anything
+    // notable to present early on... we should see something there even
+    // if it's low volume in the beginning" -- adjustable per-run (fields
+    // in the Weekly Ledger panel) rather than hardcoded, since the right
+    // bar genuinely differs by how much history exists yet.
+    const { minPct: notableMinPct, absMin: notableAbsMin, barPct: notableBarPct } = notableSettings || { minPct: 5, absMin: 5, barPct: 55 };
     let wrQuery = 'picks?select=id,capper_id,result,is_published,opening_odds,closing_odds,grading_multiplier,event_date&is_parlay_leg=eq.false';
     if (from) wrQuery += `&event_date=gte.${from}`;
     if (to) wrQuery += `&event_date=lte.${to}`;
@@ -18827,7 +18847,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
     const { topRows, bottomRows } = await computeTopBottomData('', 'All sports', from, to, 2);
     const { hotRows: hotStreakRows, coldRows: coldStreakRows } = await computeStreaksData('', from, to, 3);
-    const notable = await computeNotableStats(5, 5, 65, from, to);
+    const notable = await computeNotableStats(notableMinPct, notableAbsMin, notableBarPct, from, to);
 
     let consensusQuery = 'daily_consensus?select=*&agreeing_cappers=gte.2&order=event_date.desc,agreeing_cappers.desc';
     if (from) consensusQuery += `&event_date=gte.${from}`;
@@ -18861,6 +18881,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // snapshot just needs a wider From/To -- this field only labels what
       // was saved so ledger.html can filter/group by granularity later.
       periodType: detectPeriodType(from, to),
+      notableSettings: { minPct: notableMinPct, absMin: notableAbsMin, barPct: notableBarPct },
       isExample: false,
       published: {
         picks: pubStats.total_picks, wins: pubStats.wins, losses: pubStats.losses, pushes: pubStats.pushes,
@@ -19027,6 +19048,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   ${bottomHtml}
   ${hotStreakHtml}
   ${coldStreakHtml}
+  <div style="font-size:10px;color:#55584d;margin-bottom:6px;">Notable Statistics settings used for this run: min. sample ${doc.notableSettings.minPct}% of avg. volume (floor ${doc.notableSettings.absMin}), confidence bar ${doc.notableSettings.barPct}% -- adjustable in the Weekly Ledger panel before building.</div>
   ${notableHotHtml}
   ${notableColdHtml}
   ${tierHtml}
@@ -19113,7 +19135,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     btn.disabled = true;
     btn.textContent = 'Building...';
     try {
-      const result = await buildWeeklyLedgerData(from, to);
+      const notableSettings = {
+        minPct: Number($('wlNotableMinPct').value) || 5,
+        absMin: Math.max(1, Number($('wlNotableAbsMin').value) || 5),
+        barPct: Math.min(99, Math.max(50, Number($('wlNotableBar').value) || 55))
+      };
+      const result = await buildWeeklyLedgerData(from, to, notableSettings);
       openWeeklyLedgerTab(result, `${from} → ${to}`);
     } catch (e) {
       alert('Could not build the ledger: ' + e.message);
@@ -27618,7 +27645,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 536; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 537; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
