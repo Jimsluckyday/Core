@@ -133,6 +133,18 @@
   </section>
 
   <section>
+    <h2>Highest-consensus picks<span class="n" id="consensusRecordLine"></span></h2>
+    <p class="section-note">The picks the widest number of cappers independently agreed on this week, and whether the group was right.</p>
+    <table class="ledger"><thead><tr><th>Date</th><th>Sport</th><th>Pick</th><th class="num">Cappers</th><th class="num">Result</th><th class="num">Value</th></tr></thead><tbody id="consensusRows"></tbody></table>
+  </section>
+
+  <section>
+    <h2>Trend — Published win % &amp; ROI<span class="n" id="trendRange"></span></h2>
+    <p class="section-note">Every week logged so far, Published vs. Group. This is the part that only means something once there's more than one or two points on it.</p>
+    <div class="trend-wrap"><svg id="trendChart" width="900" height="190" viewBox="0 0 900 190"></svg></div>
+  </section>
+
+  <section>
     <div class="two-col">
       <div>
         <h2>Top performers</h2>
@@ -175,15 +187,9 @@
   </section>
 
   <section>
-    <h2>Highest-consensus picks</h2>
-    <p class="section-note">The picks the widest number of cappers independently agreed on this week, and whether the group was right.</p>
-    <table class="ledger"><thead><tr><th>Date</th><th>Sport</th><th>Pick</th><th class="num">Cappers</th><th class="num">Result</th><th class="num">Value</th></tr></thead><tbody id="consensusRows"></tbody></table>
-  </section>
-
-  <section>
-    <h2>Trend — Published win % &amp; ROI<span class="n" id="trendRange"></span></h2>
-    <p class="section-note">Every week logged so far. This is the part that only means something once there's more than one or two points on it.</p>
-    <div class="trend-wrap"><svg id="trendChart" width="900" height="190" viewBox="0 0 900 190"></svg></div>
+    <h2>Pick tier calibration</h2>
+    <p class="section-note">Does higher confidence actually track a better record? Every capper combined, split Straight vs. Parlay.</p>
+    <table class="ledger"><thead><tr><th>Tier</th><th>Type</th><th class="num">Picks</th><th class="num">Wins</th><th class="num">Losses</th><th class="num">Pushes</th><th class="num">Win %</th></tr></thead><tbody id="tierRows"></tbody></table>
   </section>
 
   <section>
@@ -516,6 +522,26 @@
         '<td class="num"><span class="pill ' + (isWin ? 'win' : 'loss') + '">' + esc(c.result) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
     }).join('') || '<tr><td colspan="6" class="empty-note">Not run this week</td></tr>';
 
+    // Direct request 2026-09-18: "I'd like the highest consensus section to
+    // have a record as I can count the wins/losses by hand but I'd prefer a
+    // #." A plain W-L-P count over the listed consensus picks, shown right
+    // in the section heading instead of making anyone tally the pill
+    // colors by eye.
+    var consensusList = w.consensus || [];
+    var cWins = 0, cLosses = 0, cPushes = 0;
+    consensusList.forEach(function (c) {
+      if (c.result === 'Win') cWins++;
+      else if (c.result === 'Loss') cLosses++;
+      else if (c.result === 'Push') cPushes++;
+    });
+    var recordLine = document.getElementById('consensusRecordLine');
+    recordLine.textContent = consensusList.length ? ('Record: ' + cWins + '-' + cLosses + '-' + cPushes + ' (' + consensusList.length + ' picks)') : '';
+
+    document.getElementById('tierRows').innerHTML = (w.tierCalibration || []).map(function (t) {
+      var tierLabel = t.tier === 0 ? 'Tier 0 (base)' : (t.tier < 0 ? ('Tier ' + t.tier + ' (below base)') : ('Tier ' + t.tier));
+      return '<tr><td>' + esc(tierLabel) + '</td><td>' + esc(t.type) + '</td><td class="num">' + t.picks + '</td><td class="num">' + t.wins + '</td><td class="num">' + t.losses + '</td><td class="num">' + t.pushes + '</td><td class="num">' + fmtPct(t.winPct) + '</td></tr>';
+    }).join('') || '<tr><td colspan="7" class="empty-note">No graded picks for this period</td></tr>';
+
     var v = w.volume;
     var volBox = document.getElementById('volumeBox');
     function changeSpan(pct) {
@@ -547,7 +573,14 @@
   }
 
   function computeRollups(weeks, mode) {
-    var real = weeks.filter(function (w) { return !w.isExample; });
+    // FIXED 2026-09-18: this used to include EVERY non-example period
+    // regardless of periodType, so once a month-level snapshot was saved
+    // alongside the weeks it covers, both got summed into the same month
+    // bucket -- silently doubling (or worse) the real totals. Rollups only
+    // ever adds up the finest granularity (weeks); a saved month/quarter/
+    // year snapshot is its own accurate, standalone entry in the picker,
+    // never fed into this sum.
+    var real = weeks.filter(function (w) { return !w.isExample && (w.periodType || 'week') === 'week'; });
     var groups = {};
     var order = [];
     real.forEach(function (w) {
@@ -597,6 +630,12 @@
     }).join('') || '<tr><td colspan="8" class="empty-note">No real weeks logged yet</td></tr>';
   }
 
+  // Direct request 2026-09-18: "It's good to see the notes and drivers show
+  // how we are doing vs the group but I'd like the chart here to show the
+  // groups trend as this only shows mine." Group's two lines are drawn
+  // muted (reduced opacity, no point labels) so Published stays the most
+  // prominent read at a glance, but the comparison the notes already
+  // describe in words is now visible on the chart itself.
   function renderTrend(weeks) {
     var svg = document.getElementById('trendChart');
     var dark = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.getAttribute('data-theme') !== 'light') || document.documentElement.getAttribute('data-theme') === 'dark';
@@ -605,7 +644,7 @@
     var n = weeks.length;
     var x = function (i) { return n === 1 ? padL + innerW / 2 : padL + (innerW * i) / (n - 1); };
     var yPct = function (pct) { return padT + innerH - (innerH * pct) / 100; };
-    var rois = weeks.map(function(w){ return w.published.roi; });
+    var rois = weeks.map(function(w){ return w.published.roi; }).concat(weeks.map(function(w){ return w.group ? w.group.roi : null; })).filter(function (v) { return v !== null && v !== undefined; });
     var maxAbsRoi = Math.max(20, Math.ceil(Math.max.apply(null, rois.map(Math.abs)) / 10) * 10);
     var yRoi = function (roi) { return padT + innerH / 2 - (innerH / 2) * (roi / maxAbsRoi); };
 
@@ -617,6 +656,8 @@
 
     var pctPoints = weeks.map(function (w, i) { return x(i) + ',' + yPct(w.published.winPct); }).join(' ');
     var roiPoints = weeks.map(function (w, i) { return x(i) + ',' + yRoi(w.published.roi); }).join(' ');
+    var groupPctPoints = weeks.map(function (w, i) { return x(i) + ',' + yPct(w.group.winPct); }).join(' ');
+    var groupRoiPoints = weeks.map(function (w, i) { return x(i) + ',' + yRoi(w.group.roi); }).join(' ');
 
     var pctDots = weeks.map(function (w, i) {
       return '<circle cx="' + x(i) + '" cy="' + yPct(w.published.winPct) + '" r="4" fill="' + accent + '"/>' +
@@ -625,16 +666,26 @@
     var roiDots = weeks.map(function (w, i) {
       return '<circle cx="' + x(i) + '" cy="' + yRoi(w.published.roi) + '" r="4" fill="' + win + '"/>';
     }).join('');
+    var groupPctDots = weeks.map(function (w, i) {
+      return '<circle cx="' + x(i) + '" cy="' + yPct(w.group.winPct) + '" r="3" fill="' + accent + '" opacity="0.4"/>';
+    }).join('');
+    var groupRoiDots = weeks.map(function (w, i) {
+      return '<circle cx="' + x(i) + '" cy="' + yRoi(w.group.roi) + '" r="3" fill="' + win + '" opacity="0.4"/>';
+    }).join('');
     var labels = weeks.map(function (w, i) {
       return '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9.5" fill="' + inkSoft + '">' + w.label + '</text>';
     }).join('');
 
     svg.innerHTML = grid +
+      '<polyline points="' + groupPctPoints + '" fill="none" stroke="' + accent + '" stroke-width="1.5" opacity="0.4"/>' + groupPctDots +
+      '<polyline points="' + groupRoiPoints + '" fill="none" stroke="' + win + '" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>' + groupRoiDots +
       '<polyline points="' + pctPoints + '" fill="none" stroke="' + accent + '" stroke-width="2"/>' + pctDots +
       '<polyline points="' + roiPoints + '" fill="none" stroke="' + win + '" stroke-width="2" stroke-dasharray="4,3"/>' + roiDots +
       labels +
-      '<circle cx="' + (padL+6) + '" cy="' + (padT-4) + '" r="4" fill="' + accent + '"/><text x="' + (padL+14) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Win %</text>' +
-      '<circle cx="' + (padL+70) + '" cy="' + (padT-4) + '" r="4" fill="' + win + '"/><text x="' + (padL+78) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">ROI</text>';
+      '<circle cx="' + (padL+6) + '" cy="' + (padT-4) + '" r="4" fill="' + accent + '"/><text x="' + (padL+14) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Published Win %</text>' +
+      '<circle cx="' + (padL+130) + '" cy="' + (padT-4) + '" r="4" fill="' + win + '"/><text x="' + (padL+138) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Published ROI</text>' +
+      '<circle cx="' + (padL+235) + '" cy="' + (padT-4) + '" r="3" fill="' + accent + '" opacity="0.4"/><text x="' + (padL+243) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Group Win %</text>' +
+      '<circle cx="' + (padL+345) + '" cy="' + (padT-4) + '" r="3" fill="' + win + '" opacity="0.4"/><text x="' + (padL+353) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Group ROI</text>';
   }
 
   function safeRender(weeks) {
@@ -647,7 +698,18 @@
 
   async function boot() {
     try {
-      var rows = await restAllPages('weekly_ledger_snapshots?select=data,updated_at&order=week_start.asc');
+      // Sorted by week_end (not week_start) -- direct bug report 2026-09-18:
+      // "It is also weird that Jun 1-30 is at the end. If I run monthly it
+      // should show that at the end of the chart and never at the
+      // beginning." A month and a week sharing the same START date (Jun 1)
+      // tied under the old week_start-only sort, landing in undefined
+      // order. Sorting by when each period ENDS instead puts things in the
+      // order they completed -- a normal week-by-week progression sorts
+      // exactly the same either way, but a broader period (month/quarter/
+      // year) always ends at or after any narrower period it contains, so
+      // it naturally lands at the end instead of wherever its start date
+      // happens to tie.
+      var rows = await restAllPages('weekly_ledger_snapshots?select=data,updated_at&order=week_end.asc,week_start.asc');
       // _savedAt/_pageLoadedAt answer "am I looking at new data or do we
       // need to re-run it" (direct request 2026-09-18) -- _savedAt is when
       // THIS period was last written by admin.html's Save to dashboard;
