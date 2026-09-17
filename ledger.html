@@ -632,14 +632,18 @@
 
   // Direct request 2026-09-18: "It's good to see the notes and drivers show
   // how we are doing vs the group but I'd like the chart here to show the
-  // groups trend as this only shows mine." Group's two lines are drawn
-  // muted (reduced opacity, no point labels) so Published stays the most
-  // prominent read at a glance, but the comparison the notes already
-  // describe in words is now visible on the chart itself.
+  // groups trend as this only shows mine." Follow-up direct feedback after
+  // seeing a first (muted same-hue) version: "the bottom 2 colors aren't as
+  // distinct and visually still blend... I'd prefer... a solid red color or
+  // something super contrasting." Group's two lines are now solid vivid
+  // red at full weight/opacity (Win% solid, ROI dashed -- same distinction
+  // Published already uses), deliberately a completely different hue
+  // family from Published's brown/green rather than a faded version of it.
   function renderTrend(weeks) {
     var svg = document.getElementById('trendChart');
     var dark = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.getAttribute('data-theme') !== 'light') || document.documentElement.getAttribute('data-theme') === 'dark';
     var ink = dark ? '#eae5d6' : '#22281f', inkSoft = dark ? '#a9a48f' : '#55584d', accent = dark ? '#d9b25c' : '#8a6d1a', win = dark ? '#5cb98a' : '#2d6a4f', field = dark ? '#4c4a3a' : '#d8d1bd';
+    var groupColor = dark ? '#ff6659' : '#d32f2f';
     var W = 900, H = 190, padL = 44, padR = 60, padT = 18, padB = 34, innerW = W - padL - padR, innerH = H - padT - padB;
     var n = weeks.length;
     var x = function (i) { return n === 1 ? padL + innerW / 2 : padL + (innerW * i) / (n - 1); };
@@ -667,25 +671,25 @@
       return '<circle cx="' + x(i) + '" cy="' + yRoi(w.published.roi) + '" r="4" fill="' + win + '"/>';
     }).join('');
     var groupPctDots = weeks.map(function (w, i) {
-      return '<circle cx="' + x(i) + '" cy="' + yPct(w.group.winPct) + '" r="3" fill="' + accent + '" opacity="0.4"/>';
+      return '<circle cx="' + x(i) + '" cy="' + yPct(w.group.winPct) + '" r="4" fill="' + groupColor + '"/>';
     }).join('');
     var groupRoiDots = weeks.map(function (w, i) {
-      return '<circle cx="' + x(i) + '" cy="' + yRoi(w.group.roi) + '" r="3" fill="' + win + '" opacity="0.4"/>';
+      return '<circle cx="' + x(i) + '" cy="' + yRoi(w.group.roi) + '" r="4" fill="' + groupColor + '"/>';
     }).join('');
     var labels = weeks.map(function (w, i) {
       return '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9.5" fill="' + inkSoft + '">' + w.label + '</text>';
     }).join('');
 
     svg.innerHTML = grid +
-      '<polyline points="' + groupPctPoints + '" fill="none" stroke="' + accent + '" stroke-width="1.5" opacity="0.4"/>' + groupPctDots +
-      '<polyline points="' + groupRoiPoints + '" fill="none" stroke="' + win + '" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>' + groupRoiDots +
+      '<polyline points="' + groupPctPoints + '" fill="none" stroke="' + groupColor + '" stroke-width="2"/>' + groupPctDots +
+      '<polyline points="' + groupRoiPoints + '" fill="none" stroke="' + groupColor + '" stroke-width="2" stroke-dasharray="5,4"/>' + groupRoiDots +
       '<polyline points="' + pctPoints + '" fill="none" stroke="' + accent + '" stroke-width="2"/>' + pctDots +
       '<polyline points="' + roiPoints + '" fill="none" stroke="' + win + '" stroke-width="2" stroke-dasharray="4,3"/>' + roiDots +
       labels +
       '<circle cx="' + (padL+6) + '" cy="' + (padT-4) + '" r="4" fill="' + accent + '"/><text x="' + (padL+14) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Published Win %</text>' +
       '<circle cx="' + (padL+130) + '" cy="' + (padT-4) + '" r="4" fill="' + win + '"/><text x="' + (padL+138) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Published ROI</text>' +
-      '<circle cx="' + (padL+235) + '" cy="' + (padT-4) + '" r="3" fill="' + accent + '" opacity="0.4"/><text x="' + (padL+243) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Group Win %</text>' +
-      '<circle cx="' + (padL+345) + '" cy="' + (padT-4) + '" r="3" fill="' + win + '" opacity="0.4"/><text x="' + (padL+353) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Group ROI</text>';
+      '<circle cx="' + (padL+235) + '" cy="' + (padT-4) + '" r="4" fill="' + groupColor + '"/><text x="' + (padL+243) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Group Win %</text>' +
+      '<circle cx="' + (padL+345) + '" cy="' + (padT-4) + '" r="4" fill="' + groupColor + '"/><text x="' + (padL+353) + '" y="' + (padT) + '" font-size="9.5" fill="' + inkSoft + '">Group ROI (dashed)</text>';
   }
 
   function safeRender(weeks) {
