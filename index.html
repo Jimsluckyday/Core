@@ -2138,12 +2138,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </p>
       <div id="streakHistoryPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Every consecutive run of wins or losses in a capper's graded history, not just whichever one is currently active -- so "on a 7-game win streak right now" doesn't hide that they also had an 11-game streak earlier, which matters for judging whether a capper runs hot/cold in bursts. Pushes are skipped over entirely (neither break nor extend a streak). Ordered by event_date, which is when the game actually happened, not when the pick was entered -- important since backfilled historical data isn't always entered in chronological order. ADDED 2026-09-18: a "Streak snapshot" summary now sits above the full list -- longest win/loss streak ever, average streak length each direction, and how many times (if any) this capper has already reached the length of whatever streak is currently active, as a data point for judging whether he tends to right the ship on a cold run or regress after a hot one. Purely descriptive, not a prediction -- worth revisiting once more data has banked up.
+          Every consecutive run of wins or losses in a capper's graded history, not just whichever one is currently active -- so "on a 7-game win streak right now" doesn't hide that they also had an 11-game streak earlier, which matters for judging whether a capper runs hot/cold in bursts. Pushes are skipped over entirely (neither break nor extend a streak). Ordered by event_date, which is when the game actually happened, not when the pick was entered -- important since backfilled historical data isn't always entered in chronological order. ADDED 2026-09-18: a "Streak snapshot" summary now sits above the full list -- longest win/loss streak ever, average streak length each direction, and how many times (if any) this capper has already reached the length of whatever streak is currently active, as a data point for judging whether he tends to right the ship on a cold run or regress after a hot one. Purely descriptive, not a prediction -- worth revisiting once more data has banked up. ADDED 2026-09-18 (same day): a "Streak continuation" box answers the actual pattern question directly -- of every time this capper's streak reached the chosen threshold (default 5+, a plain 2-3 game streak isn't meaningful), how often did it keep going vs. snap right there, shown against his normal win/loss rate for context. Flags when the sample is too small (under 5 occurrences) to read anything into yet.
         </div>
         <div class="row">
           <div class="field">
             <label>Capper</label>
             <select id="streakCapper"><option value="">Select a capper...</option></select>
+          </div>
+          <div class="field" style="max-width:140px;">
+            <label>Continuation threshold</label>
+            <input type="number" id="streakContinuationThreshold" value="5" min="2" step="1">
           </div>
           <div style="align-self:flex-end;">
             <button id="runStreakHistoryBtn">Show this capper's streaks</button>
@@ -15621,6 +15625,69 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       </div>`;
   }
 
+  // Direct follow-up to the Streak snapshot above: "is there a good way to
+  // see if these hold true that a capper who is streaky has trouble
+  // breaking through that #... a 2-3 win streak isn't what we are looking
+  // for but 5+ wins or losses is a good starting point to see if there's a
+  // pattern for a capper on whether they continue to win or continue to
+  // lose on a consistent basis." A completed streak's own final length
+  // already tells us where it broke -- a streak of length 8 necessarily
+  // PASSED THROUGH every length from the threshold up to 7 before finally
+  // snapping at 8. So for a given threshold N: any completed streak with
+  // length === N broke exactly at N (never got any further); any completed
+  // streak with length > N passed N and kept going. The (still-open)
+  // current streak, if it has already reached N, is neither -- its outcome
+  // isn't known yet, so it's shown separately, never folded into the rate.
+  // continuationRate is compared against the capper's own overall win %
+  // (for win streaks) or loss % (for loss streaks) as the plain-language
+  // baseline: "if this number is a lot higher/lower than his normal rate,
+  // that's the pattern worth watching; if it's close, this streak length
+  // isn't behaving any differently than a random one would."
+  function computeStreakContinuation(streaks, threshold, overallWinPct) {
+    function sideStats(type) {
+      const eligible = streaks.filter(s => s.type === type && s.length >= threshold);
+      const completed = eligible.filter(s => !s.isCurrent);
+      const broke = completed.filter(s => s.length === threshold).length;
+      const continued = completed.filter(s => s.length > threshold).length;
+      const reached = broke + continued;
+      const stillActive = eligible.filter(s => s.isCurrent).length;
+      const continuationPct = reached > 0 ? Math.round((1000 * continued) / reached) / 10 : null;
+      // The plain "normal rate" to compare against: this capper's overall
+      // win % for a win-streak threshold, or its complement (loss %) for a
+      // loss-streak threshold -- both are just overallWinPct or 100 minus it.
+      const baselinePct = type === 'win' ? overallWinPct : (overallWinPct !== null ? Math.round((100 - overallWinPct) * 10) / 10 : null);
+      return { reached, continued, broke, stillActive, continuationPct, baselinePct };
+    }
+    return { win: sideStats('win'), loss: sideStats('loss') };
+  }
+
+  function streakContinuationHtml(cont, threshold) {
+    function sideHtml(label, color, s) {
+      if (s.reached === 0) {
+        return `<div style="margin-bottom:6px;"><strong style="color:${color};text-transform:uppercase;">${label}</strong> — never reached a ${threshold}-game streak yet${s.stillActive ? ' (one currently active, outcome not yet known)' : ''}.</div>`;
+      }
+      const sampleNote = s.reached < 5 ? ` <span style="color:var(--stamp-amber);">(only ${s.reached} occurrence${s.reached === 1 ? '' : 's'} -- too few to read much into yet)</span>` : '';
+      const vsBaseline = s.baselinePct !== null
+        ? ` — his overall ${label.toLowerCase()} rate is ${s.baselinePct}%, so this is ${Math.abs(s.continuationPct - s.baselinePct) < 5 ? 'about in line with' : (s.continuationPct > s.baselinePct ? 'HIGHER than' : 'LOWER than')} normal`
+        : '';
+      return `<div style="margin-bottom:6px;">
+        <strong style="color:${color};text-transform:uppercase;">${label}</strong> reached ${threshold}+ <strong>${s.reached}</strong> time${s.reached === 1 ? '' : 's'} —
+        continued past it <strong>${s.continued}</strong>, broke right at ${threshold} <strong>${s.broke}</strong> times
+        (<strong>${s.continuationPct}%</strong> continuation rate${vsBaseline})${sampleNote}
+        ${s.stillActive ? `<br/><span style="color:var(--ink-soft);">+ ${s.stillActive} currently active at ${threshold}+, outcome not yet known -- not counted above.</span>` : ''}
+      </div>`;
+    }
+    return `
+      <div style="background:var(--card-bg, rgba(0,0,0,0.03));border:1px solid var(--field);border-radius:4px;padding:12px 14px;margin-bottom:14px;">
+        <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:8px;">Streak continuation (${threshold}+ games)</div>
+        <div style="font-size:12px;">
+          ${sideHtml('Win streaks', 'var(--stamp-green)', cont.win)}
+          ${sideHtml('Loss streaks', 'var(--stamp-red)', cont.loss)}
+        </div>
+        <div style="font-size:10.5px;color:var(--ink-soft);margin-top:6px;">Descriptive only, not a prediction -- once a streak reaches this length, this is how often it historically kept going vs. snapped right there for this capper.</div>
+      </div>`;
+  }
+
   function streakRowHtml(s, capperName) {
     const color = s.type === 'win' ? 'var(--stamp-green)' : 'var(--stamp-red)';
     const dateRange = s.startDate === s.endDate ? s.startDate : `${s.startDate} to ${s.endDate}`;
@@ -15656,6 +15723,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         wrap.innerHTML = '<div class="empty-state">No graded picks yet for this capper.</div>';
         return;
       }
+      const threshold = Math.max(2, Number($('streakContinuationThreshold').value) || 5);
+      const decided = picks.filter(p => p.result === 'win' || p.result === 'loss');
+      const winCount = decided.filter(p => p.result === 'win').length;
+      const overallWinPct = decided.length ? Math.round((1000 * winCount) / decided.length) / 10 : null;
       // Sort longest-first so the headline streaks (the whole point of
       // this tool) are immediately visible, not buried at the bottom of
       // a chronological list. The "Current" tag still identifies which
@@ -15663,8 +15734,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const sorted = [...streaks].sort((a, b) => b.length - a.length);
       const rows = sorted.map(s => streakRowHtml(s)).join('');
       const snapshot = streakSnapshotHtml(summarizeStreaks(streaks));
+      const continuation = streakContinuationHtml(computeStreakContinuation(streaks, threshold, overallWinPct), threshold);
       wrap.innerHTML = `
         ${snapshot}
+        ${continuation}
         <div style="font-size:12px;margin-bottom:10px;"><strong>${streaks.length}</strong> streak${streaks.length === 1 ? '' : 's'} found, longest first.</div>
         <table class="picks-table">
           <thead><tr><th>Type</th><th>Length</th><th>Date range</th><th></th></tr></thead>
@@ -27894,7 +27967,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 543; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 544; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
