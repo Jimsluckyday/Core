@@ -17549,6 +17549,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td>${oddsText}</td>
         <td>${stampSpan(row.result)}</td>
         <td>${valueText}</td>
+        <td><button type="button" class="scorecard-btn" data-date="${escapeHtml(row.event_date)}">Scorecards &rarr;</button></td>
       </tr>`;
     }).join('');
 
@@ -17566,7 +17567,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       </div>
       <table class="picks-table">
         <thead><tr>
-          <th>Date</th><th>Sport</th><th>Type</th><th>Pick</th><th># Cappers</th><th>Odds</th><th>Result</th><th>Value @ $100</th>
+          <th>Date</th><th>Sport</th><th>Type</th><th>Pick</th><th># Cappers</th><th>Odds</th><th>Result</th><th>Value @ $100</th><th></th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>`;
@@ -17594,11 +17595,40 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   .stamp.pending { color: #a3730a; }
   .stamp.win, .stamp.loss, .stamp.push { color: #fff; border: none; transform: none; }
   .stamp.win { background: #2d6a4f; } .stamp.loss { background: #8a2f3a; } .stamp.push { background: #6b6456; }
+  .scorecard-btn { font-family: inherit; font-size: 10px; padding: 4px 9px; border-radius: 2px; cursor: pointer; border: 1.5px solid #234d35; background: transparent; color: #234d35; white-space: nowrap; }
+  .scorecard-btn:hover { background: #234d35; color: #eae5d6; }
+  .scorecard-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head><body>
   <h1>Consensus Picks <button id="exportCsvBtn" style="font-size:11px;font-family:inherit;padding:5px 12px;border-radius:2px;border:1.5px solid #234d35;background:#eae5d6;color:#234d35;cursor:pointer;vertical-align:middle;">&#8681; Export to CSV</button></h1>
   ${bodyHtml}
   ${csvExportPopoutScript('consensus-picks')}
+<script>
+(function() {
+  function opener() {
+    if (!window.opener || window.opener.closed) {
+      alert('The original Pick Tracker tab is closed. Reopen this report from an open Pick Tracker tab to make this work.');
+      return null;
+    }
+    return window.opener;
+  }
+  document.querySelectorAll('.scorecard-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const op = opener();
+      if (!op) return;
+      if (typeof op.jumpToScorecardReview !== 'function') {
+        alert('Connected to the main tab, but it looks like an older version without this feature -- refresh the main tab to the latest version first.');
+        return;
+      }
+      const date = btn.getAttribute('data-date');
+      btn.disabled = true;
+      btn.textContent = 'Opening...';
+      Promise.resolve(op.jumpToScorecardReview(date))
+        .finally(function() { btn.disabled = false; btn.textContent = 'Scorecards \\u2192'; });
+    });
+  });
+})();
+<\/script>
 </body></html>`);
     win.document.close();
   }
@@ -17832,6 +17862,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   ${topBottomTableHtml('Bottom 5', bottomRows)}
   ${csvExportPopoutScript('top-bottom-cappers')}
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
+    <strong>RE-RANKED 2026-09-18:</strong> Top 5 and Bottom 5 are now sorted by $ Value @ $100, not win % — "the main focus is making money," so a capper with a losing record but real positive value (a realistic outcome for a parlay-heavy capper — more losing bets than winning ones, but the wins pay out large) can no longer land in Bottom performers, and a capper with a winning record but negative value can no longer land in Top performers. Win % is still shown and still breaks a tie on value, it's just no longer the primary sort. <strong>Reading "Total picks" next to the Record:</strong> these can look mismatched for a heavy-parlay capper, and that's expected, not a bug — "Total picks" counts distinct CALLS (each parlay leg is its own pick), while Record/Value count actual WAGERS (a whole parlay is one bet, one win or loss, no matter how many legs) — the gap between the two numbers is exactly how many legs got bundled into parlays instead of bet straight.<br/><br/>
     Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show. REDESIGNED 2026-09-13: "Total picks" now counts distinct calls (a parlay leg is its own pick, a repeated call across multiple parlays/straight bets counts once), matching Capper Streaks/Scorecard Summary/Leaderboard — so a capper spamming dozens of duplicated parlays a night doesn't look like he's hit a real validation sample when he's really made far fewer distinct calls. "Value @ $100" treats every pick as the same flat size and is deliberately not deduped -- each real wager keeps its own real payout, since the money was really on the table each time. The "Unit-Adjusted Value" column (which weighted profit by each pick's own self-reported unit size) was REMOVED the same day: "I don't trust some of them as I know people wager a stupid amount of money but I don't trust when someone publicly shares a 100k bet online as if they were wagering that much and winning they wouldn't need to waste their time sharing... better to just let them show off to the group than trust their wager sizes to be true and accurate" -- self-reported sizing is no longer used anywhere in this app's scoring. Value @ $100 caps any single Parlay win's counted payout at +1000 odds — a real hit still counts as a full, large win, it just can't single-handedly make a lottery-ticket-parlay capper look historically great off one outcome ("X parlays capped" in the odds-coverage note shows how often that actually applied).
   </div>
 <script>
@@ -18067,13 +18098,25 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     });
 
     const qualifying = rows.filter(r => (r.wins + r.losses) >= minPicks && r.win_pct !== null);
-    // Same win %, then wins, then losses tiebreaker as the Capper
-    // Leaderboard -- see that report's own comment for the direct report
-    // behind it. Applies to both ends of this same sort: the bottom slice
-    // below is just the tail of this same order, so a tied-worst capper
-    // with more decisions (more losses) correctly reads as more bottom
-    // than one with almost no sample either.
-    const sorted = [...qualifying].sort((a, b) => (b.win_pct - a.win_pct) || (b.wins - a.wins) || (a.losses - b.losses));
+    // FIXED 2026-09-18, direct request after a real business-partner
+    // question: "for the month I am Parlay P is 11-25 but positive value of
+    // $453... he shouldn't end up on the bottom cappers list as record
+    // drives bad capper results but the main focus is making money so we
+    // can't count a capper as one of our bottom performers if he's
+    // profitable and the same goes for top cappers." This used to sort by
+    // win % first -- a perfectly realistic outcome for a parlay-heavy
+    // capper (more losing bets than winning ones, but the wins pay out
+    // large enough to be net profitable) could still land in "Bottom
+    // performers" purely on record, contradicting the actual business
+    // priority. Now sorts by $ value first -- win % (and previously wins/
+    // losses) only break a tie on value, and a genuinely profitable
+    // capper can no longer appear in Bottom performers unless every
+    // single qualifying capper is also profitable (nothing left to fill
+    // the slice with), which is the honest edge case, not a violation of
+    // the rule. A capper with no valued picks at all sorts as if their
+    // value were $0 (break-even) rather than being treated as worst or
+    // best by default.
+    const sorted = [...qualifying].sort((a, b) => ((b.value ?? 0) - (a.value ?? 0)) || (b.win_pct - a.win_pct) || (b.wins - a.wins) || (a.losses - b.losses));
     const topRows = sorted.slice(0, 5);
     const bottomRows = sorted.slice(-5).reverse();
 
@@ -18740,6 +18783,32 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return desc;
   }
 
+  // Direct request 2026-09-18: "allows us to pop it out to see who agreed
+  // with them." daily_consensus is an aggregate view (no capper list of
+  // its own), so this re-queries the underlying picks for the exact same
+  // match a consensus row represents -- same fields the view itself groups
+  // on -- to get the real capper names. Baked into the saved snapshot at
+  // build time (not looked up live from ledger.html) so the read-only
+  // hosted page never needs its own Supabase query logic beyond what it
+  // already has, and the list is frozen alongside everything else in that
+  // week's doc.
+  async function fetchConsensusAgreeingCappers(row) {
+    let q = 'picks?select=capper_id,cappers(name),sports(name),bet_types(name)&is_parlay_leg=eq.false';
+    q += `&event_date=eq.${row.event_date}`;
+    q += `&selection=eq.${encodeURIComponent(row.selection)}`;
+    q += (row.line !== null && row.line !== undefined) ? `&line=eq.${row.line}` : '&line=is.null';
+    q += row.prop_player ? `&prop_player=eq.${encodeURIComponent(row.prop_player)}` : '&prop_player=is.null';
+    q += row.prop_stat ? `&prop_stat=eq.${encodeURIComponent(row.prop_stat)}` : '&prop_stat=is.null';
+    try {
+      const rows = await restAllPages(q);
+      return rows
+        .filter(p => (!p.sports || p.sports.name === row.sport_name) && (!p.bet_types || p.bet_types.name === row.bet_type_name))
+        .map(p => (p.cappers ? p.cappers.name : '—'));
+    } catch (e) {
+      return [];
+    }
+  }
+
   // Every note here is derived straight from the same numbers in `doc` --
   // no invented narrative. A hand-reviewed week can still add its own notes
   // on top of these (or via the exported JSON) the same way the first two
@@ -18867,6 +18936,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       fetchTranscriptionCost(from, to),
       fetchTranscriptionCost(priorFrom, priorTo)
     ]);
+    const consensusAgreeingLists = await Promise.all(consensusRows.map(r => fetchConsensusAgreeingCappers(r)));
 
     const doc = {
       weekStart: from,
@@ -18893,19 +18963,20 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         pushes: groupStats.pushes, pending: groupStats.pending, winPct: groupStats.win_pct,
         profit: groupStats.decidedCount ? Math.round(groupStats.total_profit * 100) / 100 : null, roi: groupStats.roi_pct
       },
-      topCappers: topRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, winPct: r.win_pct, streak: streakLabel(r.streak) })),
+      topCappers: topRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, winPct: r.win_pct, streak: streakLabel(r.streak), value: r.value !== null ? Math.round(r.value * 100) / 100 : null })),
       bottomCappers: bottomRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, value: r.value !== null ? Math.round(r.value * 100) / 100 : null })),
       hotStreaks: hotStreakRows.map(r => ({ name: r.capper_name, streak: streakLabel(r.streak), totalPicks: r.total_picks, winPct: r.win_pct })),
       coldStreaks: coldStreakRows.map(r => ({ name: r.capper_name, streak: streakLabel(r.streak), totalPicks: r.total_picks, winPct: r.win_pct })),
       notableHot: notable.hot.map(e => ({ capper: e.capperName, slice: e.label, record: `${e.wins}-${e.losses}` })),
       notableCold: notable.cold.map(e => ({ capper: e.capperName, slice: e.label, record: `${e.wins}-${e.losses}` })),
-      consensus: consensusRows.map(r => {
+      consensus: consensusRows.map((r, i) => {
         const oddsUsed = r.avg_opening_odds ?? r.avg_closing_odds ?? null;
         const v = calcProfit(oddsUsed, r.result);
         return {
           date: r.event_date, sport: r.sport_name || '—', pick: ledgerConsensusPickText(r), cappers: r.agreeing_cappers,
           result: r.result ? (r.result.charAt(0).toUpperCase() + r.result.slice(1)) : '—',
-          value: v !== null ? Math.round(v * 100) / 100 : null
+          value: v !== null ? Math.round(v * 100) / 100 : null,
+          agreeingCappers: consensusAgreeingLists[i] || []
         };
       }),
       tierCalibration: tierRows.map(r => ({ tier: r.tier, type: r.type, picks: r.total_picks, wins: r.wins, losses: r.losses, pushes: r.pushes, winPct: r.win_pct })),
@@ -25395,6 +25466,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
   $('runScorecardBtn').addEventListener('click', runScorecard);
 
+  // Direct request 2026-09-18, from a real screenshot of this exact card:
+  // "if there was consensus on a pick there would be a scorecard for this
+  // pick." Rather than re-deriving the scoring/confluence machinery for a
+  // one-off "just this pick" view (the full Pass-1/Pass-2 point-in-time
+  // aggregation above is intricate and already correct), this jumps
+  // straight to the EXISTING Scorecard Review tool for that pick's date --
+  // every scored pick that day, including this one and everyone who
+  // agreed with it, rendered with the exact same publishRankCardHtml the
+  // screenshot came from. Called from the Consensus Picks pop-out's own
+  // "Scorecards ->" button via window.opener, same pattern as the
+  // Top & Bottom Cappers pop-out's "Analysis ->" button.
+  async function jumpToScorecardReview(date) {
+    switchTab('publish');
+    const panel = $('scorecardPanel');
+    if (panel && panel.style.display === 'none') $('toggleScorecardBtn').click();
+    $('scDate').value = date;
+    await runScorecard();
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  window.jumpToScorecardReview = jumpToScorecardReview;
+
   // ---------- Formula settings (changes future scoring only) ----------
   const FORMULA_DEFAULTS = {
     overallWeight: 0.25, betTypeWeight: 0.25, streakWeight: 0.25, confluenceWeight: 0.25,
@@ -27645,7 +27737,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 537; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 538; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this

@@ -148,15 +148,16 @@
     <div class="two-col">
       <div>
         <h2>Top performers</h2>
-        <p class="section-note">Ranked by win %, from the Capper Leaderboard.</p>
-        <table class="ledger"><thead><tr><th>Capper</th><th class="num">Picks</th><th class="num">Record</th><th class="num">Streak</th></tr></thead><tbody id="topRows"></tbody></table>
+        <p class="section-note">Ranked by $ value, not win % — a capper with a losing record can't rank here unless he's actually profitable.</p>
+        <table class="ledger"><thead><tr><th>Capper</th><th class="num">Picks</th><th class="num">Record</th><th class="num">Value</th></tr></thead><tbody id="topRows"></tbody></table>
       </div>
       <div>
         <h2>Bottom performers</h2>
-        <p class="section-note">From Top &amp; Bottom Cappers, with real $ value at flat stakes.</p>
+        <p class="section-note">Ranked by $ value — a capper with a losing record but genuine positive value can't land here.</p>
         <table class="ledger"><thead><tr><th>Capper</th><th class="num">Picks</th><th class="num">Record</th><th class="num">Value</th></tr></thead><tbody id="bottomRows"></tbody></table>
       </div>
     </div>
+    <p class="volume-caption">"Picks" counts distinct calls (each parlay leg is its own pick); "Record" counts actual wagers (a whole parlay is one bet, win or lose, no matter how many legs) — for a heavy-parlay capper these numbers won't match, and that's expected, not an error.</p>
   </section>
 
   <section>
@@ -493,7 +494,7 @@
       renderCompareTile('Group (full tracking pool)', w.group, false);
 
     document.getElementById('topRows').innerHTML = (w.topCappers || []).map(function(c) {
-      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + c.picks + '</td><td class="num"><span class="pill win">' + esc(c.record) + '</span></td><td class="num">' + esc(c.streak || '—') + '</td></tr>';
+      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + c.picks + '</td><td class="num"><span class="pill win">' + esc(c.record) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
     }).join('') || '<tr><td colspan="4" class="empty-note">Not run this week</td></tr>';
 
     document.getElementById('bottomRows').innerHTML = (w.bottomCappers || []).map(function(c) {
@@ -516,11 +517,30 @@
       return '<tr><td>' + esc(n.capper) + '</td><td>' + esc(n.slice) + '</td><td class="num"><span class="pill loss">' + esc(n.record) + '</span></td></tr>';
     }).join('') || '<tr><td colspan="3" class="empty-note">Nothing cleared the bar</td></tr>';
 
-    document.getElementById('consensusRows').innerHTML = (w.consensus || []).map(function(c) {
+    // Direct request 2026-09-18: "allows us to pop it out to see who agreed
+    // with them." The full scorecard (score + confluence breakdown) only
+    // lives in admin.html, where the scoring engine actually runs -- but
+    // the plain list of WHO agreed was baked into this doc at build time
+    // (see fetchConsensusAgreeingCappers in index.html), so it can be
+    // shown here with a click, no live query needed from this page.
+    document.getElementById('consensusRows').innerHTML = (w.consensus || []).map(function(c, i) {
       var isWin = c.result === 'Win';
-      return '<tr><td>' + esc(c.date) + '</td><td>' + esc(c.sport) + '</td><td>' + esc(c.pick) + '</td><td class="num">' + c.cappers + '</td>' +
-        '<td class="num"><span class="pill ' + (isWin ? 'win' : 'loss') + '">' + esc(c.result) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
+      var agreeing = c.agreeingCappers || [];
+      var cappersCell = agreeing.length
+        ? '<span class="who-agreed-toggle" data-idx="' + i + '" style="cursor:pointer;text-decoration:underline dotted;" title="Click to see who agreed">' + c.cappers + '</span>'
+        : String(c.cappers);
+      var detailRow = agreeing.length
+        ? '<tr class="who-agreed-detail" data-idx="' + i + '" style="display:none;"><td colspan="6" style="font-size:11.5px;color:var(--ink-soft);background:var(--paper-raised);">Agreed: ' + agreeing.map(esc).join(', ') + '</td></tr>'
+        : '';
+      return '<tr><td>' + esc(c.date) + '</td><td>' + esc(c.sport) + '</td><td>' + esc(c.pick) + '</td><td class="num">' + cappersCell + '</td>' +
+        '<td class="num"><span class="pill ' + (isWin ? 'win' : 'loss') + '">' + esc(c.result) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>' + detailRow;
     }).join('') || '<tr><td colspan="6" class="empty-note">Not run this week</td></tr>';
+    document.querySelectorAll('.who-agreed-toggle').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var row = document.querySelector('.who-agreed-detail[data-idx="' + el.getAttribute('data-idx') + '"]');
+        if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+      });
+    });
 
     // Direct request 2026-09-18: "I'd like the highest consensus section to
     // have a record as I can count the wins/losses by hand but I'd prefer a
