@@ -562,22 +562,62 @@
     // highest agreeing capper's own frozen score were baked into this doc
     // at build time (see fetchConsensusAgreeingCappers in index.html), so
     // they can be shown here directly with no live query from this page.
+    // REDESIGNED 2026-09-18, direct pushback: "were all those cappers
+    // scored at 25? 29? 32... with no card there is no value" and then
+    // "is there some reason we aren't publishing the actual card." A bare
+    // names list, then a single top-score number, both fell short of what
+    // was actually asked for -- the real Publish Ranking scorecard: total
+    // score, the full overall/bet-type/streak/confluence point breakdown,
+    // and who else agreed with THAT capper's pick. All of it comes
+    // straight off scorecardBreakdown (the pick's own frozen
+    // published_score_breakdown/first_scored_score_breakdown, baked in by
+    // fetchConsensusAgreeingCappers in index.html) -- no scoring math runs
+    // on this page, it's just rendering already-computed, already-frozen
+    // numbers.
+    function scorecardCardHtml(c) {
+      var bd = c.scorecardBreakdown;
+      if (!bd) return '<div style="font-size:11.5px;color:var(--ink-soft);font-style:italic;">Publish Ranking never scored this pick, so there\'s no scorecard to show.</div>';
+      var streakLbl = (bd.streak && bd.streak.type) ? ((bd.streak.type === 'win' ? 'W' : 'L') + bd.streak.len) : '—';
+      var pt = function (n) { return (n === null || n === undefined) ? '—' : ((n >= 0 ? '+' : '') + n.toFixed(1) + 'pt'); };
+      var rows = [
+        ['Overall record', bd.overall_record + ' (' + bd.overall_adj_pct + '% adj)', pt(bd.overall_pts)],
+        ['Same bet type', bd.bet_type_record + ' (' + bd.bet_type_adj_pct + '% blended)', pt(bd.bet_type_pts)],
+        ['Streak', streakLbl, pt(bd.streak_pts)],
+        ['Confluence', (bd.agreeing_cappers || []).length + ' other capper' + ((bd.agreeing_cappers || []).length === 1 ? '' : 's') + ' agreed', pt(bd.confluence_pts)]
+      ].map(function (r) {
+        return '<div style="display:flex;justify-content:space-between;gap:10px;font-family:\'IBM Plex Mono\',monospace;font-size:11.5px;padding:3px 0;">' +
+          '<span style="color:var(--ink-soft);">' + esc(r[0]) + '</span><span style="flex:1;text-align:right;">' + esc(r[1]) + '</span><span style="min-width:48px;text-align:right;font-weight:600;">' + esc(r[2]) + '</span></div>';
+      }).join('');
+      var agreeingHtml = (bd.agreeing_cappers || []).length
+        ? '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--field);font-size:11px;">' +
+          '<div style="color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.05em;font-size:10px;margin-bottom:4px;">Also independently picked this game</div>' +
+          bd.agreeing_cappers.map(function (a) {
+            return '<div style="padding:2px 0;">' + esc(a.name) + (a.isLeg ? ' <span style="color:var(--accent);">(parlay leg)</span>' : '') +
+              (a.isHotStreak ? ' &#128293;' : '') + ' — Overall: ' + esc(a.overallRecord) + ' (' + a.overallAdjPct + '% adj)</div>';
+          }).join('') + '</div>'
+        : '';
+      return '<div style="background:var(--paper-raised);border:1px solid var(--field-soft);border-radius:6px;padding:12px 14px;max-width:520px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
+          '<strong style="font-family:\'Fraunces\',serif;font-size:15px;">' + esc(c.scorecardCapper) + '</strong>' +
+          '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:16px;font-weight:600;color:var(--accent);">' + c.scorecard.toFixed(1) + ' pts</span>' +
+        '</div>' + rows + agreeingHtml + '</div>';
+    }
+
     document.getElementById('consensusRows').innerHTML = (w.consensus || []).map(function(c, i) {
       var isWin = c.result === 'Win';
-      var agreeing = c.agreeingCappers || [];
-      var cappersCell = agreeing.length
-        ? '<span class="who-agreed-toggle" data-idx="' + i + '" style="cursor:pointer;text-decoration:underline dotted;" title="Click to see who agreed">' + c.cappers + '</span>'
-        : String(c.cappers);
-      var detailRow = agreeing.length
-        ? '<tr class="who-agreed-detail" data-idx="' + i + '" style="display:none;"><td colspan="7" style="font-size:11.5px;color:var(--ink-soft);background:var(--paper-raised);">Agreed: ' + agreeing.map(esc).join(', ') + '</td></tr>'
+      var hasScorecard = c.scorecard !== null && c.scorecard !== undefined;
+      var scorecardCell = hasScorecard
+        ? '<span class="scorecard-toggle" data-idx="' + i + '" style="cursor:pointer;text-decoration:underline dotted;color:var(--accent);font-weight:600;" title="Click to view the full scorecard">' + c.scorecard.toFixed(1) + ' pts</span>'
+        : '—';
+      var detailRow = hasScorecard
+        ? '<tr class="scorecard-detail" data-idx="' + i + '" style="display:none;"><td colspan="7" style="background:var(--paper);padding:12px 7px;">' + scorecardCardHtml(c) + '</td></tr>'
         : '';
-      var scorecardCell = (c.scorecard === null || c.scorecard === undefined) ? '—' : (c.scorecard.toFixed(1) + ' pts');
-      return '<tr><td>' + esc(c.date) + '</td><td>' + esc(c.sport) + '</td><td>' + esc(c.pick) + '</td><td class="num">' + cappersCell + '</td>' +
+      return '<tr><td>' + esc(c.date) + '</td><td>' + esc(c.sport) + '</td><td>' + esc(c.pick) + '</td><td class="num">' + c.cappers + '</td>' +
         '<td class="num"><span class="pill ' + (isWin ? 'win' : 'loss') + '">' + esc(c.result) + '</span></td><td class="num">' + scorecardCell + '</td><td class="num">' + fmtMoney(c.value) + '</td></tr>' + detailRow;
     }).join('') || '<tr><td colspan="7" class="empty-note">Not run this week</td></tr>';
-    document.querySelectorAll('.who-agreed-toggle').forEach(function (el) {
+    document.querySelectorAll('.scorecard-toggle').forEach(function (el) {
       el.addEventListener('click', function () {
-        var row = document.querySelector('.who-agreed-detail[data-idx="' + el.getAttribute('data-idx') + '"]');
+        var row = document.querySelector('.scorecard-detail[data-idx="' + el.getAttribute('data-idx') + '"]');
         if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
       });
     });
