@@ -135,7 +135,7 @@
   <section>
     <h2>Highest-consensus picks<span class="n" id="consensusRecordLine"></span></h2>
     <p class="section-note">The picks the widest number of cappers independently agreed on this week, and whether the group was right.</p>
-    <table class="ledger"><thead><tr><th>Date</th><th>Sport</th><th>Pick</th><th class="num">Cappers</th><th class="num">Result</th><th class="num">Value</th></tr></thead><tbody id="consensusRows"></tbody></table>
+    <table class="ledger"><thead><tr><th>Date</th><th>Sport</th><th>Pick</th><th class="num">Cappers</th><th class="num">Result</th><th class="num">Scorecard</th><th class="num">Value</th></tr></thead><tbody id="consensusRows"></tbody></table>
   </section>
 
   <section>
@@ -518,11 +518,14 @@
     }).join('') || '<tr><td colspan="3" class="empty-note">Nothing cleared the bar</td></tr>';
 
     // Direct request 2026-09-18: "allows us to pop it out to see who agreed
-    // with them." The full scorecard (score + confluence breakdown) only
-    // lives in admin.html, where the scoring engine actually runs -- but
-    // the plain list of WHO agreed was baked into this doc at build time
-    // (see fetchConsensusAgreeingCappers in index.html), so it can be
-    // shown here with a click, no live query needed from this page.
+    // with them" plus, after a follow-up clarifying screenshot: "whoever had
+    // the highest score of these picks should have a scorecard and that's
+    // the number I want to see." The full scorecard breakdown (score +
+    // confluence detail) only lives in admin.html, where the scoring engine
+    // actually runs -- but both the plain list of WHO agreed and the
+    // highest agreeing capper's own frozen score were baked into this doc
+    // at build time (see fetchConsensusAgreeingCappers in index.html), so
+    // they can be shown here directly with no live query from this page.
     document.getElementById('consensusRows').innerHTML = (w.consensus || []).map(function(c, i) {
       var isWin = c.result === 'Win';
       var agreeing = c.agreeingCappers || [];
@@ -530,11 +533,12 @@
         ? '<span class="who-agreed-toggle" data-idx="' + i + '" style="cursor:pointer;text-decoration:underline dotted;" title="Click to see who agreed">' + c.cappers + '</span>'
         : String(c.cappers);
       var detailRow = agreeing.length
-        ? '<tr class="who-agreed-detail" data-idx="' + i + '" style="display:none;"><td colspan="6" style="font-size:11.5px;color:var(--ink-soft);background:var(--paper-raised);">Agreed: ' + agreeing.map(esc).join(', ') + '</td></tr>'
+        ? '<tr class="who-agreed-detail" data-idx="' + i + '" style="display:none;"><td colspan="7" style="font-size:11.5px;color:var(--ink-soft);background:var(--paper-raised);">Agreed: ' + agreeing.map(esc).join(', ') + '</td></tr>'
         : '';
+      var scorecardCell = (c.scorecard === null || c.scorecard === undefined) ? '—' : (c.scorecard.toFixed(1) + ' pts');
       return '<tr><td>' + esc(c.date) + '</td><td>' + esc(c.sport) + '</td><td>' + esc(c.pick) + '</td><td class="num">' + cappersCell + '</td>' +
-        '<td class="num"><span class="pill ' + (isWin ? 'win' : 'loss') + '">' + esc(c.result) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>' + detailRow;
-    }).join('') || '<tr><td colspan="6" class="empty-note">Not run this week</td></tr>';
+        '<td class="num"><span class="pill ' + (isWin ? 'win' : 'loss') + '">' + esc(c.result) + '</span></td><td class="num">' + scorecardCell + '</td><td class="num">' + fmtMoney(c.value) + '</td></tr>' + detailRow;
+    }).join('') || '<tr><td colspan="7" class="empty-note">Not run this week</td></tr>';
     document.querySelectorAll('.who-agreed-toggle').forEach(function (el) {
       el.addEventListener('click', function () {
         var row = document.querySelector('.who-agreed-detail[data-idx="' + el.getAttribute('data-idx') + '"]');
