@@ -2138,7 +2138,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </p>
       <div id="streakHistoryPanel" style="display:none;">
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          Every consecutive run of wins or losses in a capper's graded history, not just whichever one is currently active -- so "on a 7-game win streak right now" doesn't hide that they also had an 11-game streak earlier, which matters for judging whether a capper runs hot/cold in bursts. Pushes are skipped over entirely (neither break nor extend a streak). Ordered by event_date, which is when the game actually happened, not when the pick was entered -- important since backfilled historical data isn't always entered in chronological order.
+          Every consecutive run of wins or losses in a capper's graded history, not just whichever one is currently active -- so "on a 7-game win streak right now" doesn't hide that they also had an 11-game streak earlier, which matters for judging whether a capper runs hot/cold in bursts. Pushes are skipped over entirely (neither break nor extend a streak). Ordered by event_date, which is when the game actually happened, not when the pick was entered -- important since backfilled historical data isn't always entered in chronological order. ADDED 2026-09-18: a "Streak snapshot" summary now sits above the full list -- longest win/loss streak ever, average streak length each direction, and how many times (if any) this capper has already reached the length of whatever streak is currently active, as a data point for judging whether he tends to right the ship on a cold run or regress after a hot one. Purely descriptive, not a prediction -- worth revisiting once more data has banked up.
         </div>
         <div class="row">
           <div class="field">
@@ -15553,6 +15553,74 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return streaks;
   }
 
+  // Direct request 2026-09-18: "for an individual capper how long is their
+  // biggest streak both win/loss, their average streak is and should we
+  // use this long term to say Capper A is on a 6 game winning streak but
+  // has never passed that so is it more likely he fails or the opposite
+  // end capper b is on a 6 game losing streak which he's done 10 times so
+  // we can be more confident he will break that streak." Originally parked
+  // ("would have to be validated by lots and lots of data") -- then
+  // reopened: "we should add it in and see how the data builds... it is a
+  // good data point to look at." Built directly on the EXISTING
+  // computeAllStreaks output (already finds every streak in a capper's
+  // history, not just the current one) rather than a new query -- this is
+  // purely a summary layer over data already being computed.
+  // timesAtLeastCurrent answers the exact regression-to-the-mean question
+  // directly: how many PAST streaks of the same type (win or loss) have
+  // already reached or exceeded the length of whatever streak is active
+  // right now. Explicitly NOT a prediction -- just the historical
+  // frequency the user asked to have visible so it can be judged over time
+  // as more data accumulates.
+  function summarizeStreaks(streaks) {
+    const wins = streaks.filter(s => s.type === 'win');
+    const losses = streaks.filter(s => s.type === 'loss');
+    const avg = arr => arr.length ? Math.round((arr.reduce((sum, s) => sum + s.length, 0) / arr.length) * 10) / 10 : null;
+    const longest = arr => arr.length ? arr.reduce((best, s) => (s.length > best.length ? s : best)) : null;
+    const current = streaks.find(s => s.isCurrent) || null;
+    let timesAtLeastCurrent = 0;
+    if (current) {
+      const sameType = current.type === 'win' ? wins : losses;
+      timesAtLeastCurrent = sameType.filter(s => !s.isCurrent && s.length >= current.length).length;
+    }
+    return {
+      current,
+      longestWin: longest(wins),
+      longestLoss: longest(losses),
+      avgWinLength: avg(wins),
+      avgLossLength: avg(losses),
+      winStreakCount: wins.length,
+      lossStreakCount: losses.length,
+      timesAtLeastCurrent
+    };
+  }
+
+  function streakSnapshotHtml(sum) {
+    const cur = sum.current;
+    const curLine = cur
+      ? `<strong style="color:${cur.type === 'win' ? 'var(--stamp-green)' : 'var(--stamp-red)'};text-transform:uppercase;">${cur.type} ${cur.length}</strong> right now`
+      : 'No active streak';
+    let contextLine = '';
+    if (cur) {
+      if (sum.timesAtLeastCurrent > 0) {
+        contextLine = `He's reached a ${cur.type} streak of ${cur.length}+ ${sum.timesAtLeastCurrent} time${sum.timesAtLeastCurrent === 1 ? '' : 's'} before this one -- ${cur.type === 'loss' ? "not unprecedented, for what that's worth" : 'has been here before, worth watching for regression'}.`;
+      } else {
+        contextLine = `This is the longest ${cur.type} streak on record for this capper -- uncharted territory${cur.type === 'loss' ? ', worth a closer look' : ''}.`;
+      }
+    }
+    return `
+      <div style="background:var(--card-bg, rgba(0,0,0,0.03));border:1px solid var(--field);border-radius:4px;padding:12px 14px;margin-bottom:14px;">
+        <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:8px;">Streak snapshot</div>
+        <div style="font-size:13px;margin-bottom:8px;">${curLine}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:12px;margin-bottom:8px;">
+          <span>Longest win streak: <strong style="color:var(--stamp-green);">${sum.longestWin ? sum.longestWin.length : '—'}</strong>${sum.longestWin ? ` (${sum.longestWin.startDate === sum.longestWin.endDate ? sum.longestWin.startDate : sum.longestWin.startDate + ' to ' + sum.longestWin.endDate})` : ''}</span>
+          <span>Longest loss streak: <strong style="color:var(--stamp-red);">${sum.longestLoss ? sum.longestLoss.length : '—'}</strong>${sum.longestLoss ? ` (${sum.longestLoss.startDate === sum.longestLoss.endDate ? sum.longestLoss.startDate : sum.longestLoss.startDate + ' to ' + sum.longestLoss.endDate})` : ''}</span>
+          <span>Avg win streak: <strong>${sum.avgWinLength ?? '—'}</strong> (${sum.winStreakCount})</span>
+          <span>Avg loss streak: <strong>${sum.avgLossLength ?? '—'}</strong> (${sum.lossStreakCount})</span>
+        </div>
+        ${contextLine ? `<div style="font-size:11.5px;color:var(--ink-soft);">${contextLine}</div>` : ''}
+      </div>`;
+  }
+
   function streakRowHtml(s, capperName) {
     const color = s.type === 'win' ? 'var(--stamp-green)' : 'var(--stamp-red)';
     const dateRange = s.startDate === s.endDate ? s.startDate : `${s.startDate} to ${s.endDate}`;
@@ -15594,7 +15662,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // one is active regardless of where it sorts.
       const sorted = [...streaks].sort((a, b) => b.length - a.length);
       const rows = sorted.map(s => streakRowHtml(s)).join('');
+      const snapshot = streakSnapshotHtml(summarizeStreaks(streaks));
       wrap.innerHTML = `
+        ${snapshot}
         <div style="font-size:12px;margin-bottom:10px;"><strong>${streaks.length}</strong> streak${streaks.length === 1 ? '' : 's'} found, longest first.</div>
         <table class="picks-table">
           <thead><tr><th>Type</th><th>Length</th><th>Date range</th><th></th></tr></thead>
@@ -27824,7 +27894,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 542; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 543; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
