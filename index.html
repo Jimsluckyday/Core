@@ -17807,19 +17807,39 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     $('toggleTopBottomBtn').textContent = showing ? 'Show ranking' : 'Hide ranking';
   });
 
+  // REDESIGNED 2026-09-18, direct report: "Cody Covers Spreads 25 picks,
+  // 22-49-0 record... were I to show this to someone who has zero
+  // experience... the first thing they would think is the data is
+  // broken." The old single row mixed two different denominators --
+  // "Total picks" from the DISTINCT basis (25) sitting right next to
+  // Wins/Losses/Pushes from the WAGER basis (22/49/0), which don't sum to
+  // the picks number and never will for a parlay-heavy capper. A hover
+  // tooltip explaining the mismatch wasn't enough -- a reader has to
+  // notice something's off before they'd think to hover at all. Now shows
+  // BOTH bases fully and separately, side by side, each with its own real
+  // total/W/L/P/win % that actually reconciles internally, so nothing
+  // needs to be explained away after the fact.
   function topBottomTableHtml(title, rows) {
     if (!rows.length) return `<p class="stub-title">${title}</p><div class="empty-state">No qualifying cappers.</div>`;
     const body = rows.map((r, i) => {
       const streak = r.streak || { type: null, len: 0 };
       const streakColor = streak.type === 'win' ? '#2d6a4f' : (streak.type === 'loss' ? '#8a2f3a' : '#55584d');
+      const reuseWarning = r.heavyParlayReuse
+        ? ` <span style="cursor:help;color:var(--gold-dark, #8a6d1a);font-weight:bold;" title="${r.parlayPickCount} parlay picks (counted in Total bets) came from only ${r.uniqueLegs} distinct underlying leg picks (each reused ~${r.reuseFactor.toFixed(1)}x on average across different parlay combos) -- that's why Distinct picks is lower than Total bets.">&#9888;&#xFE0E;</span>`
+        : '';
       return `<tr>
       <td>${i + 1}</td>
       <td>${escapeHtml(r.capper_name)}</td>
-      <td>${r.distinct_total_picks}</td>
+      <td>${r.distinct_total_picks}${reuseWarning}</td>
+      <td>${r.distinct_wins}</td>
+      <td>${r.distinct_losses}</td>
+      <td>${r.distinct_pushes}</td>
+      <td>${r.distinct_win_pct !== null ? r.distinct_win_pct + '%' : '—'}</td>
+      <td>${r.total_picks}</td>
       <td>${r.wins}</td>
       <td>${r.losses}</td>
       <td>${r.pushes}</td>
-      <td>${r.win_pct !== null ? r.win_pct + '%' : '—'}${r.heavyParlayReuse ? ` <span style="cursor:help;color:var(--gold-dark, #8a6d1a);font-weight:bold;" title="Win % discounted -- ${r.parlayPickCount} parlay picks were built from only ${r.uniqueLegs} distinct underlying leg picks (each real pick reused ~${r.reuseFactor.toFixed(1)}x on average across different parlay combos), so they don't count as that many independent decided picks. Straight (non-parlay) picks and the dollar value above are unaffected.">&#9888;&#xFE0E;</span>` : ''}</td>
+      <td>${r.wager_win_pct !== null ? r.wager_win_pct + '%' : '—'}</td>
       <td><span style="color:${streakColor};font-weight:bold;">${streakLabel(streak)}</span></td>
       <td>${r.value !== null ? `${r.value >= 0 ? '+' : '−'}$${Math.abs(r.value).toFixed(2)}` : '—'}
           <span style="color:var(--ink-soft);font-size:10px;"> (${r.oddsPresentCount}/${r.total_picks} have odds${r.pending ? ` &middot; ${r.pending} pending` : ''}${r.parlayCappedCount ? ` &middot; ${r.parlayCappedCount} parlay${r.parlayCappedCount === 1 ? '' : 's'} capped` : ''})</span></td>
@@ -17829,7 +17849,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return `
       <p class="stub-title" style="margin-bottom:8px;">${title}</p>
       <table class="picks-table" style="margin-bottom:20px;">
-        <thead><tr><th>#</th><th>Capper</th><th>Total picks</th><th>Wins</th><th>Losses</th><th>Pushes</th><th>Win %</th><th>Streak</th><th>Value @ $100</th><th></th></tr></thead>
+        <thead>
+          <tr>
+            <th>#</th><th>Capper</th>
+            <th style="border-left:2px solid #22281f;">Distinct picks</th><th>Distinct W</th><th>Distinct L</th><th>Distinct P</th><th>Distinct win %</th>
+            <th style="border-left:2px solid #22281f;">Total bets</th><th>Bet W</th><th>Bet L</th><th>Bet P</th><th>Bet win %</th>
+            <th>Streak</th><th>Value @ $100</th><th></th>
+          </tr>
+        </thead>
         <tbody>${body}</tbody>
       </table>`;
   }
@@ -17862,7 +17889,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   ${topBottomTableHtml('Bottom 5', bottomRows)}
   ${csvExportPopoutScript('top-bottom-cappers')}
   <div style="font-size:10px;color:#55584d;margin-top:8px;">
-    <strong>RE-RANKED 2026-09-18:</strong> Top 5 and Bottom 5 are now sorted by $ Value @ $100, not win % — "the main focus is making money," so a capper with a losing record but real positive value (a realistic outcome for a parlay-heavy capper — more losing bets than winning ones, but the wins pay out large) can no longer land in Bottom performers, and a capper with a winning record but negative value can no longer land in Top performers. Win % is still shown and still breaks a tie on value, it's just no longer the primary sort. <strong>Reading "Total picks" next to the Record:</strong> these can look mismatched for a heavy-parlay capper, and that's expected, not a bug — "Total picks" counts distinct CALLS (each parlay leg is its own pick), while Record/Value count actual WAGERS (a whole parlay is one bet, one win or loss, no matter how many legs) — the gap between the two numbers is exactly how many legs got bundled into parlays instead of bet straight.<br/><br/>
+    <strong>RE-RANKED 2026-09-18:</strong> Top 5 and Bottom 5 are now sorted by $ Value @ $100, not win % — "the main focus is making money," so a capper with a losing record but real positive value (a realistic outcome for a parlay-heavy capper — more losing bets than winning ones, but the wins pay out large) can no longer land in Bottom performers, and a capper with a winning record but negative value can no longer land in Top performers. <strong>REDESIGNED 2026-09-18, "Distinct picks" vs. "Total bets":</strong> these are now two fully separate columns, each with its own real Total/W/L/P/Win % that adds up on its own — never a count from one basis shown next to a record from the other, which is what made a heavy-parlay capper's row look broken before this change. "Distinct picks" counts distinct CALLS (each parlay leg is its own pick, a call reused across several parlays counts once); "Total bets" counts actual WAGERS (a whole parlay is one bet, one win or loss, no matter how many legs). For most cappers Distinct picks runs a bit ABOVE Total bets (a 2-leg parlay is 1 bet but 2 distinct calls); for a capper who builds many parlay slips from a small, reused pool of the same calls (flagged with &#9888;&#xFE0E; on Distinct picks), it can run BELOW Total bets instead — both directions are normal, only the reuse pattern differs. Value @ $100 is always wager-based and untouched by any of this.<br/><br/>
     Streak is current consecutive wins (W) or losses (L) in picks, most recent first — a push doesn't break it, since it's neither a win nor a loss. A top-5 capper on a long losing streak, or a bottom-5 capper on a long winning one, is worth a second look before deciding what stays published. Click "Analysis" next to any capper to open their full bet-type/sport breakdown for these same filters, without re-running a separate report. This tab is a snapshot from whenever it was last run/refreshed — use Refresh above after adding or editing picks elsewhere so the numbers here match what Analysis will show. REDESIGNED 2026-09-13: "Total picks" now counts distinct calls (a parlay leg is its own pick, a repeated call across multiple parlays/straight bets counts once), matching Capper Streaks/Scorecard Summary/Leaderboard — so a capper spamming dozens of duplicated parlays a night doesn't look like he's hit a real validation sample when he's really made far fewer distinct calls. "Value @ $100" treats every pick as the same flat size and is deliberately not deduped -- each real wager keeps its own real payout, since the money was really on the table each time. The "Unit-Adjusted Value" column (which weighted profit by each pick's own self-reported unit size) was REMOVED the same day: "I don't trust some of them as I know people wager a stupid amount of money but I don't trust when someone publicly shares a 100k bet online as if they were wagering that much and winning they wouldn't need to waste their time sharing... better to just let them show off to the group than trust their wager sizes to be true and accurate" -- self-reported sizing is no longer used anywhere in this app's scoring. Value @ $100 caps any single Parlay win's counted payout at +1000 odds — a real hit still counts as a full, large win, it just can't single-handedly make a lottery-ticket-parlay capper look historically great off one outcome ("X parlays capped" in the odds-coverage note shows how often that actually applied).
   </div>
 <script>
@@ -18059,6 +18086,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const rows = Object.values(byCapper).map(b => {
       const distinctEntry = distinctByCapperTopBottom[b.capper_id];
       const distinct_total_picks = distinctEntry ? distinctEntry.distinctPicks.length : 0;
+      // FIXED 2026-09-18, direct report: "Cody Covers Spreads 25 picks,
+      // 22-49-0 record... were I to show this to someone who has zero
+      // experience... the first thing they would think is the data is
+      // broken." Real design flaw, not just a missing tooltip -- this
+      // report's row was showing "Total picks" from the DISTINCT basis
+      // (25) right next to Wins/Losses/Pushes from the WAGER basis
+      // (22/49/0), two different denominators mixed in one line that
+      // arithmetically don't sum (25 != 22+49+0). Computing the distinct
+      // side's OWN win/loss/push/pending breakdown here so both bases can
+      // be shown fully and separately -- never a count from one basis next
+      // to a record from the other.
+      let distinctWins = 0, distinctLosses = 0, distinctPushes = 0, distinctPending = 0;
+      if (distinctEntry) {
+        distinctEntry.distinctPicks.forEach(p => {
+          if (p.result === 'win') distinctWins++;
+          else if (p.result === 'loss') distinctLosses++;
+          else if (p.result === 'push') distinctPushes++;
+          else distinctPending++;
+        });
+      }
+      const distinctWinPct = (distinctWins + distinctLosses) > 0 ? Math.round((1000 * distinctWins) / (distinctWins + distinctLosses)) / 10 : null;
       // CONFIRMED REQUEST 2026-09-06 (see the parlay_legs fetch above for
       // the full reasoning): reuseFactor is "on average, how many different
       // parlays did each of this capper's real underlying leg picks end up
@@ -18087,7 +18135,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       return {
         ...b,
         distinct_total_picks,
+        distinct_wins: distinctWins,
+        distinct_losses: distinctLosses,
+        distinct_pushes: distinctPushes,
+        distinct_pending: distinctPending,
+        distinct_win_pct: distinctWinPct,
         win_pct: weightedDecided > 0 ? Math.round((1000 * (straightWins + weightedParlayWins)) / weightedDecided) / 10 : null,
+        wager_win_pct: (b.wins + b.losses) > 0 ? Math.round((1000 * b.wins) / (b.wins + b.losses)) / 10 : null,
         heavyParlayReuse,
         reuseFactor,
         parlayPickCount: b.parlayWins + b.parlayLosses,
@@ -18979,8 +19033,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         pushes: groupStats.pushes, pending: groupStats.pending, winPct: groupStats.win_pct,
         profit: groupStats.decidedCount ? Math.round(groupStats.total_profit * 100) / 100 : null, roi: groupStats.roi_pct
       },
-      topCappers: topRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, winPct: r.win_pct, streak: streakLabel(r.streak), value: r.value !== null ? Math.round(r.value * 100) / 100 : null, heavyParlayReuse: r.heavyParlayReuse, reuseFactor: r.reuseFactor !== null && r.reuseFactor !== undefined ? Math.round(r.reuseFactor * 10) / 10 : null, parlayPickCount: r.parlayPickCount, uniqueLegs: r.uniqueLegs })),
-      bottomCappers: bottomRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, value: r.value !== null ? Math.round(r.value * 100) / 100 : null, heavyParlayReuse: r.heavyParlayReuse, reuseFactor: r.reuseFactor !== null && r.reuseFactor !== undefined ? Math.round(r.reuseFactor * 10) / 10 : null, parlayPickCount: r.parlayPickCount, uniqueLegs: r.uniqueLegs })),
+      // FIXED 2026-09-18, direct report: "were I to show this to someone who
+      // has zero experience... the first thing they would think is the data
+      // is broken" -- `picks` (distinct) and `record` (wager-based) used to
+      // be shown side by side with no reconciling detail beyond a hover
+      // warning. Now carries BOTH bases fully -- distinctRecord/distinctWinPct
+      // alongside the existing distinct `picks` count, and betsTotal/betWinPct
+      // alongside the existing wager-based `record` -- so ledger.html can
+      // render two clearly-labeled, internally-consistent lines instead of
+      // one ambiguous pair of numbers.
+      topCappers: topRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, distinctRecord: `${r.distinct_wins}-${r.distinct_losses}-${r.distinct_pushes}`, distinctWinPct: r.distinct_win_pct, record: `${r.wins}-${r.losses}-${r.pushes}`, betsTotal: r.total_picks, betWinPct: r.wager_win_pct, winPct: r.win_pct, streak: streakLabel(r.streak), value: r.value !== null ? Math.round(r.value * 100) / 100 : null, heavyParlayReuse: r.heavyParlayReuse, reuseFactor: r.reuseFactor !== null && r.reuseFactor !== undefined ? Math.round(r.reuseFactor * 10) / 10 : null, parlayPickCount: r.parlayPickCount, uniqueLegs: r.uniqueLegs })),
+      bottomCappers: bottomRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, distinctRecord: `${r.distinct_wins}-${r.distinct_losses}-${r.distinct_pushes}`, distinctWinPct: r.distinct_win_pct, record: `${r.wins}-${r.losses}-${r.pushes}`, betsTotal: r.total_picks, betWinPct: r.wager_win_pct, value: r.value !== null ? Math.round(r.value * 100) / 100 : null, heavyParlayReuse: r.heavyParlayReuse, reuseFactor: r.reuseFactor !== null && r.reuseFactor !== undefined ? Math.round(r.reuseFactor * 10) / 10 : null, parlayPickCount: r.parlayPickCount, uniqueLegs: r.uniqueLegs })),
       hotStreaks: hotStreakRows.map(r => ({ name: r.capper_name, streak: streakLabel(r.streak), totalPicks: r.total_picks, winPct: r.win_pct })),
       coldStreaks: coldStreakRows.map(r => ({ name: r.capper_name, streak: streakLabel(r.streak), totalPicks: r.total_picks, winPct: r.win_pct })),
       notableHot: notable.hot.map(e => ({ capper: e.capperName, slice: e.label, record: `${e.wins}-${e.losses}` })),
@@ -27754,7 +27817,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 540; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 541; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this

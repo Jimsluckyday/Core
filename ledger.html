@@ -145,19 +145,27 @@
   </section>
 
   <section>
-    <div class="two-col">
-      <div>
-        <h2>Top performers</h2>
-        <p class="section-note">Ranked by $ value, not win % — a capper with a losing record can't rank here unless he's actually profitable.</p>
-        <table class="ledger"><thead><tr><th>Capper</th><th class="num">Picks</th><th class="num">Record</th><th class="num">Value</th></tr></thead><tbody id="topRows"></tbody></table>
-      </div>
-      <div>
-        <h2>Bottom performers</h2>
-        <p class="section-note">Ranked by $ value — a capper with a losing record but genuine positive value can't land here.</p>
-        <table class="ledger"><thead><tr><th>Capper</th><th class="num">Picks</th><th class="num">Record</th><th class="num">Value</th></tr></thead><tbody id="bottomRows"></tbody></table>
-      </div>
+    <div>
+      <h2>Top performers</h2>
+      <p class="section-note">Ranked by $ value, not win % — a capper with a losing record can't rank here unless he's actually profitable.</p>
+      <div class="trend-wrap"><table class="ledger"><thead><tr>
+        <th>Capper</th>
+        <th class="num" style="border-left:2px solid var(--field);">Distinct picks</th><th class="num">D. record</th><th class="num">D. win %</th>
+        <th class="num" style="border-left:2px solid var(--field);">Total bets</th><th class="num">Bet record</th><th class="num">Bet win %</th>
+        <th class="num">Value</th>
+      </tr></thead><tbody id="topRows"></tbody></table></div>
     </div>
-    <p class="volume-caption">"Picks" counts distinct calls (each parlay leg is its own pick, but the same call reused across several parlays only counts once); "Record" counts actual wagers (a whole parlay is one bet, win or lose, no matter how many legs) — for a heavy-parlay capper these numbers won't match, and that's expected, not an error. Picks can land either side of Record: more legs than wagers is normal for parlays, but a capper who builds many parlay slips from a small, reused pool of the same calls can show FEWER Picks than Record — hover the &#9888;&#xFE0E; next to Picks when that happens for the exact breakdown.</p>
+    <div style="margin-top:22px;">
+      <h2>Bottom performers</h2>
+      <p class="section-note">Ranked by $ value — a capper with a losing record but genuine positive value can't land here.</p>
+      <div class="trend-wrap"><table class="ledger"><thead><tr>
+        <th>Capper</th>
+        <th class="num" style="border-left:2px solid var(--field);">Distinct picks</th><th class="num">D. record</th><th class="num">D. win %</th>
+        <th class="num" style="border-left:2px solid var(--field);">Total bets</th><th class="num">Bet record</th><th class="num">Bet win %</th>
+        <th class="num">Value</th>
+      </tr></thead><tbody id="bottomRows"></tbody></table></div>
+    </div>
+    <p class="volume-caption">"Distinct picks" counts distinct calls (each parlay leg is its own pick, but the same call reused across several parlays only counts once), with its own real record and win % alongside it. "Total bets" counts actual wagers (a whole parlay is one bet, win or lose, no matter how many legs), also with its own real record and win %. These are two separate, self-consistent counts, never mixed — for a heavy-parlay capper they won't match, and that's expected, not an error: more legs than wagers is normal, but a capper who builds many parlay slips from a small, reused pool of the same calls (flagged &#9888;&#xFE0E;) can show fewer distinct picks than total bets instead.</p>
   </section>
 
   <section>
@@ -493,30 +501,41 @@
       renderCompareTile('Published (what we posted)', w.published, true) +
       renderCompareTile('Group (full tracking pool)', w.group, false);
 
-    // Direct report 2026-09-18: "Cody Covers Spreads 25 picks, 22-49-0 record
-    // -- where are the nearly 50 picks?" Picks (25) is LOWER than the
-    // record's total decisions (71) specifically because a heavy-parlay
-    // capper can build many parlay slips from a small, reused pool of real
-    // calls -- admin.html's own Top & Bottom Cappers report already flags
-    // this with a hover warning, this just carries the same explanation
-    // (parlayPickCount/uniqueLegs/reuseFactor from computeTopBottomData)
-    // over to ledger.html instead of leaving the low number unexplained.
-    function picksCell(c) {
-      var html = String(c.picks);
-      if (c.heavyParlayReuse) {
-        var title = c.parlayPickCount + ' parlay picks came from only ' + c.uniqueLegs + ' distinct underlying leg picks (each reused ~' + c.reuseFactor.toFixed(1) + 'x on average across different parlay combos) -- that\'s why Picks is lower than Record\'s total decisions.';
-        html += ' <span style="cursor:help;color:#8a6d1a;font-weight:bold;" title="' + esc(title) + '">&#9888;&#xFE0E;</span>';
-      }
-      return html;
+    // REDESIGNED 2026-09-18, direct report: "Cody Covers Spreads 25 picks,
+    // 22-49-0 record... were I to show this to someone who has zero
+    // experience... the first thing they would think is the data is
+    // broken." A hover warning on a bare, unexplained "25" wasn't enough --
+    // a reader has to notice something's off before they'd think to hover.
+    // Now shows BOTH bases fully and separately: Distinct picks with its
+    // own real record/win %, and Total bets with its own real record/win %
+    // -- never a count from one basis sitting next to a record from the
+    // other, so nothing needs to be explained away after the fact.
+    function warningIcon(warning) {
+      return warning
+        ? ' <span style="cursor:help;color:#8a6d1a;font-weight:bold;" title="' + esc(warning) + '">&#9888;&#xFE0E;</span>'
+        : '';
+    }
+    function topBottomRow(c, pillType) {
+      var reuseWarning = c.heavyParlayReuse
+        ? (c.parlayPickCount + ' parlay picks (counted in Total bets) came from only ' + c.uniqueLegs + ' distinct underlying leg picks (each reused ~' + c.reuseFactor.toFixed(1) + 'x on average across different parlay combos) -- that\'s why Distinct picks is lower than Total bets.')
+        : null;
+      return '<tr><td>' + esc(c.name) + '</td>' +
+        '<td class="num" style="border-left:2px solid var(--field);">' + c.picks + warningIcon(reuseWarning) + '</td>' +
+        '<td class="num"><span class="pill ' + pillType + '">' + esc(c.distinctRecord) + '</span></td>' +
+        '<td class="num">' + fmtPct(c.distinctWinPct) + '</td>' +
+        '<td class="num" style="border-left:2px solid var(--field);">' + c.betsTotal + '</td>' +
+        '<td class="num"><span class="pill ' + pillType + '">' + esc(c.record) + '</span></td>' +
+        '<td class="num">' + fmtPct(c.betWinPct) + '</td>' +
+        '<td class="num">' + fmtMoney(c.value) + '</td></tr>';
     }
 
     document.getElementById('topRows').innerHTML = (w.topCappers || []).map(function(c) {
-      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + picksCell(c) + '</td><td class="num"><span class="pill win">' + esc(c.record) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
-    }).join('') || '<tr><td colspan="4" class="empty-note">Not run this week</td></tr>';
+      return topBottomRow(c, 'win');
+    }).join('') || '<tr><td colspan="8" class="empty-note">Not run this week</td></tr>';
 
     document.getElementById('bottomRows').innerHTML = (w.bottomCappers || []).map(function(c) {
-      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + picksCell(c) + '</td><td class="num"><span class="pill loss">' + esc(c.record) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
-    }).join('') || '<tr><td colspan="4" class="empty-note">Top &amp; Bottom Cappers wasn’t run for this week</td></tr>';
+      return topBottomRow(c, 'loss');
+    }).join('') || '<tr><td colspan="8" class="empty-note">Top &amp; Bottom Cappers wasn’t run for this week</td></tr>';
 
     document.getElementById('hotStreakRows').innerHTML = (w.hotStreaks || []).map(function(s) {
       return '<tr><td>' + esc(s.name) + '</td><td class="num" style="color:var(--win);font-weight:600;">' + esc(s.streak) + '</td><td class="num">' + s.totalPicks + ' picks, ' + fmtPct(s.winPct) + '</td></tr>';
