@@ -157,7 +157,7 @@
         <table class="ledger"><thead><tr><th>Capper</th><th class="num">Picks</th><th class="num">Record</th><th class="num">Value</th></tr></thead><tbody id="bottomRows"></tbody></table>
       </div>
     </div>
-    <p class="volume-caption">"Picks" counts distinct calls (each parlay leg is its own pick); "Record" counts actual wagers (a whole parlay is one bet, win or lose, no matter how many legs) — for a heavy-parlay capper these numbers won't match, and that's expected, not an error.</p>
+    <p class="volume-caption">"Picks" counts distinct calls (each parlay leg is its own pick, but the same call reused across several parlays only counts once); "Record" counts actual wagers (a whole parlay is one bet, win or lose, no matter how many legs) — for a heavy-parlay capper these numbers won't match, and that's expected, not an error. Picks can land either side of Record: more legs than wagers is normal for parlays, but a capper who builds many parlay slips from a small, reused pool of the same calls can show FEWER Picks than Record — hover the &#9888;&#xFE0E; next to Picks when that happens for the exact breakdown.</p>
   </section>
 
   <section>
@@ -493,12 +493,29 @@
       renderCompareTile('Published (what we posted)', w.published, true) +
       renderCompareTile('Group (full tracking pool)', w.group, false);
 
+    // Direct report 2026-09-18: "Cody Covers Spreads 25 picks, 22-49-0 record
+    // -- where are the nearly 50 picks?" Picks (25) is LOWER than the
+    // record's total decisions (71) specifically because a heavy-parlay
+    // capper can build many parlay slips from a small, reused pool of real
+    // calls -- admin.html's own Top & Bottom Cappers report already flags
+    // this with a hover warning, this just carries the same explanation
+    // (parlayPickCount/uniqueLegs/reuseFactor from computeTopBottomData)
+    // over to ledger.html instead of leaving the low number unexplained.
+    function picksCell(c) {
+      var html = String(c.picks);
+      if (c.heavyParlayReuse) {
+        var title = c.parlayPickCount + ' parlay picks came from only ' + c.uniqueLegs + ' distinct underlying leg picks (each reused ~' + c.reuseFactor.toFixed(1) + 'x on average across different parlay combos) -- that\'s why Picks is lower than Record\'s total decisions.';
+        html += ' <span style="cursor:help;color:#8a6d1a;font-weight:bold;" title="' + esc(title) + '">&#9888;&#xFE0E;</span>';
+      }
+      return html;
+    }
+
     document.getElementById('topRows').innerHTML = (w.topCappers || []).map(function(c) {
-      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + c.picks + '</td><td class="num"><span class="pill win">' + esc(c.record) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
+      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + picksCell(c) + '</td><td class="num"><span class="pill win">' + esc(c.record) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
     }).join('') || '<tr><td colspan="4" class="empty-note">Not run this week</td></tr>';
 
     document.getElementById('bottomRows').innerHTML = (w.bottomCappers || []).map(function(c) {
-      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + c.picks + '</td><td class="num"><span class="pill loss">' + esc(c.record) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
+      return '<tr><td>' + esc(c.name) + '</td><td class="num">' + picksCell(c) + '</td><td class="num"><span class="pill loss">' + esc(c.record) + '</span></td><td class="num">' + fmtMoney(c.value) + '</td></tr>';
     }).join('') || '<tr><td colspan="4" class="empty-note">Top &amp; Bottom Cappers wasn’t run for this week</td></tr>';
 
     document.getElementById('hotStreakRows').innerHTML = (w.hotStreaks || []).map(function(s) {

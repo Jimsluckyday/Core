@@ -18979,8 +18979,8 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         pushes: groupStats.pushes, pending: groupStats.pending, winPct: groupStats.win_pct,
         profit: groupStats.decidedCount ? Math.round(groupStats.total_profit * 100) / 100 : null, roi: groupStats.roi_pct
       },
-      topCappers: topRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, winPct: r.win_pct, streak: streakLabel(r.streak), value: r.value !== null ? Math.round(r.value * 100) / 100 : null })),
-      bottomCappers: bottomRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, value: r.value !== null ? Math.round(r.value * 100) / 100 : null })),
+      topCappers: topRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, winPct: r.win_pct, streak: streakLabel(r.streak), value: r.value !== null ? Math.round(r.value * 100) / 100 : null, heavyParlayReuse: r.heavyParlayReuse, reuseFactor: r.reuseFactor !== null && r.reuseFactor !== undefined ? Math.round(r.reuseFactor * 10) / 10 : null, parlayPickCount: r.parlayPickCount, uniqueLegs: r.uniqueLegs })),
+      bottomCappers: bottomRows.map(r => ({ name: r.capper_name, picks: r.distinct_total_picks, record: `${r.wins}-${r.losses}-${r.pushes}`, value: r.value !== null ? Math.round(r.value * 100) / 100 : null, heavyParlayReuse: r.heavyParlayReuse, reuseFactor: r.reuseFactor !== null && r.reuseFactor !== undefined ? Math.round(r.reuseFactor * 10) / 10 : null, parlayPickCount: r.parlayPickCount, uniqueLegs: r.uniqueLegs })),
       hotStreaks: hotStreakRows.map(r => ({ name: r.capper_name, streak: streakLabel(r.streak), totalPicks: r.total_picks, winPct: r.win_pct })),
       coldStreaks: coldStreakRows.map(r => ({ name: r.capper_name, streak: streakLabel(r.streak), totalPicks: r.total_picks, winPct: r.win_pct })),
       notableHot: notable.hot.map(e => ({ capper: e.capperName, slice: e.label, record: `${e.wins}-${e.losses}` })),
@@ -27754,7 +27754,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 539; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 540; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
