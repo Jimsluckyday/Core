@@ -14852,7 +14852,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           // branch) so the row can offer a one-click "Fix to X" button --
           // see automationGroupListHtml -- instead of the reason text being
           // the only place a correction is visible.
-          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '', permanent, suggestion: it.suggestion || null, suggestion_field: it.suggestion_field || 'prop_player' })) });
+          // ADDED 2026-09-24, direct report: a "Fix to X" one-click suggestion
+          // guessed the wrong Andreeva sister. Rather than guessing one name
+          // or declining silently, an ambiguous surname now comes back from
+          // schedule-sync-backfill as a `suggestions` array (every real
+          // player sharing that surname, one-click choice each) instead of
+          // a single `suggestion` string -- passed through here unchanged.
+          failureGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '', permanent, suggestion: it.suggestion || null, suggestions: it.suggestions || null, suggestion_field: it.suggestion_field || 'prop_player' })) });
         } else if (isItemArray && PENDING_KEYS.has(key)) {
           pendingCount += val.length;
           pendingGroups.push({ sport: sport || '', items: val.map(it => ({ id: it.id, sport: it.sport || sport || '', label: itemLabel(it), reason: it.reason || '' })) });
@@ -15058,9 +15064,16 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // selection for a team/tennis/MMA matchup), defaulting to
       // prop_player only for backward compatibility with results from
       // before this field existed at all.
-      const fixSuggestionBtnHtml = (it.id && it.suggestion)
-        ? `<button type="button" class="fix-automation-suggestion-btn" data-pick-id="${it.id}" data-field="${escapeHtml(it.suggestion_field || 'prop_player')}" data-new="${escapeHtml(it.suggestion)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;">Fix to "${escapeHtml(it.suggestion)}"</button>`
-        : '';
+      // ADDED 2026-09-24: an ambiguous surname (e.g. "Andreeva" -- two real
+      // sisters both on tour) now comes back as it.suggestions (plural,
+      // every real candidate) instead of one it.suggestion the tool might
+      // have guessed wrong. Render one button per candidate when present;
+      // otherwise fall back to the original single-suggestion button.
+      const fixSuggestionBtnHtml = (it.id && Array.isArray(it.suggestions) && it.suggestions.length)
+        ? it.suggestions.map(name => `<button type="button" class="fix-automation-suggestion-btn" data-pick-id="${it.id}" data-field="${escapeHtml(it.suggestion_field || 'prop_player')}" data-new="${escapeHtml(name)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;margin-bottom:2px;">Fix to "${escapeHtml(name)}"</button>`).join('')
+        : (it.id && it.suggestion)
+          ? `<button type="button" class="fix-automation-suggestion-btn" data-pick-id="${it.id}" data-field="${escapeHtml(it.suggestion_field || 'prop_player')}" data-new="${escapeHtml(it.suggestion)}" style="font-family:inherit;font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;border:1.5px solid #234d35;background:#234d35;color:#eae5d6;white-space:nowrap;margin-right:4px;">Fix to "${escapeHtml(it.suggestion)}"</button>`
+          : '';
       // Direct request 2026-08-31: a plain, always-visible badge -- not
       // just something implied by the reason text -- so this reads
       // correctly at a glance days later, or to someone else entirely who
@@ -15132,9 +15145,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // list sorted only by capper name.
     const allFailureItems = [];
     s.failureGroups.forEach(g => g.items.forEach(it => allFailureItems.push(Object.assign({}, it, { sport: it.sport || g.sport }))));
-    const fixNowItems = allFailureItems.filter(it => it.suggestion && !it.permanent);
+    // hasFix also counts an ambiguous-surname `suggestions` array (2026-09-24) --
+    // it has no single `suggestion` string, but still has one-click buttons to offer.
+    const hasFix = it => !!it.suggestion || (Array.isArray(it.suggestions) && it.suggestions.length);
+    const fixNowItems = allFailureItems.filter(it => hasFix(it) && !it.permanent);
     const permanentItems = allFailureItems.filter(it => it.permanent);
-    const needsLookItems = allFailureItems.filter(it => !it.suggestion && !it.permanent);
+    const needsLookItems = allFailureItems.filter(it => !hasFix(it) && !it.permanent);
     let html = `<div class="msg ok" style="margin-bottom:8px;"><strong>${escapeHtml(label)}</strong></div>`;
     html += `<div style="font-size:13px;margin-bottom:10px;">
       <strong>${s.totalChecked}</strong> checked &middot;
@@ -28417,7 +28433,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 553; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 554; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
