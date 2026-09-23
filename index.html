@@ -11228,7 +11228,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (!legIds.length) {
         legsHtml = '<div style="color:var(--ink-soft);font-style:italic;">No legs linked yet.</div>';
       } else {
-        legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,event_name,prop_team,game_start_time,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(${legIds.join(',')})`);
+        legs = await rest(`picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,event_name,prop_team,game_start_time,schedule_sync_status,schedule_sync_note,source_image,bet_types(name)&id=in.(${legIds.join(',')})`);
         // Legs are deliberately never their own row anywhere else in the
         // picks list (see buildPicksFilterQuery) -- the same game appearing
         // both as its own line AND inside a parlay's legs was exactly the
@@ -11310,6 +11310,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
             ? `<input type="text" class="leg-propteam-input" data-leg-id="${leg.id}" value="${escapeHtml(leg.prop_team || '')}" placeholder="prop team" style="width:90px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />`
             : '';
           const legStartTimeInput = `<input type="datetime-local" class="leg-starttime-input" data-leg-id="${leg.id}" value="${legStartTimeLocal}" style="font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />`;
+          // ADDED 2026-09-24, direct report: "when trying to source the
+          // image # [for a leg] there is no section in the parlay wrapper
+          // or leg that shows image #s." source_image got a real field on
+          // the main Add/Edit Pick form back in v514, but this inline leg-
+          // editor (built 2026-08-31, before v514 existed) was never
+          // retrofitted with it -- same "2 layers of editing" problem the
+          // other four inline fields here were built to fix in the first
+          // place, just for the one field that arrived later. Same
+          // shared blur-to-save wiring as event_name/prop_team below.
+          const legSourceImageInput = `<input type="text" class="leg-sourceimage-input" data-leg-id="${leg.id}" value="${escapeHtml(leg.source_image || '')}" placeholder="source image" style="width:100px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />`;
           return `<li style="margin-bottom:5px;">
               ${legSelectionInput}${lineTxt}${propBit} — ${escapeHtml(bt)}${oddsTxt} — ${gradeHtml}${legSyncBadge}
               <button type="button" class="ghost small" data-leg-edit="${leg.id}" style="padding:1px 6px;font-size:10px;margin-left:6px;">Edit</button>
@@ -11317,6 +11327,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <span class="leg-field-save-status" data-leg-id="${leg.id}" style="font-size:10px;margin-left:4px;"></span>
               <div style="margin-top:3px;">
                 <span style="color:var(--ink-soft);font-size:10px;">event/team/start:</span>${legEventNameInput}${legPropTeamInput}${legStartTimeInput}
+              </div>
+              <div style="margin-top:3px;">
+                <span style="color:var(--ink-soft);font-size:10px;">source image:</span>${legSourceImageInput}
               </div>
               <div style="margin-top:3px;">
                 <span style="color:var(--ink-soft);font-size:10px;">this parlay's tier/unit:</span>${tierSelectHtml}${unitSizeInputHtml}
@@ -11407,9 +11420,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
         });
         inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
       });
-      row.querySelectorAll('input.leg-eventname-input, input.leg-propteam-input').forEach(inp => {
+      row.querySelectorAll('input.leg-eventname-input, input.leg-propteam-input, input.leg-sourceimage-input').forEach(inp => {
         let lastSaved = inp.value;
-        const field = inp.classList.contains('leg-eventname-input') ? 'event_name' : 'prop_team';
+        const field = inp.classList.contains('leg-eventname-input') ? 'event_name'
+          : inp.classList.contains('leg-propteam-input') ? 'prop_team' : 'source_image';
         inp.addEventListener('blur', async () => {
           if (inp.value === lastSaved) return;
           const legId = inp.getAttribute('data-leg-id');
@@ -13116,7 +13130,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         if (!legIds.length) {
           legsHtml = '<div style="color:#55584d;font-style:italic;">No legs linked yet.</div>';
         } else {
-          legs = await op.rest('picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,event_name,prop_team,game_start_time,schedule_sync_status,schedule_sync_note,bet_types(name)&id=in.(' + legIds.join(',') + ')');
+          legs = await op.rest('picks?select=id,selection,line,opening_odds,result,sport_id,bet_type_id,prop_player,prop_stat,event_name,prop_team,game_start_time,schedule_sync_status,schedule_sync_note,source_image,bet_types(name)&id=in.(' + legIds.join(',') + ')');
           legsHtml = '<ul style="margin:4px 0 4px 18px;padding:0;list-style:none;">' + legs.map(function(leg) {
             const bt = leg.bet_types ? leg.bet_types.name : '';
             const lineTxt = (leg.line !== null && leg.line !== undefined) ? ' (' + (leg.line > 0 ? '+' : '') + leg.line + ')' : '';
@@ -13170,12 +13184,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
               ? '<input type="text" class="leg-propteam-input" data-leg-id="' + leg.id + '" value="' + escLocal(leg.prop_team || '') + '" placeholder="prop team" style="width:90px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />'
               : '';
             const legStartTimeInput = '<input type="datetime-local" class="leg-starttime-input" data-leg-id="' + leg.id + '" value="' + legStartTimeLocal + '" style="font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />';
+            // ADDED 2026-09-24, same fix as the main app's own copy of this
+            // template (see that one's own comment) -- source_image had no
+            // inline field here, only on the main Add/Edit Pick form (v514,
+            // built after this leg-editor already existed).
+            const legSourceImageInput = '<input type="text" class="leg-sourceimage-input" data-leg-id="' + leg.id + '" value="' + escLocal(leg.source_image || '') + '" placeholder="source image" style="width:100px;font-family:inherit;font-size:10px;padding:2px 3px;margin-left:4px;" />';
             return '<li style="margin-bottom:5px;">' +
               legSelectionInput + lineTxt + propBit + ' — ' + escLocal(bt) + oddsTxt + ' — ' + gradeHtml + legSyncBadge +
               ' <button type="button" class="mini leg-edit-btn" data-leg-edit="' + leg.id + '" style="padding:1px 6px;">Edit</button>' +
               ' <button type="button" class="mini leg-delete-btn" data-leg-delete="' + leg.id + '" data-leg-summary="' + escLocal(leg.selection) + lineTxt + propBit + '" style="padding:1px 6px;border-color:#8a2f3a;color:#8a2f3a;">Delete</button>' +
               ' <span class="leg-field-save-status" data-leg-id="' + leg.id + '" style="font-size:10px;margin-left:4px;"></span>' +
               '<div style="margin-top:3px;"><span style="color:#55584d;font-size:10px;">event/team/start:</span>' + legEventNameInput + legPropTeamInput + legStartTimeInput + '</div>' +
+              '<div style="margin-top:3px;"><span style="color:#55584d;font-size:10px;">source image:</span>' + legSourceImageInput + '</div>' +
               '<div style="margin-top:3px;"><span style="color:#55584d;font-size:10px;">Tier/unit for this parlay:</span>' + tierSelectHtml + unitSizeInputHtml +
               ' <span class="leg-tier-save-status" data-leg-id="' + leg.id + '" style="font-size:10px;margin-left:4px;"></span></div>' +
               '</li>';
@@ -13300,9 +13320,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           });
           inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
         });
-        tr.querySelectorAll('input.leg-eventname-input, input.leg-propteam-input').forEach(function(inp) {
+        tr.querySelectorAll('input.leg-eventname-input, input.leg-propteam-input, input.leg-sourceimage-input').forEach(function(inp) {
           let lastSaved = inp.value;
-          const field = inp.classList.contains('leg-eventname-input') ? 'event_name' : 'prop_team';
+          const field = inp.classList.contains('leg-eventname-input') ? 'event_name'
+            : inp.classList.contains('leg-propteam-input') ? 'prop_team' : 'source_image';
           inp.addEventListener('blur', async () => {
             if (inp.value === lastSaved) return;
             const op8 = opener();
@@ -28396,7 +28417,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 552; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 553; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
