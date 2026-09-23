@@ -931,76 +931,6 @@
          bordered-box pattern as "1. Prep & publish"/"2. Grading" above
          (togglePrePublishToolsBtn/prePublishToolsPanel) -- each of these two
          new tool sections gets its own independent "Show tools" toggle. -->
-    <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-top:24px;margin-bottom:10px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-        <strong style="font-size:12px;">Tennis draw cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— use before uploading a heavy Tennis night</span></strong>
-        <button type="button" class="ghost small" id="toggleTennisDrawsToolsBtn">Show tools</button>
-      </div>
-      <div id="tennisDrawsToolsPanel" style="display:none;margin-top:10px;">
-        <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-          ADDED 2026-09-11, direct request: "if I've got 15+ Tennis picks a night doing this one by one is not a solution that works long term." ESPN's tennis scoreboard (what "Find & Update Pick Info" checks against) only covers ATP/WTA main-tour level — it has zero coverage of ATP Challenger Tour or ITF events, which is where a large share of real Tennis picks actually land. Same idea as Bulk refresh tournaments above: export a research request, hand it to any AI chat (your own subscription — no per-call API cost), and paste the CSV it gives back here. It gets stored in a cache that "Find & Update Pick Info"'s Tennis matching already checks alongside ESPN, so a Challenger-level match ESPN can't see still gets found automatically once it's in here.
-          <br /><br />
-          <strong style="color:var(--ink);">Pulls the WHOLE tournament, not just one day</strong> — direct follow-up after a real miss: "this shouldn't be looking for specific players... the entire match draw should [be pulled]... this would avoid misses." The export below asks for every real match from every round of every tournament active that week, each tagged with its own real date — not just whatever's scheduled on the one date you pick here. Honest limitation: for a live/upcoming week, later rounds (QF/SF/F) genuinely don't exist yet until earlier rounds decide who advances, so a single pull early in the week only returns what's been drawn or played so far — re-running it later in the week fills in the rest. For a past/historical date, the whole bracket is already decided, so one pull gets everything.
-        </div>
-        <!-- Direct request 2026-09-12, after a real whole-week pull came back
-             480+ rows: "if I'm asking for a day that we go no further back
-             than one day if even that... [but] if you pull a tennis draw it
-             will automatically pull and give me the entire draw which will
-             be cumbersome if I run this tomorrow for a multi day
-             tournament." The whole-draw pull above is still the right
-             default for backfill/catching up after a gap (that's exactly
-             the anti-miss behavior it was built for), but for routine daily
-             use once caught up, re-pulling an entire still-active
-             tournament's whole bracket every single day is genuinely
-             wasteful.
-             ORIGINAL version of this checkbox asked for ONLY the exact date
-             typed below -- direct correction, same day: "my only concern is
-             games that happen 2 days out as it wouldn't be unheard of...
-             I've seen examples of say a capper puts in a call on the 14th
-             for the 16th." A capper's pick can reference a match a few days
-             in the future, so a strict single-date pull for "today" would
-             structurally miss that match's real data until the day it's
-             actually played -- exactly the kind of miss this whole tool
-             exists to prevent. Narrowed to a forward WINDOW instead of one
-             exact date -- still far smaller than a whole draw, but wide
-             enough to catch a pick posted a few days ahead. -->
-        <div class="checkbox-row" style="margin-bottom:6px;">
-          <input type="checkbox" id="tennisDrawJustThisDate" />
-          <label for="tennisDrawJustThisDate" style="font-weight:normal;">Only the next few days, not the whole draw <span style="color:var(--ink-soft);">(for routine daily use once caught up -- leave unchecked when backfilling or catching up after a gap, since that's when pulling the whole draw actually prevents misses)</span></label>
-        </div>
-        <div class="row" id="tennisDrawDaysAheadRow" style="display:none;margin-bottom:4px;">
-          <div class="field" style="flex:0 0 140px;">
-            <label>Days ahead to include</label>
-            <input id="tennisDrawDaysAhead" type="number" min="1" max="10" value="3" />
-          </div>
-          <div class="field" style="flex:2;">
-            <div style="font-size:10px;color:var(--ink-soft);margin-top:22px;">Covers a pick already posted for an upcoming match, not just matches happening today -- 3 days is usually enough, but bump it up if a capper regularly posts further ahead than that.</div>
-          </div>
-        </div>
-        <div class="row">
-          <div class="field" style="flex:0 0 auto;">
-            <label>Any date in the tournament week</label>
-            <input id="tennisDrawExportDate" type="date" />
-          </div>
-          <div style="align-self:flex-end;">
-            <button id="exportTennisDrawRequestBtn">&#8681; Export research request</button>
-          </div>
-        </div>
-        <div style="margin-top:14px;">
-          <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
-          <textarea id="tennisDrawImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,match_date,start_time_et,tournament_play_start_et&#10;Challenger,Bratislava Open,R32,Alexander Shevchenko,Federico Cina,2025-06-10,,&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Federico Cina,2025-06-13,,2025-06-13 05:00"></textarea>
-          <div style="margin-top:8px;">
-            <button id="parseTennisDrawImportBtn">Parse &amp; preview</button>
-          </div>
-          <div id="tennisDrawImportWrap" style="margin-top:12px;"></div>
-        </div>
-
-        <div style="margin-top:24px;padding-top:16px;border-top:1px dashed var(--field);font-size:10px;color:var(--ink-soft);">
-          MOVED 2026-09-13, direct request after a real grading run silently skipped 7 real Challenger matches whose draws were pulled here but whose results never got pasted anywhere: "we need to add the button to the grading section of the automation tools so just like Golf we run that, then the Tennis results, KBO results etc so anything that needs data to grade is done in the same place to reduce the situation where we don't do this." The "Import results" tool that used to sit right here now lives in the <strong>2. Grading</strong> section instead, alongside KBO results cache and directly above "Find &amp; Update Results" -- the day-of-drawing step (above) and the day-after-results step are genuinely two different points in the workflow, and burying the results step in the same box as the draws step (sharing this box's own toggle) was exactly how it went unnoticed. Draws still belong here -- this is where you'd come to pull them.
-        </div>
-      </div>
-    </div>
-
     <!-- Direct request 2026-09-12, after working through an unusually
          worded MMA spread ("Barcelos -3.5... win by Decision with at least
          1 30-27 or Finish") that read as a loss condition but was actually
@@ -1631,19 +1561,100 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <button type="button" class="ghost small" id="togglePrePublishToolsBtn">Show tools</button>
             </div>
             <div id="prePublishToolsPanel" style="display:none;margin-top:10px;">
-              <!-- Direct request 2026-09-11: "leave a note in the
-                   automation tools section in case someone has forgotten or
-                   never used the tools before... run those 2 in the order
-                   required to cut down on having to duplicate work later." -->
-              <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
-                &#9888; Tennis or KBO picks tonight? Populate the <strong>Tennis draw cache</strong> / <strong>KBO results cache</strong> (Setup tab) for this date FIRST, then run "Find &amp; Update Pick Info" below -- running Pick Info first means re-running it again afterward to pick up anything the cache would have caught.
-              </div>
+              <!-- MOVED 2026-09-23, direct request: "I hadn't done this in
+                   a while and was doing it out of order... the Tennis should
+                   also have it's own section in [this part of the workflow]
+                   since it will be run from here every day." Confirmed
+                   directly against schedule-sync-backfill.ts before moving
+                   anything: Tennis draw cache genuinely feeds "Find & Update
+                   Pick Info" (it reads tennis_draw_cache for exactly the
+                   Challenger/ITF matches ESPN can't see), so it belongs
+                   physically ahead of that button, not just mentioned in a
+                   reminder pointing to a different tab. KBO results cache
+                   does NOT belong in this reminder at all -- confirmed KBO's
+                   schedule matching hits Naver's live API directly, never
+                   kbo_results_cache, which is read ONLY by grading
+                   (grade_picks_espn_backfill.ts, the next day) and holds
+                   final scores that don't exist yet at this pre-publish
+                   stage. Removed the old "Tennis or KBO... (Setup tab)"
+                   banner entirely -- the real Tennis tool is right here now,
+                   nothing left to point to elsewhere. -->
+      <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-top:24px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <strong style="font-size:12px;">Tennis draw cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— use before uploading a heavy Tennis night</span></strong>
+          <button type="button" class="ghost small" id="toggleTennisDrawsToolsBtn">Show tools</button>
+        </div>
+        <div id="tennisDrawsToolsPanel" style="display:none;margin-top:10px;">
+          <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+            ADDED 2026-09-11, direct request: "if I've got 15+ Tennis picks a night doing this one by one is not a solution that works long term." ESPN's tennis scoreboard (what "Find & Update Pick Info" checks against) only covers ATP/WTA main-tour level — it has zero coverage of ATP Challenger Tour or ITF events, which is where a large share of real Tennis picks actually land. Same idea as Bulk refresh tournaments above: export a research request, hand it to any AI chat (your own subscription — no per-call API cost), and paste the CSV it gives back here. It gets stored in a cache that "Find & Update Pick Info"'s Tennis matching already checks alongside ESPN, so a Challenger-level match ESPN can't see still gets found automatically once it's in here.
+            <br /><br />
+            <strong style="color:var(--ink);">Pulls the WHOLE tournament, not just one day</strong> — direct follow-up after a real miss: "this shouldn't be looking for specific players... the entire match draw should [be pulled]... this would avoid misses." The export below asks for every real match from every round of every tournament active that week, each tagged with its own real date — not just whatever's scheduled on the one date you pick here. Honest limitation: for a live/upcoming week, later rounds (QF/SF/F) genuinely don't exist yet until earlier rounds decide who advances, so a single pull early in the week only returns what's been drawn or played so far — re-running it later in the week fills in the rest. For a past/historical date, the whole bracket is already decided, so one pull gets everything.
+          </div>
+          <!-- Direct request 2026-09-12, after a real whole-week pull came back
+               480+ rows: "if I'm asking for a day that we go no further back
+               than one day if even that... [but] if you pull a tennis draw it
+               will automatically pull and give me the entire draw which will
+               be cumbersome if I run this tomorrow for a multi day
+               tournament." The whole-draw pull above is still the right
+               default for backfill/catching up after a gap (that's exactly
+               the anti-miss behavior it was built for), but for routine daily
+               use once caught up, re-pulling an entire still-active
+               tournament's whole bracket every single day is genuinely
+               wasteful.
+               ORIGINAL version of this checkbox asked for ONLY the exact date
+               typed below -- direct correction, same day: "my only concern is
+               games that happen 2 days out as it wouldn't be unheard of...
+               I've seen examples of say a capper puts in a call on the 14th
+               for the 16th." A capper's pick can reference a match a few days
+               in the future, so a strict single-date pull for "today" would
+               structurally miss that match's real data until the day it's
+               actually played -- exactly the kind of miss this whole tool
+               exists to prevent. Narrowed to a forward WINDOW instead of one
+               exact date -- still far smaller than a whole draw, but wide
+               enough to catch a pick posted a few days ahead. -->
+          <div class="checkbox-row" style="margin-bottom:6px;">
+            <input type="checkbox" id="tennisDrawJustThisDate" />
+            <label for="tennisDrawJustThisDate" style="font-weight:normal;">Only the next few days, not the whole draw <span style="color:var(--ink-soft);">(for routine daily use once caught up -- leave unchecked when backfilling or catching up after a gap, since that's when pulling the whole draw actually prevents misses)</span></label>
+          </div>
+          <div class="row" id="tennisDrawDaysAheadRow" style="display:none;margin-bottom:4px;">
+            <div class="field" style="flex:0 0 140px;">
+              <label>Days ahead to include</label>
+              <input id="tennisDrawDaysAhead" type="number" min="1" max="10" value="3" />
+            </div>
+            <div class="field" style="flex:2;">
+              <div style="font-size:10px;color:var(--ink-soft);margin-top:22px;">Covers a pick already posted for an upcoming match, not just matches happening today -- 3 days is usually enough, but bump it up if a capper regularly posts further ahead than that.</div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field" style="flex:0 0 auto;">
+              <label>Any date in the tournament week</label>
+              <input id="tennisDrawExportDate" type="date" />
+            </div>
+            <div style="align-self:flex-end;">
+              <button id="exportTennisDrawRequestBtn">&#8681; Export research request</button>
+            </div>
+          </div>
+          <div style="margin-top:14px;">
+            <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+            <textarea id="tennisDrawImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,match_date,start_time_et,tournament_play_start_et&#10;Challenger,Bratislava Open,R32,Alexander Shevchenko,Federico Cina,2025-06-10,,&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Federico Cina,2025-06-13,,2025-06-13 05:00"></textarea>
+            <div style="margin-top:8px;">
+              <button id="parseTennisDrawImportBtn">Parse &amp; preview</button>
+            </div>
+            <div id="tennisDrawImportWrap" style="margin-top:12px;"></div>
+          </div>
+
+          <div style="margin-top:24px;padding-top:16px;border-top:1px dashed var(--field);font-size:10px;color:var(--ink-soft);">
+            MOVED 2026-09-13, direct request after a real grading run silently skipped 7 real Challenger matches whose draws were pulled here but whose results never got pasted anywhere: "we need to add the button to the grading section of the automation tools so just like Golf we run that, then the Tennis results, KBO results etc so anything that needs data to grade is done in the same place to reduce the situation where we don't do this." The "Import results" tool that used to sit right here now lives in the <strong>2. Grading</strong> section instead, alongside KBO results cache and directly above "Find &amp; Update Results" -- the day-of-drawing step (above) and the day-after-results step are genuinely two different points in the workflow, and burying the results step in the same box as the draws step (sharing this box's own toggle) was exactly how it went unnoticed. Draws still belong here -- this is where you'd come to pull them.
+          </div>
+        </div>
+      </div>
+
               <!-- Direct follow-up 2026-09-11, after a real Soccer pick got
                    flagged unmatched solely because the 2025 UEFA Nations
                    League Final had never been added to the Tournaments
                    list: "how do I make sure that we are adding them so this
                    isn't a common question/query going forwards." Same
-                   run-this-first habit as the Tennis/KBO reminder above,
+                   run-this-first habit as the Tennis draw cache tool above,
                    just for the sport that hits this the most (Soccer/Tennis/
                    Golf tournament-window matching, not team schedules). -->
               <div style="font-size:11px;color:var(--stamp-amber);font-weight:bold;margin-bottom:10px;">
@@ -3189,20 +3200,18 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
-    <!-- TENNIS DRAW CACHE SHORTCUT -- direct request 2026-09-23: "the
-         Tennis should also have it's own section in data tools since it
-         will be run from the data tools section every day." The real tool
-         (export/paste/parse form, the tennisDrawsToolsPanel box) stays on
-         Setup exactly as built -- duplicating that whole form here would
-         mean two separate DOM copies to keep wired/in sync for no real
-         benefit. This is a lightweight pointer instead, same reversed-
-         direction idea as goDataValidationBtn (which jumps INTO Data
-         Tools from elsewhere) -- jumps FROM Data Tools OUT to the real
-         tool on Setup, expanding it and scrolling to it, so the daily
-         habit lives here without the tool itself needing to move. -->
+    <!-- TENNIS DRAW CACHE SHORTCUT -- direct request 2026-09-23. UPDATED
+         same day: the real tool moved from Setup into Pending Picks > "1.
+         Prep & publish" (a real workflow-order fix -- Tennis draw cache
+         genuinely feeds "Find & Update Pick Info", confirmed directly
+         against schedule-sync-backfill.ts, so it belongs physically ahead
+         of that button, not on a separate tab). This shortcut's target
+         updated to match -- still a lightweight pointer (not a duplicated
+         form), same reversed-direction idea as goDataValidationBtn, just
+         jumping to Pending Picks now instead of Setup. -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
-        Tennis draw cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run before a heavy Tennis night; opens on Setup</span>
+        Tennis draw cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run before a heavy Tennis night; opens under Pending Picks &gt; 1. Prep &amp; publish</span>
       </p>
       <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
         Catches ATP Challenger/ITF matches ESPN's own schedule sync can't see. The real tool lives on Setup -- this jumps straight to it.
@@ -14472,11 +14481,23 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   $('showAutomationInstructionsBtn').addEventListener('click', openAutomationInstructionsTab);
 
   $('goTennisDrawCacheBtn').addEventListener('click', () => {
-    switchTab('setup');
+    // UPDATED 2026-09-23: Tennis draw cache moved from Setup into Pending
+    // Picks > Automation tools > "1. Prep & publish" -- same four-deep
+    // nested-collapse chain revealResultsAuditPanel already has to walk
+    // for Results Audit (picksPanel > automationPanel > the specific
+    // sub-section > the tool's own panel), just ending at
+    // prePublishToolsPanel/tennisDrawsToolsPanel instead of
+    // gradingToolsPanel/resultsAuditPanel.
+    switchTab('pending');
+    const picksPanel = $('picksPanel');
+    if (picksPanel && picksPanel.style.display === 'none') $('togglePicksBtn').click();
+    const automationPanel = $('automationPanel');
+    if (automationPanel && automationPanel.style.display === 'none') $('toggleAutomationBtn').click();
+    const prePublishPanel = $('prePublishToolsPanel');
+    if (prePublishPanel && prePublishPanel.style.display === 'none') $('togglePrePublishToolsBtn').click();
     const panel = $('tennisDrawsToolsPanel');
-    panel.style.display = 'block';
-    $('toggleTennisDrawsToolsBtn').textContent = 'Hide tools';
-    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (panel && panel.style.display === 'none') $('toggleTennisDrawsToolsBtn').click();
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   $('goDataValidationBtn').addEventListener('click', () => {
@@ -28194,7 +28215,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 547; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 548; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
