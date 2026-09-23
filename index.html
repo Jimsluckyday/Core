@@ -3189,6 +3189,27 @@ These are almost always the same day, so "Date entered" only fills in a starting
       </div>
     </div>
 
+    <!-- TENNIS DRAW CACHE SHORTCUT -- direct request 2026-09-23: "the
+         Tennis should also have it's own section in data tools since it
+         will be run from the data tools section every day." The real tool
+         (export/paste/parse form, the tennisDrawsToolsPanel box) stays on
+         Setup exactly as built -- duplicating that whole form here would
+         mean two separate DOM copies to keep wired/in sync for no real
+         benefit. This is a lightweight pointer instead, same reversed-
+         direction idea as goDataValidationBtn (which jumps INTO Data
+         Tools from elsewhere) -- jumps FROM Data Tools OUT to the real
+         tool on Setup, expanding it and scrolling to it, so the daily
+         habit lives here without the tool itself needing to move. -->
+    <div class="stub" data-tab="tools">
+      <p class="stub-title">
+        Tennis draw cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run before a heavy Tennis night; opens on Setup</span>
+      </p>
+      <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+        Catches ATP Challenger/ITF matches ESPN's own schedule sync can't see. The real tool lives on Setup -- this jumps straight to it.
+      </div>
+      <button type="button" id="goTennisDrawCacheBtn">Tennis draw cache &rarr;</button>
+    </div>
+
     <!-- DUPLICATE PICK CHECKER (internal only) -->
     <div class="stub" data-tab="tools">
       <p class="stub-title">
@@ -14449,6 +14470,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   wireToolBoxToggle('toggleBetRulingsToolsBtn', 'betRulingsToolsPanel');
 
   $('showAutomationInstructionsBtn').addEventListener('click', openAutomationInstructionsTab);
+
+  $('goTennisDrawCacheBtn').addEventListener('click', () => {
+    switchTab('setup');
+    const panel = $('tennisDrawsToolsPanel');
+    panel.style.display = 'block';
+    $('toggleTennisDrawsToolsBtn').textContent = 'Hide tools';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 
   $('goDataValidationBtn').addEventListener('click', () => {
     switchTab('tools');
@@ -28165,7 +28194,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 546; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 547; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
