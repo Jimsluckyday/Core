@@ -28191,7 +28191,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     if (!banner) return; // guard in case this markup isn't present in some older cached page
     let rows;
     try {
-      rows = await rest('picks?select=id,event_date,selection,capper_id,sport_id,bet_type_id,prop_player,prop_stat,automation_dismissed_flags,cappers(name),sports(name),bet_types!inner(name)&result=eq.pending&bet_types.is_futures=eq.true&order=event_date.asc');
+      rows = await rest('picks?select=id,event_date,created_at,selection,capper_id,sport_id,bet_type_id,prop_player,prop_stat,is_parlay_leg,automation_dismissed_flags,cappers(name),sports(name),bet_types!inner(name)&result=eq.pending&bet_types.is_futures=eq.true&order=event_date.asc');
     } catch (e) {
       // Never block the rest of the app over this -- if is_futures hasn't
       // been added to bet_types yet (migration not run), PostgREST's error
@@ -28252,29 +28252,61 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // uses, so it stops re-alerting on the same repeats already looked at
     // -- but a further NEW copy of the same pick later still has no flag
     // of its own yet, so it correctly re-triggers this exactly once more.
+    // POLICY CHANGE, direct request 2026-09-24, right after the detection
+    // above shipped: "I'd like to remove any duplicates from the same
+    // capper... I would like to keep only the earliest one... I am fine
+    // with whatever odds he got when he took his original pick." Each
+    // group is now sorted to its real earliest entry (event_date, then
+    // created_at as a tiebreak for same-day re-entries) -- the primary
+    // action deletes every OTHER pick in the group outright and keeps
+    // that one exactly as originally called, rather than just dismissing
+    // the reminder. A lighter secondary action stays available for the
+    // rare false-positive (two genuinely different real futures markets
+    // that happened to normalize to the same grouping key) -- dismissing
+    // there never deletes anything, same as the original "Mark reviewed"
+    // behavior.
+    //
+    // Direct clarification, same conversation: "this would only apply to
+    // duplicate futures and not the parlay picks on the same day with
+    // multiple of the same team as that is a normal function." A same-day
+    // Parlay leg repeating a team (e.g. two different parlays both calling
+    // the same favorite) is completely normal and already deliberately
+    // left alone by the Duplicate Pick Checker's own within-parlay-only
+    // check above -- this futures repeat-scan is scoped to
+    // bet_types.is_futures=true rows already, structurally separate from
+    // "Parlay" bet type rows, so it was never going to touch those. The
+    // is_parlay_leg exclusion below is a narrower belt-and-suspenders
+    // guard for the rare theoretical case of a futures-shaped bet entered
+    // AS a leg of some other parlay -- deleting a leg outright would
+    // corrupt its parent parlay's own leg count/combined odds, so those
+    // are never candidates for this scan regardless of how many times the
+    // same pick shows up among them.
     const repeatGroups = {};
-    rows.forEach(r => {
+    rows.filter(r => !r.is_parlay_leg).forEach(r => {
       const key = [r.capper_id, r.sport_id, r.bet_type_id, normalizeForMatch(r.selection || ''), normalizeForMatch(r.prop_player || ''), normalizeForMatch(r.prop_stat || '')].join('|');
       (repeatGroups[key] = repeatGroups[key] || []).push(r);
     });
-    const repeats = Object.values(repeatGroups).filter(g => g.length > 1 && !g.every(r => (r.automation_dismissed_flags || []).includes('repeated_futures_pick')));
+    const repeats = Object.values(repeatGroups)
+      .filter(g => g.length > 1 && !g.every(r => (r.automation_dismissed_flags || []).includes('repeated_futures_pick')))
+      .map(g => [...g].sort((a, b) => (a.event_date || '').localeCompare(b.event_date || '') || (a.created_at || '').localeCompare(b.created_at || '')));
     const repeatListHtml = repeatedFuturesExpanded ? `
       <div style="max-height:220px;overflow-y:auto;margin-top:6px;font-size:11px;">
         <table class="picks-table" style="width:100%;">
-          <thead><tr><th>Capper</th><th>Sport</th><th>Pick</th><th>Placed on</th><th></th></tr></thead>
+          <thead><tr><th>Capper</th><th>Sport</th><th>Pick</th><th>Placed on (earliest kept)</th><th></th><th></th></tr></thead>
           <tbody>${repeats.map(g => `<tr>
             <td>${escapeHtml(g[0].cappers ? g[0].cappers.name : '—')}</td>
             <td>${escapeHtml(g[0].sports ? g[0].sports.name : '—')}</td>
             <td>${escapeHtml([g[0].prop_player, g[0].prop_stat, g[0].selection].filter(Boolean).join(' — ') || '—')}</td>
-            <td>${g.map(r => escapeHtml(r.event_date)).join(', ')}</td>
-            <td><button type="button" class="repeatedFuturesReviewBtn" data-ids="${g.map(r => r.id).join(',')}" style="font-size:11px;padding:1px 8px;" title="Both/all picks stay exactly as-is -- this only stops the reminder for this group.">Mark reviewed</button></td>
+            <td><strong>${escapeHtml(g[0].event_date)}</strong>${g.length > 1 ? ', ' + g.slice(1).map(r => escapeHtml(r.event_date)).join(', ') : ''}</td>
+            <td><button type="button" class="repeatedFuturesDeleteBtn" data-keep-id="${g[0].id}" data-delete-ids="${g.slice(1).map(r => r.id).join(',')}" style="font-size:11px;padding:1px 8px;background:#8a2f3a;color:#fff;border:none;border-radius:2px;cursor:pointer;" title="Deletes every copy except the earliest (${escapeHtml(g[0].event_date)}) -- permanent, cannot be undone from here.">Keep earliest, delete ${g.length - 1}</button></td>
+            <td><button type="button" class="repeatedFuturesReviewBtn" data-ids="${g.map(r => r.id).join(',')}" style="font-size:11px;padding:1px 8px;" title="Use only if these are genuinely NOT the same real pick -- nothing gets deleted, this just stops the reminder for this group.">Not a duplicate</button></td>
           </tr>`).join('')}</tbody>
         </table>
       </div>` : '';
     const repeatBannerHtml = repeats.length ? `
       <div style="background:#e6eef7;color:#1f3b5c;border-left:4px solid #4a7ab5;border-radius:0 3px 3px 0;font-size:12px;padding:6px 12px;margin-top:6px;">
-        <span style="cursor:pointer;font-weight:bold;" id="repeatedFuturesToggle">&#9888; ${repeats.length} futures pick${repeats.length === 1 ? '' : 's'} called by the same capper more than once -- worth a look, not necessarily wrong ${repeatedFuturesExpanded ? '&#9650;' : '&#9660;'}</span>
-        ${repeatedFuturesExpanded ? '<div style="font-size:10.5px;margin:4px 0 2px;">A capper re-upping a futures pick (odds moved, or re-alerting anyone who missed it) is normal and both/all copies are fine to keep. This only exists to catch an accidental duplicate transcription you\'d otherwise have no way to notice across different upload days.</div>' : ''}
+        <span style="cursor:pointer;font-weight:bold;" id="repeatedFuturesToggle">&#9888; ${repeats.length} futures pick${repeats.length === 1 ? '' : 's'} called by the same capper more than once -- keep the earliest, delete the rest ${repeatedFuturesExpanded ? '&#9650;' : '&#9660;'}</span>
+        ${repeatedFuturesExpanded ? '<div style="font-size:10.5px;margin:4px 0 2px;">Standing policy: only the capper\'s original call is kept regardless of later re-ups or odds moves. \"Keep earliest, delete N\" permanently removes every later copy; \"Not a duplicate\" is the escape hatch for a genuine false match.</div>' : ''}
         ${repeatListHtml}
       </div>` : '';
 
@@ -28305,6 +28337,26 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         refreshFuturesBanner();
       });
     }
+    banner.querySelectorAll('.repeatedFuturesDeleteBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const deleteIds = btn.getAttribute('data-delete-ids').split(',').filter(Boolean);
+        if (!deleteIds.length) return;
+        if (!confirm(`Permanently delete ${deleteIds.length} later cop${deleteIds.length === 1 ? 'y' : 'ies'} of this pick, keeping only the earliest one exactly as originally called? This cannot be undone from here.`)) return;
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+        try {
+          for (const id of deleteIds) {
+            await rest(`picks?id=eq.${id}`, { method: 'DELETE' });
+          }
+          await refreshFuturesBanner();
+          await refreshPicksList();
+        } catch (e) {
+          alert('Could not delete: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = `Keep earliest, delete ${deleteIds.length}`;
+        }
+      });
+    });
     banner.querySelectorAll('.repeatedFuturesReviewBtn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const ids = btn.getAttribute('data-ids').split(',');
@@ -28564,7 +28616,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 559; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 560; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
