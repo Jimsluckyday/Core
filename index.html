@@ -8905,9 +8905,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // 3 stat values, immediately after it runs -- never touches any other
   // Player Prop (MLB Strikeouts, NBA Points, etc.), which keep the
   // original Over/Under behavior untouched.
-  function isGolfMatchupStat(statValue) {
+  // Renamed from isGolfMatchupStat 2026-09-24, direct report: a real
+  // Formula 1 "Race Matchup" pick (e.g. "Russell to beat Norris") is the
+  // exact same shape as Golf's Round/Tournament Matchup -- a head-to-head
+  // opponent name as the selection, no line, no Over/Under -- just a
+  // different sport, so it's folded into this same check rather than
+  // built as a new parallel list (unlike Anytime Goal/YES_NO_PROP_STATS,
+  // which is a genuinely different shape and deliberately kept separate).
+  function isMatchupPropStat(statValue) {
     const n = normalizeForMatch(statValue);
-    return n === 'roundmatchup' || n === 'tournamentmatchup';
+    return n === 'roundmatchup' || n === 'tournamentmatchup' || n === 'racematchup';
   }
   // "Round Winner" added direct request 2026-08-26: a golfer to win one
   // specific round outright -- no opponent (unlike Round Matchup, which
@@ -8941,8 +8948,11 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // the player TO do the thing, no real "No" market anyone actually
   // calls), so it's added here rather than built as a new special case.
   // Triple-double added alongside it since NBA prop sheets virtually
-  // always carry both together.
-  const YES_NO_PROP_STATS = ['anytime goal', 'double-double', 'triple-double'];
+  // always carry both together. "Top 20 Finish"/"Top 10 Finish" added
+  // 2026-09-24, direct report of a false "Missing: Line" flag on real
+  // Golf picks (selection already correctly "Yes" for both) -- same
+  // backing-the-player-TO-do-it shape, no real "No" market anyone calls.
+  const YES_NO_PROP_STATS = ['anytime goal', 'double-double', 'triple-double', 'top 20 finish', 'top 10 finish'];
   function isYesNoPropStat(statValue) {
     return YES_NO_PROP_STATS.includes(normalizeForMatch(statValue));
   }
@@ -8952,7 +8962,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
     if (!usesProp) return; // non-prop bets already show Selection normally
 
     const statValue = $('propStat').value;
-    if (isGolfMatchupStat(statValue)) {
+    if (isMatchupPropStat(statValue)) {
       $('selectionField').style.display = 'block';
       $('selectionLabel').textContent = "Opponent (who they're picked to beat)";
       $('pickSelection').placeholder = 'e.g. Justin Thomas';
@@ -9707,8 +9717,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
       } else {
         line = lineVal ? Number(lineVal) : null;
       }
-    } else if (isProp && isGolfMatchupStat($('propStat').value)) {
-      // Round/Tournament Matchup: opponent typed into the (un-hidden)
+    } else if (isProp && isMatchupPropStat($('propStat').value)) {
+      // Round/Tournament/Race Matchup: opponent typed into the (un-hidden)
       // Selection field by updateGolfPropSelectionField() -- no line, no
       // Over/Under semantics at all.
       selection = $('pickSelection').value.trim();
@@ -10765,11 +10775,14 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // deliberately sets line to null for exactly these three prop_stat
   // values. Every OTHER Player Prop still has a real stat-line number, so
   // this only excludes these three specific stats, not Player Prop as a
-  // whole.
-  const GOLF_NO_LINE_PROP_STATS = ['round matchup', 'tournament matchup', 'tournament winner', 'round winner'];
+  // whole. Extended 2026-09-24, direct report of a false "Missing: Line"
+  // flag on real F1 "Race Matchup" picks (e.g. "Russell" picked to beat
+  // "Norris") -- same head-to-head, no-line shape as Golf's matchups, just
+  // not golf-specific, so added here rather than kept golf-only.
+  const NO_LINE_MATCHUP_PROP_STATS = ['round matchup', 'tournament matchup', 'tournament winner', 'round winner', 'race matchup'];
   function betTypeUsesLine(betTypeName, usesPropFields, propStat) {
     const n = (betTypeName || '').toLowerCase();
-    if (usesPropFields && GOLF_NO_LINE_PROP_STATS.includes((propStat || '').toLowerCase().trim())) return false;
+    if (usesPropFields && NO_LINE_MATCHUP_PROP_STATS.includes((propStat || '').toLowerCase().trim())) return false;
     // Same "no real line exists for this stat" carve-out as Golf, just for
     // a plain yes/no player prop (Anytime Goal, etc.) -- see
     // YES_NO_PROP_STATS' own comment. Without this, Missing Data's Line
@@ -26789,7 +26802,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // confusable with a real value the way a bare "0" was.
     const earlyBetType = findByNameCI(betTypes, row.bet_type || row.bettype);
     const earlyPropStatRaw = row.prop_stat || row.stat || '';
-    const isGolfMatchupUpload = earlyBetType && earlyBetType.uses_prop_fields && isGolfMatchupStat(earlyPropStatRaw);
+    const isGolfMatchupUpload = earlyBetType && earlyBetType.uses_prop_fields && isMatchupPropStat(earlyPropStatRaw);
     if (isGolfMatchupUpload && !row.selection) {
       row.selection = 'Opponent TBD';
     } else if (!row.selection) {
@@ -26894,7 +26907,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     if (isPropBet && propStatRaw && isYesNoPropStat(propStatRaw)) {
       propSelection = 'Yes';
       propLineOverride = null;
-    } else if (isPropBet && propStatRaw && !isGolfMatchupStat(propStatRaw) && !isGolfOutrightStat(propStatRaw)) {
+    } else if (isPropBet && propStatRaw && !isMatchupPropStat(propStatRaw) && !isGolfOutrightStat(propStatRaw)) {
       const lineNum = row.line !== undefined && row.line !== '' ? Number(row.line) : NaN;
       if (!isNaN(lineNum)) {
         propSelection = lineNum < 0 ? 'Over' : 'Under';
@@ -28457,7 +28470,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 555; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 556; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
