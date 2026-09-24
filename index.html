@@ -28185,12 +28185,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // whenever the picks list changes (see call sites: initMainApp, after a
   // successful Bulk Import, after Grading Corrections are applied).
   let futuresBannerExpanded = false;
+  let repeatedFuturesExpanded = false;
   async function refreshFuturesBanner() {
     const banner = $('futuresBanner');
     if (!banner) return; // guard in case this markup isn't present in some older cached page
     let rows;
     try {
-      rows = await rest('picks?select=id,event_date,selection,cappers(name),bet_types!inner(name)&result=eq.pending&bet_types.is_futures=eq.true&order=event_date.asc');
+      rows = await rest('picks?select=id,event_date,selection,capper_id,sport_id,bet_type_id,prop_player,prop_stat,automation_dismissed_flags,cappers(name),sports(name),bet_types!inner(name)&result=eq.pending&bet_types.is_futures=eq.true&order=event_date.asc');
     } catch (e) {
       // Never block the rest of the app over this -- if is_futures hasn't
       // been added to bet_types yet (migration not run), PostgREST's error
@@ -28228,13 +28229,63 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           </tr>`).join('')}</tbody>
         </table>
       </div>` : '';
+
+    // ADDED 2026-09-24, direct report: "Proven winner put in the Indiana
+    // Pacers to win the NBA title on multiple dates... I didn't notice it
+    // was the same capper the first couple times and to be honest I
+    // shouldn't have to... it's not something we should check as we don't
+    // want to analyze the data only be alerted when there are problems."
+    // The existing Duplicate Pick Checker's own dupKey deliberately
+    // INCLUDES event_date (see that function's own comment -- it exists to
+    // catch an accidental same-day re-import), which is exactly why it can
+    // never catch this: a futures pick re-affirmed on a different real
+    // calendar day is, by definition, never a same-day duplicate. Grouped
+    // here instead by capper+sport+bet type+selection/prop only, ignoring
+    // date entirely, since a futures position's real identity has nothing
+    // to do with which day it was (re-)called. Deliberately NOT treated as
+    // an error to auto-fix -- a capper genuinely re-upping a futures pick
+    // (odds moved, or re-alerting anyone who missed it the first time) is
+    // a real, legitimate thing that happens, so this surfaces the group
+    // for a human decision instead of assuming either answer. "Mark
+    // reviewed" tags every CURRENT member with the same
+    // automation_dismissed_flags mechanism the Data Quality banner already
+    // uses, so it stops re-alerting on the same repeats already looked at
+    // -- but a further NEW copy of the same pick later still has no flag
+    // of its own yet, so it correctly re-triggers this exactly once more.
+    const repeatGroups = {};
+    rows.forEach(r => {
+      const key = [r.capper_id, r.sport_id, r.bet_type_id, normalizeForMatch(r.selection || ''), normalizeForMatch(r.prop_player || ''), normalizeForMatch(r.prop_stat || '')].join('|');
+      (repeatGroups[key] = repeatGroups[key] || []).push(r);
+    });
+    const repeats = Object.values(repeatGroups).filter(g => g.length > 1 && !g.every(r => (r.automation_dismissed_flags || []).includes('repeated_futures_pick')));
+    const repeatListHtml = repeatedFuturesExpanded ? `
+      <div style="max-height:220px;overflow-y:auto;margin-top:6px;font-size:11px;">
+        <table class="picks-table" style="width:100%;">
+          <thead><tr><th>Capper</th><th>Sport</th><th>Pick</th><th>Placed on</th><th></th></tr></thead>
+          <tbody>${repeats.map(g => `<tr>
+            <td>${escapeHtml(g[0].cappers ? g[0].cappers.name : '—')}</td>
+            <td>${escapeHtml(g[0].sports ? g[0].sports.name : '—')}</td>
+            <td>${escapeHtml([g[0].prop_player, g[0].prop_stat, g[0].selection].filter(Boolean).join(' — ') || '—')}</td>
+            <td>${g.map(r => escapeHtml(r.event_date)).join(', ')}</td>
+            <td><button type="button" class="repeatedFuturesReviewBtn" data-ids="${g.map(r => r.id).join(',')}" style="font-size:11px;padding:1px 8px;" title="Both/all picks stay exactly as-is -- this only stops the reminder for this group.">Mark reviewed</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : '';
+    const repeatBannerHtml = repeats.length ? `
+      <div style="background:#e6eef7;color:#1f3b5c;border-left:4px solid #4a7ab5;border-radius:0 3px 3px 0;font-size:12px;padding:6px 12px;margin-top:6px;">
+        <span style="cursor:pointer;font-weight:bold;" id="repeatedFuturesToggle">&#9888; ${repeats.length} futures pick${repeats.length === 1 ? '' : 's'} called by the same capper more than once -- worth a look, not necessarily wrong ${repeatedFuturesExpanded ? '&#9650;' : '&#9660;'}</span>
+        ${repeatedFuturesExpanded ? '<div style="font-size:10.5px;margin:4px 0 2px;">A capper re-upping a futures pick (odds moved, or re-alerting anyone who missed it) is normal and both/all copies are fine to keep. This only exists to catch an accidental duplicate transcription you\'d otherwise have no way to notice across different upload days.</div>' : ''}
+        ${repeatListHtml}
+      </div>` : '';
+
     banner.style.display = 'block';
     banner.innerHTML = `
       <div style="background:#f2e7c9;color:#5c3d05;border-left:4px solid var(--stamp-amber);border-radius:0 3px 3px 0;font-size:12px;padding:6px 12px;">
         <span style="cursor:pointer;font-weight:bold;" id="futuresBannerToggle">&#9888; ${rows.length} long-term futures bet${rows.length === 1 ? '' : 's'} still open -- oldest placed ${escapeHtml(oldest.event_date)} (${daysAgo} day${daysAgo === 1 ? '' : 's'} ago) ${futuresBannerExpanded ? '&#9650;' : '&#9660;'}</span>
         <button id="futuresBannerGoBtn" style="margin-left:10px;font-size:11px;padding:1px 8px;">Review in Grading Exceptions</button>
         ${listHtml}
-      </div>`;
+      </div>
+      ${repeatBannerHtml}`;
     $('futuresBannerToggle').addEventListener('click', () => {
       futuresBannerExpanded = !futuresBannerExpanded;
       refreshFuturesBanner();
@@ -28246,6 +28297,24 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     });
     banner.querySelectorAll('.futuresBannerEditBtn').forEach(btn => {
       btn.addEventListener('click', () => enterPickEditMode(btn.getAttribute('data-id')));
+    });
+    const repeatedFuturesToggleEl = $('repeatedFuturesToggle');
+    if (repeatedFuturesToggleEl) {
+      repeatedFuturesToggleEl.addEventListener('click', () => {
+        repeatedFuturesExpanded = !repeatedFuturesExpanded;
+        refreshFuturesBanner();
+      });
+    }
+    banner.querySelectorAll('.repeatedFuturesReviewBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const ids = btn.getAttribute('data-ids').split(',');
+        btn.disabled = true;
+        btn.textContent = 'Marking...';
+        for (const id of ids) {
+          await dismissAutomationFlags(id, ['repeated_futures_pick'], null, null);
+        }
+        await refreshFuturesBanner();
+      });
     });
   }
 
@@ -28495,7 +28564,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 558; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 559; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
