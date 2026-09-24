@@ -26679,10 +26679,30 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // Finds the actual tournament a date falls within (not just whether one
   // exists) -- used to auto-fill event_name on import rather than leaving
   // it blank once the date-window check has already confirmed a real
-  // match. If more than one tournament's window contains the date, picks
-  // whichever one's real (un-buffered) dates come closest -- a reasonable
-  // guess is far more useful than a blank field, and easy to correct
-  // later if it picked the wrong one of two overlapping events.
+  // match.
+  //
+  // CONFIRMED REAL BUG, direct report 2026-09-24: two real Golf picks
+  // ("T Lawrence"/"V Perez") had event_name auto-filled to "Meijer LPGA
+  // Classic" -- but both are real MEN who played the U.S. Open the same
+  // week. This function used to pick "whichever overlapping tournament's
+  // real dates come closest" as a silent tiebreak whenever 2+ real
+  // tournaments' windows both covered the date -- reasoning that "a
+  // reasonable guess is far more useful than a blank field, easy to
+  // correct later." That's backwards for Golf specifically: this system
+  // has no PGA/LPGA split (both are just "Golf"), a bare surname gives no
+  // gender/tour clue at all, and the user's own account of what happened
+  // proves the "easy to correct later" assumption was wrong -- trusting
+  // the tool's one confident-looking answer, they researched results for
+  // the WRONG real tournament and manually graded real picks incorrectly
+  // before catching it. Direct quote: "I would have no idea who T
+  // Lawrence is... I expect if the system points us to a place to look
+  // like the Meijer tournament that it is correct." A guess presented as
+  // fact is worse than an honest blank here. Now returns an
+  // `{ambiguous: true, candidates}` marker instead of silently picking
+  // one when 2+ real tournaments genuinely overlap -- the caller leaves
+  // event_name blank and surfaces EVERY real candidate name in a warning,
+  // so a human decides with the actual choice in front of them instead of
+  // being handed one unverified answer that looks like a verified one.
   function findMatchingTournament(dateStr, sportId) {
     const sportTournaments = tournaments.filter(t => String(t.sport_id) === String(sportId));
     if (!sportTournaments.length) return null;
@@ -26696,16 +26716,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     });
     if (!candidates.length) return null;
     if (candidates.length === 1) return candidates[0];
-    // Multiple overlapping matches -- prefer whichever one's real
-    // (un-buffered) window is closest to the entered date.
-    let best = null, bestGap = Infinity;
-    for (const t of candidates) {
-      const startGap = Math.abs(d - new Date(t.start_date).getTime());
-      const endGap = Math.abs(d - new Date(t.end_date).getTime());
-      const gap = Math.min(startGap, endGap);
-      if (gap < bestGap) { bestGap = gap; best = t; }
-    }
-    return best;
+    return { ambiguous: true, candidates };
   }
 
   // Converts a pasted date to YYYY-MM-DD without ever going through a Date
@@ -26990,12 +27001,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       } else if (!row.event_name) {
         // Date check passed and no event name was given in the pasted
         // data -- auto-fill from whichever registered tournament the date
-        // actually matched, rather than leaving it blank. A reasonable
-        // guess here is far more useful than an empty field, and much
-        // faster to correct later (one pick) than to leave blank now and
-        // have to revisit every tennis/golf/soccer pick individually.
+        // actually matched, rather than leaving it blank. Only when
+        // exactly ONE real tournament matches -- see findMatchingTournament's
+        // own comment for why 2+ real overlapping candidates (e.g. a PGA
+        // major and an LPGA event the same week) must never be silently
+        // guessed between, confirmed as a real, damaging mistake 2026-09-24.
         const matched = findMatchingTournament(normalizedDate, sport.id);
-        if (matched) autoEventName = matched.name;
+        if (matched && matched.ambiguous) {
+          warnings.push(`${sport.name} has more than one real tournament registered for this date (${matched.candidates.map(t => t.name).join(', ')}) -- event_name left blank since a name alone can't say which one this is. Confirm which tournament this player actually competed in, then add it manually.`);
+        } else if (matched) {
+          autoEventName = matched.name;
+        }
       }
     }
 
@@ -28479,7 +28495,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 557; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 558; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
