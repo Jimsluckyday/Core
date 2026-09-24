@@ -5127,9 +5127,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       const sportName = t.sports ? t.sports.name : 'Unknown sport';
       (bySport[sportName] = bySport[sportName] || []).push(t);
     });
+    // ADDED 2026-09-24, direct report: "I can see that delete option for
+    // teams but not the edit" while trying to fix a soccer team just
+    // uploaded -- Known Players got a rename pencil in v546 for the exact
+    // same "typo shouldn't need delete-and-re-add" reason, Teams never got
+    // the same retrofit. Same pattern, ported directly.
     const teamChipHtml = t => `
       <span style="display:inline-flex;align-items:center;gap:4px;background:var(--chip-bg);color:var(--ink);border:1px solid var(--chip-border);padding:2px 8px;border-radius:12px;font-size:11px;">
         ${escapeHtml(t.name)}
+        <button type="button" class="edit-team-btn" data-id="${t.id}" data-name="${escapeHtml(t.name)}" title="Rename" style="border:none;background:none;color:var(--ink-soft);cursor:pointer;padding:0;">&#9998;</button>
         <button type="button" class="delete-team-btn" data-id="${t.id}" style="border:none;background:none;color:var(--stamp-red);cursor:pointer;font-weight:bold;padding:0;">&times;</button>
       </span>`;
     wrap.innerHTML = Object.keys(bySport).sort().map(sportName => `
@@ -5137,6 +5143,24 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:4px;">${escapeHtml(sportName)} (${bySport[sportName].length})</div>
         ${letterBandGroupsHtml(bySport[sportName], t => t.name, items => items.map(teamChipHtml).join(''))}
       </div>`).join('');
+    wrap.querySelectorAll('.edit-team-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const currentName = btn.getAttribute('data-name');
+        const newName = prompt('Rename this team to:', currentName);
+        if (newName === null) return; // cancelled
+        const trimmed = newName.trim();
+        if (!trimmed || trimmed === currentName) return;
+        try {
+          await rest(`teams?id=eq.${btn.getAttribute('data-id')}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name: trimmed })
+          });
+          await refreshTeams();
+        } catch (e) {
+          alert('Could not rename: ' + e.message);
+        }
+      });
+    });
     wrap.querySelectorAll('.delete-team-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         try {
@@ -28433,7 +28457,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 554; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 555; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
