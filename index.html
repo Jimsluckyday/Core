@@ -7358,7 +7358,8 @@ These are almost always the same day, so "Date entered" only fills in a starting
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(rows)
         });
-        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} match(es). "Find & Update Pick Info" will now check these alongside ESPN for Tennis picks on the matching date(s).</div>`;
+        await registerKnownPlayersFromTennisRows(rows);
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} match(es). "Find & Update Pick Info" will now check these alongside ESPN for Tennis picks on the matching date(s). Every real player name in this batch is also now registered in Known Players, so Bulk Import will catch a typo of any of them from here on.</div>`;
         $('tennisDrawImportInput').value = '';
       } catch (e) {
         alert('Could not cache: ' + e.message);
@@ -7615,8 +7616,9 @@ These are almost always the same day, so "Date entered" only fills in a starting
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(rows)
         });
+        await registerKnownPlayersFromTennisRows(rows);
         logResultsCheck('tennis_results', matchDate, rows.length);
-        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} result(s). "Find & Update Results" will now check these alongside ESPN for Tennis picks on ${matchDate}.</div>`;
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} result(s). "Find & Update Results" will now check these alongside ESPN for Tennis picks on ${matchDate}. Every real player name in this batch is also now registered in Known Players, so Bulk Import will catch a typo of any of them from here on.</div>`;
         $('tennisResultsImportInput').value = '';
       } catch (e) {
         alert('Could not cache: ' + e.message);
@@ -9798,6 +9800,56 @@ These are almost always the same day, so "Date entered" only fills in a starting
     updatePropPlayerDatalist();
     populateKnownPlayerSportSelect();
   }
+
+  // ADDED 2026-09-25, direct report: "a lot of tennis players are going
+  // to get transcribed wrong due to language barriers and names that are
+  // just hard to spell in general... if I cache the tennis information
+  // before running Find and Update start times this should catch any
+  // misspelled names at that point if we haven't graded a tennis player
+  // before." Root cause confirmed by reading the actual code: Bulk
+  // Import's typo check (checkPlayerName) silently does nothing at all
+  // for a sport with zero registered known_players, and known_players has
+  // always only ever grown AFTER a pick successfully GRADES -- for a
+  // historical backfill date, that means a real ATP/WTA player never
+  // graded before in this system has ZERO typo protection the first time
+  // their name comes up, no matter how well the checker itself works.
+  // Confirmed real case: a whole batch of June 2025 Tennis picks (Marozsan,
+  // Kecmanovic, Tiafoe, Siniakova, Danilovic, Bautista Agut, etc.) had
+  // several typo'd variants sail through Bulk Import with zero warning,
+  // while a frequently-bet NBA star (already graded many times) correctly
+  // got flagged the same import session.
+  //
+  // Fix: register every real player name the MOMENT it's confirmed via
+  // research -- either a real draw pairing (Tennis draw cache) or a real
+  // result (Tennis results cache) -- instead of waiting for a first
+  // successful grade. Draw cache fires earliest in the real workflow
+  // (before picks are even entered, let alone graded), which is exactly
+  // the timing the direct request asked for. Best-effort and silent on
+  // failure -- this is bookkeeping on top of an already-successful cache
+  // write, never allowed to make that write look like it failed.
+  async function registerKnownPlayersFromTennisRows(rows) {
+    try {
+      const tennisSport = sports.find(s => normalizeForMatch(s.name) === 'tennis');
+      if (!tennisSport) return;
+      const existingNames = new Set(knownPlayers.filter(p => String(p.sport_id) === String(tennisSport.id)).map(p => normalizeForMatch(p.name)));
+      const namesInRows = new Set();
+      rows.forEach(r => { [r.player_a_name, r.player_b_name].forEach(n => { if (n) namesInRows.add(n.trim()); }); });
+      const newNames = [...namesInRows].filter(n => !existingNames.has(normalizeForMatch(n)));
+      if (!newNames.length) return;
+      await rest('known_players', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(newNames.map(name => {
+          const { first, last } = splitPlayerName(name);
+          return { name, sport_id: tennisSport.id, first_name: first, last_name: last };
+        }))
+      });
+      await refreshKnownPlayers();
+    } catch (e) {
+      console.warn('Could not register known players from Tennis cache import:', e.message);
+    }
+  }
+
   function updatePropPlayerDatalist() {
     const datalist = $('propPlayerSuggestions');
     const sportId = $('pickSport').value;
@@ -29535,7 +29587,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 572; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 573; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
