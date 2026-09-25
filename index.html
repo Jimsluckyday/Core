@@ -21395,7 +21395,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     return { summary, legStatuses, parentFound, status };
   }
 
-  function renderVerifyUploadResults(standaloneFound, standaloneMissing, unresolvable, parlayReports) {
+  function renderVerifyUploadResults(standaloneFound, standaloneMissing, unresolvable, parlayReports, standaloneFoundViaReview) {
     const wrap = $('verifyUploadWrap');
     const nameOf = (list, id) => (list.find(x => String(x.id) === String(id)) || {}).name || '';
     const legLabel = v => {
@@ -21410,8 +21410,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const totalMissingCount = standaloneMissing.length + parlaySafe.reduce((n, p) => n + p.legStatuses.length, 0);
     const totalFoundCount = standaloneFound.length + parlayComplete.length;
     const needsAttention = totalMissingCount > 0 || parlayReviewNeeded.length > 0;
+    // Direct report 2026-09-25: rows corrected in the database after this
+    // exact same file was already checked once no longer text-match the
+    // file's stale version, but the person marked them reviewed already
+    // (see markVerifyRowReviewed) -- called out by count here so it's
+    // clear the "confirmed" total includes some the tool couldn't
+    // literally re-verify itself, not silently folded into a number that
+    // otherwise implies a fresh exact match every time.
+    const reviewedNote = (standaloneFoundViaReview && standaloneFoundViaReview.length)
+      ? ` (${standaloneFoundViaReview.length} of those via a previous "Mark reviewed," not a fresh exact match)` : '';
     const summaryHtml = `<div style="background:${needsAttention ? 'var(--stamp-red)' : 'var(--stamp-green)'};color:var(--paper);font-size:14px;font-weight:bold;padding:12px;border-radius:3px;margin-bottom:12px;">
-        <strong>${totalFoundCount}</strong> confirmed in the database${totalMissingCount > 0 ? `, <strong>${totalMissingCount}</strong> genuinely missing (safe to re-import, see below)` : ''}${parlayReviewNeeded.length > 0 ? `, <strong>${parlayReviewNeeded.length}</strong> parlay${parlayReviewNeeded.length === 1 ? '' : 's'} need${parlayReviewNeeded.length === 1 ? 's' : ''} a manual look -- NOT safe to re-import as-is` : ''}${!needsAttention ? ' -- everything checkable from this file is accounted for' : ''}
+        <strong>${totalFoundCount}</strong> confirmed in the database${reviewedNote}${totalMissingCount > 0 ? `, <strong>${totalMissingCount}</strong> genuinely missing (safe to re-import, see below)` : ''}${parlayReviewNeeded.length > 0 ? `, <strong>${parlayReviewNeeded.length}</strong> parlay${parlayReviewNeeded.length === 1 ? '' : 's'} need${parlayReviewNeeded.length === 1 ? 's' : ''} a manual look -- NOT safe to re-import as-is` : ''}${!needsAttention ? ' -- everything checkable from this file is accounted for' : ''}
       </div>`;
     // CONFIRMED REQUEST 2026-09-07: "it says 1 row couldn't be checked but
     // it didn't tell me what row so how would I know what this missed?"
@@ -21467,7 +21476,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       return;
     }
 
-    const standaloneRowsHtml = standaloneMissing.map(v => `<tr>
+    // markReviewCandidates lines up 1:1 with every "Mark reviewed" button
+    // rendered below (standalone rows first, then each parlay-safe
+    // group's own legs, in the exact same order they're written into the
+    // table) -- markVerifyRowReviewed looks a click up by that same
+    // index instead of re-parsing anything out of the DOM.
+    const markReviewCandidates = [...standaloneMissing];
+    const markReviewBtnHtml = idx => `<button type="button" class="markVerifyReviewedBtn" data-idx="${idx}" style="font-size:10px;padding:2px 6px;" title="Use once you've confirmed this pick is really in the database under different text (a typo you fixed, etc.) -- stops this exact row from being flagged missing again on a future check of this same file.">Mark reviewed</button>`;
+    const standaloneRowsHtml = standaloneMissing.map((v, i) => `<tr>
         <td>${escapeHtml(v.resolved.event_date || '')}</td>
         <td>${escapeHtml(nameOf(cappers, v.resolved.capper_id))}</td>
         <td>${escapeHtml(nameOf(sports, v.resolved.sport_id))}</td>
@@ -21476,6 +21492,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         <td>${v.resolved.line ?? ''}</td>
         <td>${escapeHtml(v.resolved.prop_player || '')}</td>
         <td>${escapeHtml(v.resolved.prop_stat || '')}</td>
+        <td>${markReviewBtnHtml(i)}</td>
       </tr>`).join('');
     // Every fully-missing parlay's REAL leg rows, each tagged with its own
     // parlay number. CONFIRMED REAL BUG, direct report 2026-08-28: "why is
@@ -21497,15 +21514,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const localNumber = p.summary.parlayLocalNumber;
       p.legStatuses.forEach(l => {
         parlayLegRows.push({ v: l.v, parlayNumber: localNumber });
+        markReviewCandidates.push(l.v);
       });
     });
+    let parlayLegRowIdx = standaloneMissing.length;
     const tableHtml = (standaloneMissing.length || parlaySafe.length)
       ? `<table class="picks-table">
-          <thead><tr><th></th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Prop player</th><th>Prop stat</th></tr></thead>
+          <thead><tr><th></th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Prop player</th><th>Prop stat</th><th></th></tr></thead>
           <tbody>
             ${standaloneRowsHtml}
             ${parlaySafe.map((p, i) => `<tr style="background:rgba(45,106,79,0.08);">
-              <td colspan="9" style="font-size:11px;">Parlay recovery group ${i + 1} of ${parlaySafe.length}: <strong>${escapeHtml(nameOf(cappers, p.summary.resolved.capper_id))}</strong>, ${escapeHtml(p.summary.resolved.event_date || '')} -- all ${p.legStatuses.length} real legs below are genuinely missing, safe to recreate together</td>
+              <td colspan="10" style="font-size:11px;">Parlay recovery group ${i + 1} of ${parlaySafe.length}: <strong>${escapeHtml(nameOf(cappers, p.summary.resolved.capper_id))}</strong>, ${escapeHtml(p.summary.resolved.event_date || '')} -- all ${p.legStatuses.length} real legs below are genuinely missing, safe to recreate together</td>
             </tr>` + p.legStatuses.map(l => `<tr>
               <td></td>
               <td>${escapeHtml(l.v.resolved.event_date || '')}</td>
@@ -21516,11 +21535,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
               <td>${l.v.resolved.line ?? ''}</td>
               <td>${escapeHtml(l.v.resolved.prop_player || '')}</td>
               <td>${escapeHtml(l.v.resolved.prop_stat || '')}</td>
+              <td>${markReviewBtnHtml(parlayLegRowIdx++)}</td>
             </tr>`).join('')).join('')}
           </tbody>
         </table>
         <button id="exportMissingUploadBtn" style="margin-top:10px;">Export missing rows to CSV</button>
-        <div style="font-size:10px;color:var(--ink-soft);margin-top:4px;">This export is directly safe to paste into Bulk Import as-is -- standalone picks import normally, and each recovered parlay's legs carry a real <code>parlay</code> tag so they'll link back together correctly instead of importing as bare, leg-less picks.</div>`
+        <div style="font-size:10px;color:var(--ink-soft);margin-top:4px;">This export is directly safe to paste into Bulk Import as-is -- standalone picks import normally, and each recovered parlay's legs carry a real <code>parlay</code> tag so they'll link back together correctly instead of importing as bare, leg-less picks. "Mark reviewed" is for a genuinely different situation -- a pick you've confirmed IS already in the database (just under corrected text), not one to re-import.</div>`
       : '';
 
     wrap.innerHTML = summaryHtml + reviewHtml + unresolvableHtml + tableHtml;
@@ -21531,6 +21551,45 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         const parlayCsvRows = parlayLegRows.map(({ v, parlayNumber }) => [v.resolved.event_date, nameOf(cappers, v.resolved.capper_id), nameOf(sports, v.resolved.sport_id), nameOf(betTypes, v.resolved.bet_type_id), v.resolved.selection || '', v.resolved.line ?? '', v.resolved.prop_player || '', v.resolved.prop_stat || '', parlayNumber]);
         downloadCsv(`missing-picks-${new Date().toISOString().split('T')[0]}.csv`, cols, [...standaloneCsvRows, ...parlayCsvRows]);
       });
+    }
+    wrap.querySelectorAll('.markVerifyReviewedBtn').forEach(btn => {
+      btn.addEventListener('click', () => markVerifyRowReviewed(markReviewCandidates[Number(btn.getAttribute('data-idx'))], btn, nameOf));
+    });
+  }
+
+  // Writes one confirmation row to verify_upload_dismissed_rows (new
+  // table -- SQL delivered directly in chat) keyed by the exact same
+  // dupKey this tool already uses to decide "found" vs "missing," then
+  // re-runs the whole check from scratch so the row moves out of
+  // "missing" immediately and stays out on any future check of this same
+  // file. Never touches `picks` itself -- this is a separate
+  // acknowledgment record, not a data fix.
+  async function markVerifyRowReviewed(v, btn, nameOf) {
+    if (!v) return;
+    btn.disabled = true;
+    btn.textContent = 'Marking...';
+    try {
+      const payload = {
+        dup_key: dupKey(v.resolved),
+        capper: nameOf(cappers, v.resolved.capper_id),
+        sport: nameOf(sports, v.resolved.sport_id),
+        bet_type: nameOf(betTypes, v.resolved.bet_type_id),
+        selection: v.resolved.selection || null,
+        line: v.resolved.line ?? null,
+        prop_player: v.resolved.prop_player || null,
+        prop_stat: v.resolved.prop_stat || null,
+        event_date: v.resolved.event_date || null
+      };
+      await rest('verify_upload_dismissed_rows', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(payload)
+      });
+      await runVerifyUpload();
+    } catch (e) {
+      alert('Could not mark reviewed: ' + e.message);
+      btn.disabled = false;
+      btn.textContent = 'Mark reviewed';
     }
   }
 
@@ -21570,7 +21629,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const maxDate = dates.reduce((a, b) => (a > b ? a : b));
       const existing = await restAllPages(`picks?select=id,capper_id,event_date,sport_id,bet_type_id,selection,line,prop_player,prop_stat,doubleheader_game&capper_id=in.(${capperIds.join(',')})&event_date=gte.${minDate}&event_date=lte.${maxDate}&order=id.asc`);
       const existingKeys = new Set(existing.map(p => dupKey(p)));
-      const isFound = v => existingKeys.has(dupKey(v.resolved));
+      // Direct report 2026-09-25: "I went through the process of updating
+      // all the errors on the pending picks page... now when I run verify
+      // upload against database it thinks all the ones I corrected are
+      // missing." Root cause: dupKey is computed from the ORIGINAL
+      // uploaded file's own text (a typo'd name, say) -- once that same
+      // real pick gets corrected in the database, its dupKey no longer
+      // matches the file's stale version, so this read-only tool has no
+      // way to know "this isn't actually missing, it was just fixed" and
+      // re-flags it every single run. verify_upload_dismissed_rows (new
+      // table, SQL given directly in chat) is a small, purely additive
+      // "already looked at this, it's fine" list keyed by that same
+      // dupKey -- a row here is a HUMAN'S confirmation, never
+      // auto-populated, and it's the one write this tool makes now
+      // (previously genuinely read-only against `picks`, per this
+      // function's own header comment -- still never touches `picks`
+      // itself, only this separate acknowledgment table).
+      const dismissedRows = await restAllPages('verify_upload_dismissed_rows?select=dup_key');
+      const dismissedKeys = new Set(dismissedRows.map(r => r.dup_key));
+      const isDbFound = v => existingKeys.has(dupKey(v.resolved));
+      const isReviewed = v => dismissedKeys.has(dupKey(v.resolved));
+      const isFound = v => isDbFound(v) || isReviewed(v);
 
       // Every leg gets grouped under its own parlay instead of ever being
       // listed as its own standalone row -- see classifyParlay's own
@@ -21584,7 +21663,8 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
       const standaloneFound = standaloneRows.filter(isFound);
       const standaloneMissing = standaloneRows.filter(v => !isFound(v));
-      renderVerifyUploadResults(standaloneFound, standaloneMissing, unresolvable, parlayReports);
+      const standaloneFoundViaReview = standaloneFound.filter(v => !isDbFound(v));
+      renderVerifyUploadResults(standaloneFound, standaloneMissing, unresolvable, parlayReports, standaloneFoundViaReview);
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">Could not check the database: ${e.message}</div>`;
     } finally {
@@ -28642,7 +28722,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 562; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 563; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
