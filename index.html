@@ -8962,8 +8962,19 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // play-by-play-based implementation; this list only controls the
   // entry-side no-line shape, identical for every stat in it.
   const YES_NO_PROP_STATS = ['anytime goal', 'double-double', 'triple-double', 'top 20 finish', 'top 10 finish', 'first goal scorer'];
+  // CONFIRMED REAL BUG, direct report 2026-09-25: a real Double-Double pick
+  // was flagged "Missing: Line" even though this is a yes/no prop with no
+  // line to give. Root cause: normalizeForMatch strips ALL non-alphanumeric
+  // characters (spaces AND hyphens), but every entry in YES_NO_PROP_STATS
+  // above still has its space or hyphen -- so this used to compare e.g.
+  // "doubledouble" against the literal string "double-double" and never
+  // matched, for any of the 6 entries, anywhere this function is called
+  // (Add Pick's line-skip branch, Bulk Import's Selection override, and
+  // this Missing-fields Line check all rely on it). Normalizing BOTH sides
+  // the same way fixes all three call sites at once.
   function isYesNoPropStat(statValue) {
-    return YES_NO_PROP_STATS.includes(normalizeForMatch(statValue));
+    const target = normalizeForMatch(statValue);
+    return YES_NO_PROP_STATS.some(s => normalizeForMatch(s) === target);
   }
   function updateGolfPropSelectionField() {
     const bt = currentBetType();
@@ -28722,7 +28733,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 563; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 564; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
