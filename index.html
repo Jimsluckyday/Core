@@ -1790,18 +1790,61 @@ These are almost always the same day, so "Date entered" only fills in a starting
                    run that, then the Tennis results, KBO results etc so
                    anything that needs data to grade is done in the same
                    place to reduce the situation where we don't do this."
-                   Golf already works this way by construction -- its
-                   grading button (below) reads live from ESPN's own PGA
-                   leaderboard, no separate manual pull required. Tennis
-                   and KBO couldn't, because their required data-pull step
-                   (Import results / KBO results cache) lived on a
-                   completely different tab (Setup), reachable only via a
-                   plain text reminder easy to skim past -- exactly what
-                   happened here. Both tools are now physically inside
-                   this section, ordered before the buttons that need
-                   their data, each still collapsed by default with its
-                   own toggle so this section doesn't turn into a wall of
-                   text when you don't need them. -->
+                   Tennis and KBO's required data-pull step (Import
+                   results / KBO results cache) lived on a completely
+                   different tab (Setup), reachable only via a plain text
+                   reminder easy to skim past -- exactly what happened
+                   here. Both tools are now physically inside this
+                   section, ordered before the buttons that need their
+                   data, each still collapsed by default with its own
+                   toggle so this section doesn't turn into a wall of text
+                   when you don't need them.
+                   CORRECTED 2026-09-25: this comment used to claim "Golf
+                   already works this way by construction -- reads live
+                   from ESPN's own PGA leaderboard" -- confirmed FALSE
+                   while building the new Golf results cache below: Golf
+                   had no automated grading of any kind in this Edge
+                   Function. Whatever that original claim was based on, it
+                   was never actually true; corrected here so a future
+                   reader isn't misled by it. -->
+
+              <!-- ADDED 2026-09-25, direct request: "maybe we could run
+                   something that will tell us if there are games ESPN
+                   won't cover... if there are no KBO games today... it
+                   won't tell us to look for those but if there are golf,
+                   tennis, MMA, F1 then we can run the individual ones
+                   before we run the full grade results for the day." A
+                   cheap pre-flight check over TODAY's own pending picks
+                   (not a generic "here's every sport that might ever need
+                   this" list) -- only surfaces a sport's cache tool when
+                   there's an actual pending pick for it on the chosen
+                   date, exactly the "don't spend an hour on pre-work for
+                   tournaments that aren't even in the system" scoping
+                   asked for. Sports with zero pending picks that date are
+                   silently omitted, not shown as "all clear" -- nothing
+                   to say about them. -->
+              <div style="border:1.5px solid var(--stamp-amber);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <strong style="font-size:12px;">Automation gaps for a date <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this FIRST, before "Find &amp; Update Results"</span></strong>
+                  <button type="button" class="ghost small" id="toggleAutomationGapsBtn">Show tool</button>
+                </div>
+                <div id="automationGapsPanel" style="display:none;margin-top:10px;">
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+                    Checks today's own pending picks and tells you which sports actually need a results-cache tool run first (Golf, Tennis, MMA, Soccer, KBO, CFL) -- only the ones with a real pending pick for this date. A sport not listed here either has zero pending picks today, or grades entirely from live ESPN data with nothing to pre-check.
+                  </div>
+                  <div class="row">
+                    <div class="field" style="flex:0 0 auto;">
+                      <label>Date being graded</label>
+                      <input id="automationGapsDate" type="date" />
+                    </div>
+                    <div style="align-self:flex-end;">
+                      <button id="runAutomationGapsBtn">Check for gaps</button>
+                    </div>
+                  </div>
+                  <div id="automationGapsResults" style="margin-top:12px;"></div>
+                </div>
+              </div>
+
               <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
                   <strong style="font-size:12px;">Tennis: Import results <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading Tennis picks</span></strong>
@@ -1963,6 +2006,46 @@ These are almost always the same day, so "Date entered" only fills in a starting
                       <button id="parseSoccerResultsImportBtn">Parse &amp; preview</button>
                     </div>
                     <div id="soccerResultsImportWrap" style="margin-top:12px;"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ADDED 2026-09-25, direct report: "I'm realizing we
+                   don't have a golf one." Confirmed Golf has ZERO
+                   automated grading at all (unlike Tennis/Soccer, which
+                   were only partial gaps) -- same free bulk-paste pattern
+                   as CFL. Only covers Tournament Winner/Top 10 Finish/
+                   Top 20 Finish/Tournament Matchup for now -- Round
+                   Matchup/Round Winner need to know WHICH round a pick
+                   means, which nothing currently records, so those still
+                   fall through to manual grading with an explicit reason
+                   rather than guessing the round from a date. -->
+              <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <strong style="font-size:12px;">Golf results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading Golf picks, no automated source exists</span></strong>
+                  <button type="button" class="ghost small" id="toggleGolfResultsToolsBtn">Show tools</button>
+                </div>
+                <div id="golfResultsToolsPanel" style="display:none;margin-top:10px;">
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+                    ESPN's live scoreboard isn't used for Golf leaderboards here -- this is the ONLY way Tournament Winner, Top 10 Finish, Top 20 Finish, and Tournament Matchup picks get graded. Matched by TOURNAMENT NAME (the pick's own Event name), not date, since a real tournament runs several days -- export once the tournament is actually finished (or a player you need has finished/withdrawn) rather than day by day. Round Matchup/Round Winner picks aren't covered yet (they need a specific round, not just the final result) -- keep grading those manually.
+                  </div>
+                  <div class="row">
+                    <div class="field" style="flex:1 1 260px;">
+                      <label>Tournament name (as entered on the picks)</label>
+                      <input id="golfResultsTournamentName" type="text" placeholder="e.g. U.S. Open" />
+                    </div>
+                    <div style="align-self:flex-end;">
+                      <button id="exportGolfResultsRequestBtn">&#8681; Export results request</button>
+                    </div>
+                  </div>
+                  <div id="golfResultsExportWarnWrap" style="margin-top:10px;"></div>
+                  <div style="margin-top:14px;">
+                    <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
+                    <textarea id="golfResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="player_name,finish_position,withdrawn,status&#10;Scottie Scheffler,1,no,completed"></textarea>
+                    <div style="margin-top:8px;">
+                      <button id="parseGolfResultsImportBtn">Parse &amp; preview</button>
+                    </div>
+                    <div id="golfResultsImportWrap" style="margin-top:12px;"></div>
                   </div>
                 </div>
               </div>
@@ -8161,6 +8244,158 @@ These are almost always the same day, so "Date entered" only fills in a starting
         alert('Could not cache: ' + e.message);
         btn.disabled = false;
         btn.textContent = `Cache ${rows.length} match(es)`;
+      }
+    });
+  });
+
+  // ---------- Golf results cache (export request / import results) ----------
+  // ADDED 2026-09-25, direct report: "I'm realizing we don't have a golf
+  // one." Same free bulk-paste pattern as CFL/KBO -- ESPN's live
+  // scoreboard is never used for Golf leaderboards here, so this is the
+  // ONLY path Tournament Winner/Top 10 Finish/Top 20 Finish/Tournament
+  // Matchup picks can grade through. Keyed by TOURNAMENT NAME, not a
+  // single date -- unlike every other results cache on this page, a golf
+  // tournament runs several days, so there's no one "date the games were
+  // played" to scope this by. `round` is always written as 'FINAL' here
+  // (not exposed in this UI) -- the underlying table also supports per-
+  // round rows for a future Round Matchup/Round Winner extension, but
+  // that isn't graded yet (see grade_picks_espn_backfill.ts's own comment
+  // on why -- no pick currently records which round it means).
+  async function fetchCachedGolfPlayersForTournament(tournamentName) {
+    if (!tournamentName) return [];
+    try {
+      return await rest(`golf_results_cache?select=player_name,finish_position&tournament_name=eq.${encodeURIComponent(tournamentName)}&round=eq.FINAL`);
+    } catch (e) { return []; }
+  }
+
+  $('exportGolfResultsRequestBtn').addEventListener('click', async () => {
+    const tournamentName = $('golfResultsTournamentName').value.trim();
+    if (!tournamentName) { alert('Enter the tournament name first (as it appears on the picks\' Event name field).'); return; }
+    const btn = $('exportGolfResultsRequestBtn');
+    btn.disabled = true;
+    try {
+      const cached = await fetchCachedGolfPlayersForTournament(tournamentName);
+      const cachedLine = cached.length
+        ? `Already cached for this tournament (confirm/find these):\n${cached.map(p => `  - ${p.player_name} (currently: finished ${p.finish_position ?? '?'})`).join('\n')}`
+        : 'No players currently cached for this tournament yet.';
+
+      const instructions = [
+        '=== INSTRUCTIONS FOR RESEARCHING GOLF RESULTS ===',
+        '',
+        `Please find the real final leaderboard for the golf tournament "${tournamentName}".`,
+        '',
+        'For each player who was entered/picked, report their final finish position (1 = won the tournament; use the actual numeric position for a tie, e.g. a player tied for 5th is "5" even if others also show "5").',
+        '',
+        'If a player withdrew or was disqualified before finishing, mark them as withdrawn instead of giving a finish position.',
+        '',
+        cachedLine,
+        '',
+        'OUTPUT FORMAT -- please return a CSV with exactly these columns: player_name,finish_position,withdrawn,status',
+        '  - finish_position: the player\'s final numeric rank. Leave blank if withdrawn.',
+        '  - withdrawn: "yes" or "no".',
+        '  - status: "completed" normally, or "voided" if the ENTIRE tournament was canceled/abandoned (leave finish_position/withdrawn blank in that case).',
+        '',
+        'Only include players you are reasonably confident actually played this tournament -- if uncertain, leave them out rather than guessing.',
+        '',
+        '=== END INSTRUCTIONS ==='
+      ].join('\r\n');
+
+      downloadCsv(`golf-results-request-${tournamentName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.csv`, ['player_name', 'finish_position', 'withdrawn', 'status'], [], instructions);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function parseGolfResultsImportCsv(text, tournamentName) {
+    const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
+    if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
+    function looksLikeHeader(line) {
+      const delim = line.includes('\t') ? '\t' : ',';
+      const tokens = splitCsvLine(line, delim).map(t => t.trim().toLowerCase());
+      return tokens.includes('player_name');
+    }
+    const headerRowIndex = allLines.findIndex(looksLikeHeader);
+    if (headerRowIndex === -1) return { error: 'Missing required column: player_name.' };
+    const lines = allLines.slice(headerRowIndex);
+    const delimiter = lines[0].includes('\t') ? '\t' : ',';
+    const headers = splitCsvLine(lines[0], delimiter).map(h => h.trim().toLowerCase());
+    const nameIdx = headers.indexOf('player_name');
+    const finishIdx = headers.indexOf('finish_position');
+    const withdrawnIdx = headers.indexOf('withdrawn');
+    const statusIdx = headers.indexOf('status');
+    if (nameIdx === -1) return { error: 'Missing required column: player_name.' };
+
+    const rows = [];
+    const errors = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i], delimiter).map(c => c.trim());
+      const player_name = cells[nameIdx];
+      if (!player_name) { errors.push(`Row ${i + 1}: missing player_name -- skipped.`); continue; }
+      const statusRaw = ((statusIdx !== -1 && cells[statusIdx]) || 'completed').toLowerCase();
+      const isVoided = statusRaw === 'voided';
+      const withdrawnRaw = ((withdrawnIdx !== -1 && cells[withdrawnIdx]) || 'no').toLowerCase();
+      const withdrawn = withdrawnRaw === 'yes' || withdrawnRaw === 'true';
+      let finish_position = null;
+      if (!isVoided && !withdrawn) {
+        const n = finishIdx !== -1 ? Number(cells[finishIdx]) : NaN;
+        if (!Number.isFinite(n)) { errors.push(`Row ${i + 1}: missing or non-numeric finish_position (or mark withdrawn/voided) -- skipped.`); continue; }
+        finish_position = n;
+      }
+      rows.push({ tournament_name: tournamentName, round: 'FINAL', player_name, finish_position, withdrawn, result_status: isVoided ? 'voided' : 'completed' });
+    }
+    return { rows, errors };
+  }
+
+  $('parseGolfResultsImportBtn').addEventListener('click', async () => {
+    const wrap = $('golfResultsImportWrap');
+    const tournamentName = $('golfResultsTournamentName').value.trim();
+    if (!tournamentName) { wrap.innerHTML = '<div class="msg error">Enter the tournament name first.</div>'; return; }
+
+    if (isBlankResultsPaste($('golfResultsImportInput').value, ['player_name'])) {
+      wrap.innerHTML = `<div class="msg ok">Results check complete for "${escapeHtml(tournamentName)}": no players found to update.</div>`;
+      $('golfResultsImportInput').value = '';
+      return;
+    }
+
+    const { rows, errors, error } = parseGolfResultsImportCsv($('golfResultsImportInput').value, tournamentName);
+    if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
+
+    const errorsHtml = errors.length
+      ? `<div class="msg error" style="margin-bottom:10px;">${errors.map(e => `<div>${escapeHtml(e)}</div>`).join('')}</div>` : '';
+
+    if (!rows.length) {
+      wrap.innerHTML = errorsHtml + '<div class="empty-state">Nothing to import -- check the errors above.</div>';
+      return;
+    }
+
+    const rowsHtml = rows.map(r => `
+      <tr><td>${escapeHtml(r.player_name)}</td><td>${r.finish_position ?? '—'}</td><td>${r.withdrawn ? 'Yes' : 'No'}</td><td>${escapeHtml(r.result_status)}</td></tr>`).join('');
+
+    wrap.innerHTML = `
+      ${errorsHtml}
+      <div style="font-size:12px;margin-bottom:10px;"><strong>${rows.length}</strong> player(s) ready to cache for "${escapeHtml(tournamentName)}":</div>
+      <table class="picks-table" style="margin-bottom:14px;">
+        <thead><tr><th>Player</th><th>Finish position</th><th>Withdrawn</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <button id="confirmGolfResultsImportBtn">Cache ${rows.length} player(s)</button>`;
+
+    $('confirmGolfResultsImportBtn').addEventListener('click', async () => {
+      const btn = $('confirmGolfResultsImportBtn');
+      btn.disabled = true;
+      btn.textContent = 'Caching...';
+      try {
+        await rest('golf_results_cache?on_conflict=tournament_name,round,player_name', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows)
+        });
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} player(s) for "${escapeHtml(tournamentName)}". "Find & Update Results" will now check these for this tournament's Golf picks.</div>`;
+        $('golfResultsImportInput').value = '';
+      } catch (e) {
+        alert('Could not cache: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = `Cache ${rows.length} player(s)`;
       }
     });
   });
@@ -14938,6 +15173,121 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     panel.style.display = showing ? 'none' : 'block';
     $('toggleSoccerResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
+  // ADDED 2026-09-25, same collapse pattern -- see the Golf results cache
+  // box's own comment above for what this tool does.
+  $('toggleGolfResultsToolsBtn').addEventListener('click', () => {
+    const panel = $('golfResultsToolsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleGolfResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+  });
+  $('toggleAutomationGapsBtn').addEventListener('click', () => {
+    const panel = $('automationGapsPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('toggleAutomationGapsBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+  });
+
+  // ---------- Automation gaps for a date ----------
+  // ADDED 2026-09-25, direct request: "maybe we could run something that
+  // will tell us if there are games ESPN won't cover... if there are golf,
+  // tennis, MMA, F1 then we can run the individual ones before we run the
+  // full grade results for the day." A cheap pre-flight scan of TODAY's
+  // own pending picks, grouped by sport, checked against a short static
+  // list of sports this app is CONFIRMED to need a paste-in results cache
+  // for -- never a live ESPN call of its own, just counting what's
+  // already sitting in `picks`. Direct scoping request, same conversation:
+  // "we only need to look for games that were called so we don't need to
+  // look at tournaments that aren't being called" -- a sport in this list
+  // with ZERO pending picks on the chosen date is left out of the results
+  // entirely, not shown as a reassuring "all clear" row.
+  //
+  // NO_LIVE_AUTOMATION: this app's own grading Edge Function has ZERO
+  // live-data path for these -- every pending pick needs its cache tool.
+  // PARTIAL_AUTOMATION: real live ESPN coverage exists, but a specific
+  // slice doesn't (Tennis Challenger/ITF tier, MMA Method of Victory,
+  // Soccer outside the 24-competition list) -- can't cheaply tell which
+  // slice a given pick falls into without actually querying ESPN (that's
+  // what "Find & Update Results" itself does), so every pending pick for
+  // these sports is surfaced as "worth a look," not a guaranteed miss.
+  const AUTOMATION_GAP_SPORTS = {
+    golf: { label: 'Golf', panelId: 'golfResultsToolsPanel', toggleBtnId: 'toggleGolfResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the Golf results cache.' },
+    kbo: { label: 'KBO', panelId: 'kboResultsToolsPanel', toggleBtnId: 'toggleKboResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the KBO results cache.' },
+    cfl: { label: 'CFL', panelId: 'cflResultsToolsPanel', toggleBtnId: 'toggleCflResultsToolsBtn', note: 'ESPN has no CFL data at all -- every pending pick needs the CFL results cache.' },
+    tennis: { label: 'Tennis', panelId: 'tennisResultsToolsPanel', toggleBtnId: 'toggleTennisResultsToolsBtn', note: 'Tour-level (ATP/WTA) grades live from ESPN -- only a Challenger/ITF match ESPN never carried needs the cache. Worth a look before assuming a miss is a real bug.' },
+    mma: { label: 'MMA', panelId: 'mmaResultsToolsPanel', toggleBtnId: 'toggleMmaResultsToolsBtn', note: 'Moneyline grades live from ESPN -- only Method of Victory picks need the cache.' },
+    soccer: { label: 'Soccer', panelId: 'soccerResultsToolsPanel', toggleBtnId: 'toggleSoccerResultsToolsBtn', note: 'Most competitions (Club World Cup, Champions League, major leagues, etc.) grade live from ESPN -- only a competition outside that list needs the cache.' }
+  };
+
+  function revealGradingToolPanel(panelId, toggleBtnId) {
+    const picksPanel = $('picksPanel');
+    if (picksPanel && picksPanel.style.display === 'none') $('togglePicksBtn').click();
+    const automationPanel = $('automationPanel');
+    if (automationPanel && automationPanel.style.display === 'none') $('toggleAutomationBtn').click();
+    const gradingPanel = $('gradingToolsPanel');
+    if (gradingPanel && gradingPanel.style.display === 'none') $('toggleGradingToolsBtn').click();
+    const panel = $(panelId);
+    if (panel && panel.style.display === 'none') $(toggleBtnId).click();
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  $('runAutomationGapsBtn').addEventListener('click', async () => {
+    const date = $('automationGapsDate').value;
+    const wrap = $('automationGapsResults');
+    if (!date) { wrap.innerHTML = '<div class="msg error">Pick a date first.</div>'; return; }
+    const btn = $('runAutomationGapsBtn');
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    try {
+      const rows = await restAllPages(
+        `picks?select=selection,prop_player,event_name,sports(name)&event_date=eq.${date}&result=eq.pending`
+      );
+      const bySport = {};
+      rows.forEach(p => {
+        const sportName = p.sports ? p.sports.name : null;
+        if (!sportName) return;
+        const key = normalizeForMatch(sportName);
+        if (!AUTOMATION_GAP_SPORTS[key]) return;
+        if (!bySport[key]) bySport[key] = [];
+        bySport[key].push(p);
+      });
+      const keysPresent = Object.keys(bySport);
+      if (!keysPresent.length) {
+        wrap.innerHTML = `<div class="msg ok">Nothing to flag for ${escapeHtml(date)} -- no pending picks in a sport that needs a results-cache tool. Safe to run "Find &amp; Update Results" directly.</div>`;
+        return;
+      }
+      const cardsHtml = keysPresent.map(key => {
+        const info = AUTOMATION_GAP_SPORTS[key];
+        const picks = bySport[key];
+        // Distinct identifiers so this reads as "here's what to research,"
+        // not just a bare count -- event_name (tournament/competition) when
+        // present, otherwise the player/selection text itself.
+        const idSet = new Set(picks.map(p => p.event_name || p.prop_player || p.selection).filter(Boolean));
+        const ids = [...idSet].slice(0, 12);
+        const idsHtml = ids.length
+          ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${ids.map(i => escapeHtml(i)).join(', ')}${idSet.size > ids.length ? ` (+${idSet.size - ids.length} more)` : ''}</div>`
+          : '';
+        return `<div style="border:1px solid var(--field);border-radius:4px;padding:8px 10px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div><strong>${escapeHtml(info.label)}</strong> -- ${picks.length} pending pick${picks.length === 1 ? '' : 's'} on ${escapeHtml(date)}</div>
+            <button type="button" class="ghost small" data-panel-id="${info.panelId}" data-toggle-btn-id="${info.toggleBtnId}">Open ${escapeHtml(info.label)} cache tool &rarr;</button>
+          </div>
+          <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${escapeHtml(info.note)}</div>
+          ${idsHtml}
+        </div>`;
+      }).join('');
+      wrap.innerHTML = `<div style="font-size:12px;margin-bottom:8px;">${keysPresent.length} sport${keysPresent.length === 1 ? '' : 's'} worth checking before running "Find &amp; Update Results" for ${escapeHtml(date)}:</div>${cardsHtml}`;
+      wrap.querySelectorAll('button[data-panel-id]').forEach(b => {
+        b.addEventListener('click', () => revealGradingToolPanel(b.getAttribute('data-panel-id'), b.getAttribute('data-toggle-btn-id')));
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">Could not check: ${escapeHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Check for gaps';
+    }
+  });
+
   // ADDED 2026-09-14, same collapse pattern -- see the Results Audit box's
   // own comment for what this tool does.
   $('toggleResultsAuditBtn').addEventListener('click', () => {
@@ -29071,7 +29421,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 567; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 568; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
