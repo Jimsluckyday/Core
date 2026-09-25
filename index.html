@@ -1830,7 +1830,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
                 </div>
                 <div id="automationGapsPanel" style="display:none;margin-top:10px;">
                   <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-                    Checks today's own pending picks and tells you which sports actually need a results-cache tool run first (Golf, Tennis, MMA, Soccer, KBO, CFL) -- only the ones with a real pending pick for this date. A sport not listed here either has zero pending picks today, or grades entirely from live ESPN data with nothing to pre-check.
+                    Checks today's own pending picks and tells you which sports actually need a results-cache tool run first (Golf, Tennis, MMA, Soccer, KBO, CFL, CBA, Euro Basketball, Cricket) -- only the ones with a real pending pick for this date. A sport not listed here either has zero pending picks today, or grades entirely from live ESPN data with nothing to pre-check.
                   </div>
                   <div class="row">
                     <div class="field" style="flex:0 0 auto;">
@@ -1882,38 +1882,70 @@ These are almost always the same day, so "Date entered" only fills in a starting
               <!-- ADDED 2026-09-13, direct request: "if we can upload
                    anything to make any bet easier to grade for the next
                    day then yes we should take that opportunity." Same
-                   free bulk-paste pattern as KBO (now its own shared
-                   section) -- ESPN's CFL
-                   scoreboard is confirmed 100% dead for every date tested
-                   (see grade_picks_espn_backfill's own header comment),
-                   so there was never going to be a live-data fix here,
-                   only a paste-in one. -->
+                   free bulk-paste pattern as KBO -- ESPN's CFL scoreboard
+                   is confirmed 100% dead for every date tested (see
+                   grade_picks_espn_backfill's own header comment), so
+                   there was never going to be a live-data fix here, only
+                   a paste-in one.
+                   CONSOLIDATED 2026-09-25, direct request right after
+                   CBA/Euro Basketball/Cricket got the identical treatment:
+                   "we can condense some of the cache tools if a bunch of
+                   them rarely get called... time constraints doing this
+                   live are a thing in case it runs a dozen searches when
+                   1-2 are needed." Four sports (CFL, CBA, Euro Basketball,
+                   Cricket) are IDENTICAL in shape -- team vs. team, plain
+                   final score, Moneyline/Spread/Total -- and none of them
+                   see anywhere near Tennis/KBO/Soccer's daily volume, so
+                   folding all four into one box with a sport dropdown
+                   (instead of a 4th near-identical standalone box) cuts
+                   real UI clutter for tools that are mostly dormant. Each
+                   export request still only ever asks about the ONE
+                   selected sport and ONE date -- exactly as narrow as the
+                   old single-sport boxes were, never a broader sweep, so
+                   this stays a 1-2-search lookup, not an open-ended
+                   research task. Writes to a DIFFERENT table per sport
+                   (`${sport}_results_cache`) -- same column shape for all
+                   four (game_date/home_team/away_team/home_score/
+                   away_score/result_status), so one shared JS path
+                   handles all of them; Cricket alone also accepts a
+                   "tied" status (a real, distinct outcome from a rained-
+                   out "voided" match -- see grade_picks_espn_backfill.ts's
+                   own comment on why those two aren't the same thing). -->
               <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-                  <strong style="font-size:12px;">CFL results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading CFL picks, ESPN has no CFL data at all</span></strong>
-                  <button type="button" class="ghost small" id="toggleCflResultsToolsBtn">Show tools</button>
+                  <strong style="font-size:12px;">Other team sports results cache <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— CFL, CBA, Euro Basketball, Cricket</span></strong>
+                  <button type="button" class="ghost small" id="toggleTeamSportResultsToolsBtn">Show tools</button>
                 </div>
-                <div id="cflResultsToolsPanel" style="display:none;margin-top:10px;">
+                <div id="teamSportResultsToolsPanel" style="display:none;margin-top:10px;">
                   <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
-                    ESPN's public CFL scoreboard feed returns zero events for literally every date tested -- confirmed dead, not a per-date gap. Same free bulk-paste pattern as KBO: export a request, paste a chatbot's real CFL scores back in, confirm. "Find & Update Results" below then checks this cache for Moneyline/Spread/Total CFL picks instead of leaving them pending indefinitely.
+                    None of these four sports have any live ESPN coverage in this app -- same free bulk-paste pattern as KBO/Golf: pick the sport and date, export a request, paste a chatbot's real score(s) back in, confirm. "Find & Update Results" then checks the matching cache for that sport's Moneyline/Spread/Total picks instead of leaving them pending indefinitely.
                   </div>
                   <div class="row">
+                    <div class="field" style="flex:0 0 160px;">
+                      <label>Sport</label>
+                      <select id="teamSportResultsSport">
+                        <option value="cfl">CFL</option>
+                        <option value="cba">CBA</option>
+                        <option value="euro_basketball">Euro Basketball</option>
+                        <option value="cricket">Cricket</option>
+                      </select>
+                    </div>
                     <div class="field" style="flex:0 0 auto;">
                       <label>Date games were played</label>
-                      <input id="cflResultsExportDate" type="date" />
+                      <input id="teamSportResultsExportDate" type="date" />
                     </div>
                     <div style="align-self:flex-end;">
-                      <button id="exportCflResultsRequestBtn">&#8681; Export results request</button>
+                      <button id="exportTeamSportResultsRequestBtn">&#8681; Export results request</button>
                     </div>
                   </div>
-                  <div id="cflResultsExportWarnWrap" style="margin-top:10px;"></div>
+                  <div id="teamSportResultsExportWarnWrap" style="margin-top:10px;"></div>
                   <div style="margin-top:14px;">
                     <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
-                    <textarea id="cflResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="home_team,away_team,home_score,away_score,status&#10;Calgary Stampeders,Saskatchewan Roughriders,27,24,completed"></textarea>
+                    <textarea id="teamSportResultsImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="home_team,away_team,home_score,away_score,status&#10;Calgary Stampeders,Saskatchewan Roughriders,27,24,completed"></textarea>
                     <div style="margin-top:8px;">
-                      <button id="parseCflResultsImportBtn">Parse &amp; preview</button>
+                      <button id="parseTeamSportResultsImportBtn">Parse &amp; preview</button>
                     </div>
-                    <div id="cflResultsImportWrap" style="margin-top:12px;"></div>
+                    <div id="teamSportResultsImportWrap" style="margin-top:12px;"></div>
                   </div>
                 </div>
               </div>
@@ -7761,55 +7793,73 @@ These are almost always the same day, so "Date entered" only fills in a starting
     });
   });
 
-  // ---------- CFL results cache (export request / import results) ----------
-  // ADDED 2026-09-13, direct request: "if we can upload anything to make
-  // any bet easier to grade for the next day then yes we should take that
-  // opportunity." Modeled directly on the KBO results cache just above --
-  // same shape, minus the First-5-innings columns (not an MMA/CFL concept).
-  async function fetchCachedCflGamesForDate(date) {
+  // ---------- Other team sports results cache (CFL/CBA/Euro Basketball/Cricket) ----------
+  // CONSOLIDATED 2026-09-25, direct request: "we can condense some of the
+  // cache tools if a bunch of them rarely get called or combine them into
+  // one tool provided that it doesn't spiral into a 1hr fetch." Replaces
+  // 4 near-identical standalone boxes (CFL, plus what would have been
+  // separate CBA/Euro Basketball/Cricket ones) with ONE tool + a sport
+  // dropdown -- all four share the exact same table shape (game_date,
+  // home_team, away_team, home_score, away_score, result_status), just a
+  // different table name per sport. Each export/parse call still only
+  // ever targets the ONE selected sport + ONE date -- never broadened
+  // into a multi-sport or multi-date ask -- so this stays exactly as
+  // narrow a lookup as the old single-sport boxes were.
+  const TEAM_SPORT_RESULTS_CONFIG = {
+    cfl: { label: 'CFL', table: 'cfl_results_cache', displayName: 'CFL (Canadian Football League)', teamHint: 'Use the real, full team names (e.g. "Calgary Stampeders", "Saskatchewan Roughriders", "Hamilton Tiger-Cats").', noDataNote: 'ESPN has no CFL data at all -- confirmed dead for every date tested, not a per-date gap.', allowTied: false },
+    cba: { label: 'CBA', table: 'cba_results_cache', displayName: 'CBA (Chinese Basketball Association)', teamHint: 'Use the real, full team names as commonly reported (e.g. "Liaoning Flying Leopards", "Guangdong Southern Tigers").', noDataNote: 'ESPN does not cover the CBA.', allowTied: false },
+    euro_basketball: { label: 'Euro Basketball', table: 'euro_basketball_results_cache', displayName: 'European club basketball (EuroLeague, EuroCup, domestic leagues -- NOT NBA/WNBA/NCAAB)', teamHint: 'Use the real, full club names as commonly reported (e.g. "Real Madrid", "Fenerbahce Beko", "Panathinaikos").', noDataNote: 'ESPN does not cover European club basketball here.', allowTied: false },
+    cricket: { label: 'Cricket', table: 'cricket_results_cache', displayName: 'Cricket (any format/competition)', teamHint: 'Use the real, full team names as commonly reported (e.g. "India", "Mumbai Indians").', noDataNote: 'ESPN does not cover Cricket here.', allowTied: true }
+  };
+
+  async function fetchCachedTeamSportGamesForDate(sportKey, date) {
     if (!date) return [];
+    const cfg = TEAM_SPORT_RESULTS_CONFIG[sportKey];
     try {
-      return await rest(`cfl_results_cache?select=home_team,away_team&game_date=eq.${date}`);
+      return await rest(`${cfg.table}?select=home_team,away_team&game_date=eq.${date}`);
     } catch (e) { return []; }
   }
 
-  $('exportCflResultsRequestBtn').addEventListener('click', async () => {
-    const date = $('cflResultsExportDate').value;
+  $('exportTeamSportResultsRequestBtn').addEventListener('click', async () => {
+    const sportKey = $('teamSportResultsSport').value;
+    const cfg = TEAM_SPORT_RESULTS_CONFIG[sportKey];
+    const date = $('teamSportResultsExportDate').value;
     if (!date) { alert('Pick the date the games were played first.'); return; }
-    const btn = $('exportCflResultsRequestBtn');
+    const btn = $('exportTeamSportResultsRequestBtn');
     btn.disabled = true;
     try {
-      await checkScheduleSyncFlags('CFL', date, 'cflResultsExportWarnWrap');
-      const cached = await fetchCachedCflGamesForDate(date);
+      await checkScheduleSyncFlags(cfg.label, date, 'teamSportResultsExportWarnWrap');
+      const cached = await fetchCachedTeamSportGamesForDate(sportKey, date);
       const cachedLine = cached.length
         ? `Already cached for this date (confirm/find scores for these):\n${cached.map(g => `  - ${g.home_team} vs ${g.away_team}`).join('\n')}`
-        : 'No games currently cached for this date yet -- research and report any real CFL games played this date.';
+        : `No games currently cached for this date yet -- research and report any real ${cfg.label} games played this date.`;
+      const tiedNote = cfg.allowTied ? '  - status: "completed" normally, "tied" if the match genuinely ended level, or "voided" if abandoned/no result (leave scores blank for voided; a tied match still needs its real final scores).' : '  - status: "completed" normally, or "voided" if the game was postponed/canceled and not completed (leave scores blank in that case).';
 
       const instructions = [
-        '=== INSTRUCTIONS FOR RESEARCHING CFL (Canadian Football League) RESULTS ===',
+        `=== INSTRUCTIONS FOR RESEARCHING ${cfg.displayName.toUpperCase()} RESULTS ===`,
         '',
-        `Please find the real final scores of CFL games played on ${date} (Eastern Time, USA).`,
+        `Please find the real final score(s) of ${cfg.label} game(s) played on ${date} (Eastern Time, USA). Only this one date -- no need to check other days.`,
         '',
-        'Use the real, full team names (e.g. "Calgary Stampeders", "Saskatchewan Roughriders", "Hamilton Tiger-Cats").',
+        cfg.teamHint,
         '',
         cachedLine,
         '',
         'OUTPUT FORMAT -- please return a CSV with exactly these columns: home_team,away_team,home_score,away_score,status',
         '  - home_score/away_score: final score.',
-        '  - status: "completed" normally, or "voided" if the game was postponed/canceled and not completed (leave scores blank in that case).',
+        tiedNote,
         '',
         'Only include games you are reasonably confident actually happened as described -- if uncertain, leave it out rather than guessing.',
         '',
         '=== END INSTRUCTIONS ==='
       ].join('\r\n');
 
-      downloadCsv(`cfl-results-request-${date}.csv`, ['home_team', 'away_team', 'home_score', 'away_score', 'status'], [], instructions);
+      downloadCsv(`${sportKey}-results-request-${date}.csv`, ['home_team', 'away_team', 'home_score', 'away_score', 'status'], [], instructions);
     } finally {
       btn.disabled = false;
     }
   });
 
-  function parseCflResultsImportCsv(text, gameDate) {
+  function parseTeamSportResultsImportCsv(text, gameDate, allowTied) {
     const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length);
     if (allLines.length < 2) return { error: 'Paste a header row plus at least one data row.' };
     function looksLikeHeader(line) {
@@ -7838,6 +7888,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
       if (!home_team || !away_team) { errors.push(`Row ${i + 1}: missing home_team or away_team -- skipped.`); continue; }
       const statusRaw = ((statusIdx !== -1 && cells[statusIdx]) || 'completed').toLowerCase();
       const isVoided = statusRaw === 'voided';
+      const isTied = allowTied && statusRaw === 'tied';
       function parseScore(idx) {
         if (idx === -1 || !cells[idx]) return null;
         const n = Number(cells[idx]);
@@ -7852,27 +7903,29 @@ These are almost always the same day, so "Date entered" only fills in a starting
           continue;
         }
       }
-      rows.push({ game_date: gameDate, home_team, away_team, home_score, away_score, result_status: isVoided ? 'voided' : 'completed' });
+      rows.push({ game_date: gameDate, home_team, away_team, home_score, away_score, result_status: isVoided ? 'voided' : (isTied ? 'tied' : 'completed') });
     }
     return { rows, errors };
   }
 
-  $('parseCflResultsImportBtn').addEventListener('click', async () => {
-    const wrap = $('cflResultsImportWrap');
-    const gameDate = $('cflResultsExportDate').value;
+  $('parseTeamSportResultsImportBtn').addEventListener('click', async () => {
+    const sportKey = $('teamSportResultsSport').value;
+    const cfg = TEAM_SPORT_RESULTS_CONFIG[sportKey];
+    const wrap = $('teamSportResultsImportWrap');
+    const gameDate = $('teamSportResultsExportDate').value;
     if (!gameDate) { wrap.innerHTML = '<div class="msg error">Pick the date the games were played first.</div>'; return; }
 
-    await checkScheduleSyncFlags('CFL', gameDate, 'cflResultsExportWarnWrap');
+    await checkScheduleSyncFlags(cfg.label, gameDate, 'teamSportResultsExportWarnWrap');
 
-    if (isBlankResultsPaste($('cflResultsImportInput').value, ['home_team', 'away_team'])) {
-      logResultsCheck('cfl_results', gameDate, 0);
+    if (isBlankResultsPaste($('teamSportResultsImportInput').value, ['home_team', 'away_team'])) {
+      logResultsCheck(`${sportKey}_results`, gameDate, 0);
       wrap.innerHTML = `<div class="msg ok">Results check complete for ${escapeHtml(gameDate)}: no games found to update. Safe to run "Find & Update Results" now.</div>`;
       alert(`Results ran -- no games to update for ${gameDate}. Safe for you to run Find & Update Results.`);
-      $('cflResultsImportInput').value = '';
+      $('teamSportResultsImportInput').value = '';
       return;
     }
 
-    const { rows, errors, error } = parseCflResultsImportCsv($('cflResultsImportInput').value, gameDate);
+    const { rows, errors, error } = parseTeamSportResultsImportCsv($('teamSportResultsImportInput').value, gameDate, cfg.allowTied);
     if (error) { wrap.innerHTML = `<div class="msg error">${error}</div>`; return; }
 
     const errorsHtml = errors.length
@@ -7888,26 +7941,26 @@ These are almost always the same day, so "Date entered" only fills in a starting
 
     wrap.innerHTML = `
       ${errorsHtml}
-      <div style="font-size:12px;margin-bottom:10px;"><strong>${rows.length}</strong> game(s) ready to cache:</div>
+      <div style="font-size:12px;margin-bottom:10px;"><strong>${rows.length}</strong> ${escapeHtml(cfg.label)} game(s) ready to cache:</div>
       <table class="picks-table" style="margin-bottom:14px;">
         <thead><tr><th>Home</th><th>Away</th><th>Home score</th><th>Away score</th><th>Status</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
-      <button id="confirmCflResultsImportBtn">Cache ${rows.length} game(s)</button>`;
+      <button id="confirmTeamSportResultsImportBtn">Cache ${rows.length} game(s)</button>`;
 
-    $('confirmCflResultsImportBtn').addEventListener('click', async () => {
-      const btn = $('confirmCflResultsImportBtn');
+    $('confirmTeamSportResultsImportBtn').addEventListener('click', async () => {
+      const btn = $('confirmTeamSportResultsImportBtn');
       btn.disabled = true;
       btn.textContent = 'Caching...';
       try {
-        await rest('cfl_results_cache?on_conflict=game_date,home_team,away_team', {
+        await rest(`${cfg.table}?on_conflict=game_date,home_team,away_team`, {
           method: 'POST',
           headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(rows)
         });
-        logResultsCheck('cfl_results', gameDate, rows.length);
-        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} game(s). "Find & Update Results" will now check these for CFL picks on ${gameDate}.</div>`;
-        $('cflResultsImportInput').value = '';
+        logResultsCheck(`${sportKey}_results`, gameDate, rows.length);
+        wrap.innerHTML = `<div class="msg ok">Cached ${rows.length} game(s). "Find &amp; Update Results" will now check these for ${escapeHtml(cfg.label)} picks on ${gameDate}.</div>`;
+        $('teamSportResultsImportInput').value = '';
       } catch (e) {
         alert('Could not cache: ' + e.message);
         btn.disabled = false;
@@ -15151,13 +15204,13 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     panel.style.display = showing ? 'none' : 'block';
     $('toggleTennisResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
-  // ADDED 2026-09-13, same pattern as toggleTennisResultsToolsBtn above --
-  // CFL/MMA results cache tools also live in the Grading section now.
-  $('toggleCflResultsToolsBtn').addEventListener('click', () => {
-    const panel = $('cflResultsToolsPanel');
+  // RENAMED 2026-09-25 from toggleCflResultsToolsBtn -- this now toggles
+  // the consolidated CFL/CBA/Euro Basketball/Cricket tool.
+  $('toggleTeamSportResultsToolsBtn').addEventListener('click', () => {
+    const panel = $('teamSportResultsToolsPanel');
     const showing = panel.style.display !== 'none';
     panel.style.display = showing ? 'none' : 'block';
-    $('toggleCflResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
+    $('toggleTeamSportResultsToolsBtn').textContent = showing ? 'Show tools' : 'Hide tools';
   });
   $('toggleMmaResultsToolsBtn').addEventListener('click', () => {
     const panel = $('mmaResultsToolsPanel');
@@ -15210,10 +15263,17 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // slice a given pick falls into without actually querying ESPN (that's
   // what "Find & Update Results" itself does), so every pending pick for
   // these sports is surfaced as "worth a look," not a guaranteed miss.
+  // panelId/toggleBtnId point at the CONSOLIDATED team-sport tool for
+  // cfl/cba/eurobasketball/cricket (added 2026-09-25) -- sportSelectValue
+  // additionally pre-selects the right sport in that tool's dropdown so
+  // the jump-to button doesn't just open the box, it opens it ready to go.
   const AUTOMATION_GAP_SPORTS = {
     golf: { label: 'Golf', panelId: 'golfResultsToolsPanel', toggleBtnId: 'toggleGolfResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the Golf results cache.' },
     kbo: { label: 'KBO', panelId: 'kboResultsToolsPanel', toggleBtnId: 'toggleKboResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the KBO results cache.' },
-    cfl: { label: 'CFL', panelId: 'cflResultsToolsPanel', toggleBtnId: 'toggleCflResultsToolsBtn', note: 'ESPN has no CFL data at all -- every pending pick needs the CFL results cache.' },
+    cfl: { label: 'CFL', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cfl', note: 'ESPN has no CFL data at all -- every pending pick needs the CFL results cache.' },
+    cba: { label: 'CBA', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cba', note: 'No live automation at all -- every pending pick needs the CBA results cache.' },
+    eurobasketball: { label: 'Euro Basketball', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'euro_basketball', note: 'No live automation at all -- every pending pick needs the Euro Basketball results cache.' },
+    cricket: { label: 'Cricket', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cricket', note: 'No live automation at all -- every pending pick needs the Cricket results cache.' },
     tennis: { label: 'Tennis', panelId: 'tennisResultsToolsPanel', toggleBtnId: 'toggleTennisResultsToolsBtn', note: 'Tour-level (ATP/WTA) grades live from ESPN -- only a Challenger/ITF match ESPN never carried needs the cache. Worth a look before assuming a miss is a real bug.' },
     mma: { label: 'MMA', panelId: 'mmaResultsToolsPanel', toggleBtnId: 'toggleMmaResultsToolsBtn', note: 'Moneyline grades live from ESPN -- only Method of Victory picks need the cache.' },
     soccer: { label: 'Soccer', panelId: 'soccerResultsToolsPanel', toggleBtnId: 'toggleSoccerResultsToolsBtn', note: 'Most competitions (Club World Cup, Champions League, major leagues, etc.) grade live from ESPN -- only a competition outside that list needs the cache.' }
@@ -15270,7 +15330,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         return `<div style="border:1px solid var(--field);border-radius:4px;padding:8px 10px;margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
             <div><strong>${escapeHtml(info.label)}</strong> -- ${picks.length} pending pick${picks.length === 1 ? '' : 's'} on ${escapeHtml(date)}</div>
-            <button type="button" class="ghost small" data-panel-id="${info.panelId}" data-toggle-btn-id="${info.toggleBtnId}">Open ${escapeHtml(info.label)} cache tool &rarr;</button>
+            <button type="button" class="ghost small" data-panel-id="${info.panelId}" data-toggle-btn-id="${info.toggleBtnId}"${info.sportSelectValue ? ` data-sport-select-value="${info.sportSelectValue}"` : ''}>Open ${escapeHtml(info.label)} cache tool &rarr;</button>
           </div>
           <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${escapeHtml(info.note)}</div>
           ${idsHtml}
@@ -15278,7 +15338,11 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       }).join('');
       wrap.innerHTML = `<div style="font-size:12px;margin-bottom:8px;">${keysPresent.length} sport${keysPresent.length === 1 ? '' : 's'} worth checking before running "Find &amp; Update Results" for ${escapeHtml(date)}:</div>${cardsHtml}`;
       wrap.querySelectorAll('button[data-panel-id]').forEach(b => {
-        b.addEventListener('click', () => revealGradingToolPanel(b.getAttribute('data-panel-id'), b.getAttribute('data-toggle-btn-id')));
+        b.addEventListener('click', () => {
+          const sportSelectValue = b.getAttribute('data-sport-select-value');
+          if (sportSelectValue) $('teamSportResultsSport').value = sportSelectValue;
+          revealGradingToolPanel(b.getAttribute('data-panel-id'), b.getAttribute('data-toggle-btn-id'));
+        });
       });
     } catch (e) {
       wrap.innerHTML = `<div class="msg error">Could not check: ${escapeHtml(e.message)}</div>`;
@@ -29421,7 +29485,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 568; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 569; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
