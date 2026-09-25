@@ -27269,24 +27269,35 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // rowNumbers collected on every candidate (Direct request 2026-09-10)
       // so the new "Apply fix" button knows exactly which physical lines
       // of the pasted text to edit -- see applyFieldFixInTextarea.
+      // imageNumbers added 2026-09-25, direct follow-up after the Bulk
+      // Import preview table got its own Image # column: "having to
+      // scroll down through all of them to cross reference was too much
+      // data to look through" -- a big paste can put the affected rows
+      // far apart in a 300+-row preview table, so this panel (already the
+      // first thing shown, already grouped by exactly what needs fixing)
+      // now lists the real row/image numbers directly instead of leaving
+      // the person to go find them.
       if (m.capper) {
         const key = m.capper.toLowerCase();
-        if (!cappersMap.has(key)) cappersMap.set(key, { name: m.capper, count: 0, rowNumbers: [] });
+        if (!cappersMap.has(key)) cappersMap.set(key, { name: m.capper, count: 0, rowNumbers: [], imageNumbers: [] });
         cappersMap.get(key).count++;
         if (v.sourceRowNumber) cappersMap.get(key).rowNumbers.push(v.sourceRowNumber);
+        if (v.raw.source_image) cappersMap.get(key).imageNumbers.push(v.raw.source_image);
       }
       if (m.sport) {
         const key = m.sport.toLowerCase();
-        if (!sportsMap.has(key)) sportsMap.set(key, { name: m.sport, count: 0, rowNumbers: [] });
+        if (!sportsMap.has(key)) sportsMap.set(key, { name: m.sport, count: 0, rowNumbers: [], imageNumbers: [] });
         sportsMap.get(key).count++;
         if (v.sourceRowNumber) sportsMap.get(key).rowNumbers.push(v.sourceRowNumber);
+        if (v.raw.source_image) sportsMap.get(key).imageNumbers.push(v.raw.source_image);
       }
       if (m.bet_type) {
         const key = m.bet_type.toLowerCase();
-        if (!betTypesMap.has(key)) betTypesMap.set(key, { name: m.bet_type, count: 0, hasLine: false, hasPropStat: false, hasTwoTeams: false, rowNumbers: [] });
+        if (!betTypesMap.has(key)) betTypesMap.set(key, { name: m.bet_type, count: 0, hasLine: false, hasPropStat: false, hasTwoTeams: false, rowNumbers: [], imageNumbers: [] });
         const entry = betTypesMap.get(key);
         entry.count++;
         if (v.sourceRowNumber) entry.rowNumbers.push(v.sourceRowNumber);
+        if (v.raw.source_image) entry.imageNumbers.push(v.raw.source_image);
         if ((v.raw.line || '').trim()) entry.hasLine = true;
         if ((v.raw.prop_stat || v.raw.stat || '').trim()) entry.hasPropStat = true;
         if ((v.raw.selection || '').includes('/')) entry.hasTwoTeams = true;
@@ -27294,9 +27305,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       for (const tc of (v.teamNameChecks || [])) {
         if (tc.ambiguous) continue;
         const key = tc.sportId + '||' + tc.rawName.toLowerCase();
-        if (!teamsMap.has(key)) teamsMap.set(key, { name: tc.rawName, sportId: tc.sportId, sportName: tc.sportName, suggestion: tc.suggestion, count: 0, rowNumbers: [] });
+        if (!teamsMap.has(key)) teamsMap.set(key, { name: tc.rawName, sportId: tc.sportId, sportName: tc.sportName, suggestion: tc.suggestion, count: 0, rowNumbers: [], imageNumbers: [] });
         teamsMap.get(key).count++;
         if (v.sourceRowNumber) teamsMap.get(key).rowNumbers.push(v.sourceRowNumber);
+        if (v.raw.source_image) teamsMap.get(key).imageNumbers.push(v.raw.source_image);
       }
     }
     return {
@@ -27329,12 +27341,25 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     const applyFixBtn = (fieldKey, name, suggestion, rowNumbers) => suggestion
       ? `<button class="applyFieldFixBtn" data-field="${fieldKey}" data-old="${escapeHtml(name)}" data-new="${escapeHtml(suggestion)}" data-rows="${escapeHtml(JSON.stringify(rowNumbers || []))}">Fix to "${escapeHtml(suggestion)}"</button>`
       : '';
+    // Direct request 2026-09-25, right after the preview table's own
+    // Image # column shipped: "having to scroll down through all of them
+    // to cross reference was too much data to look through." Lists the
+    // real row/image numbers directly in this panel -- already the first
+    // thing shown, already grouped by exactly what needs fixing -- instead
+    // of a bare count that still leaves finding the actual rows as a
+    // separate scroll-and-search step.
+    const rowsCell = (count, rowNumbers, imageNumbers) => `
+      <td style="font-size:11px;">
+        <strong>${count}</strong> row${count === 1 ? '' : 's'}
+        <div style="color:var(--ink-soft);">Row${rowNumbers.length === 1 ? '' : 's'}: ${rowNumbers.length ? rowNumbers.map(n => escapeHtml(String(n))).join(', ') : '—'}</div>
+        ${imageNumbers.length ? `<div style="color:var(--ink-soft);">Image${imageNumbers.length === 1 ? '' : 's'}: ${imageNumbers.map(n => escapeHtml(n)).join(', ')}</div>` : ''}
+      </td>`;
     const rows = [];
     candidates.cappers.forEach(c => rows.push(`
       <tr>
         <td>Capper</td>
         <td>${escapeHtml(c.name)}</td>
-        <td>${c.count}</td>
+        ${rowsCell(c.count, c.rowNumbers, c.imageNumbers)}
         <td style="font-size:11px;">${suggestionNote(c.suggestion)}</td>
         <td>
           ${applyFixBtn('capper', c.name, c.suggestion, c.rowNumbers)}
@@ -27345,7 +27370,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <tr>
         <td>Sport</td>
         <td>${escapeHtml(s.name)}</td>
-        <td>${s.count}</td>
+        ${rowsCell(s.count, s.rowNumbers, s.imageNumbers)}
         <td style="font-size:11px;">${suggestionNote(s.suggestion)}</td>
         <td>
           ${applyFixBtn('sport', s.name, s.suggestion, s.rowNumbers)}
@@ -27356,7 +27381,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <tr>
         <td>Bet Type</td>
         <td>${escapeHtml(b.name)}</td>
-        <td>${b.count}</td>
+        ${rowsCell(b.count, b.rowNumbers, b.imageNumbers)}
         <td style="font-size:11px;">
           ${suggestionNote(b.suggestion)}
           <label style="display:block;"><input type="checkbox" class="newBetTypeFlag" data-flag="uses_line" ${b.hasLine ? 'checked' : ''}/> Uses a line (spread/total)</label>
@@ -27373,7 +27398,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <tr>
         <td>Team</td>
         <td>${escapeHtml(t.name)} <span style="color:var(--ink-soft);">(${escapeHtml(t.sportName)})</span></td>
-        <td>${t.count}</td>
+        ${rowsCell(t.count, t.rowNumbers, t.imageNumbers)}
         <td style="font-size:11px;">${suggestionNote(t.suggestion)}</td>
         <td>
           ${applyFixBtn('selection', t.name, t.suggestion, t.rowNumbers)}
@@ -27384,7 +27409,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <div style="margin-bottom:14px;border:2px solid var(--stamp-amber);border-radius:4px;padding:10px;">
         <div style="font-weight:bold;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">New cappers / sports / bet types / teams found in this paste (${total})</div>
         <table class="picks-table">
-          <thead><tr><th>Type</th><th>Name</th><th>Rows</th><th>Check before adding</th><th></th></tr></thead>
+          <thead><tr><th>Type</th><th>Name</th><th>Rows / Images</th><th>Check before adding</th><th></th></tr></thead>
           <tbody>${rows.join('')}</tbody>
         </table>
         <div style="font-size:10px;color:var(--ink-soft);margin-top:6px;">
@@ -28617,7 +28642,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 561; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 562; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
