@@ -8988,14 +8988,36 @@ These are almost always the same day, so "Date entered" only fills in a starting
       $('pickSelection').placeholder = 'e.g. Justin Thomas';
       $('lineField').style.display = 'none';
       $('pickLine').value = '';
-    } else if (isGolfOutrightStat(statValue) || isYesNoPropStat(statValue)) {
+    } else if (isGolfOutrightStat(statValue)) {
       $('selectionField').style.display = 'none';
+      $('lineField').style.display = 'none';
+      $('pickLine').value = '';
+    } else if (isYesNoPropStat(statValue)) {
+      // Direct feedback 2026-09-25: "it's theoretical someone could say
+      // that player x doesn't get a double double... that would be a good
+      // way of entering those with a no." Real sportsbooks sell both sides
+      // of these props (a real +953 Double-Double pick that turned out to
+      // likely BE a "No" call is what surfaced this) -- previously this
+      // field was hidden entirely and save always hardcoded "Yes", so
+      // there was no way to enter or even see a "No" call, including while
+      // editing an existing pick. Shown now, pre-filled "Yes" (the common
+      // case) but freely editable to "No".
+      $('selectionField').style.display = 'block';
+      $('selectionLabel').textContent = 'Yes or No';
+      $('pickSelection').placeholder = 'Yes';
+      if (!$('pickSelection').value) $('pickSelection').value = 'Yes';
       $('lineField').style.display = 'none';
       $('pickLine').value = '';
     } else {
       $('selectionField').style.display = 'none';
       $('lineField').style.display = (bt ? bt.uses_line : true) ? 'block' : 'none';
     }
+    // Keeps the Selection datalist's Yes/No override (see
+    // updateSelectionDatalist) in sync with whichever prop stat is
+    // currently chosen -- this function already runs on every point that
+    // changes, so piggybacking here covers all of them without a
+    // duplicate listener.
+    updateSelectionDatalist();
   }
   $('pickType').addEventListener('change', updatePickTypeFields);
   $('pickSport').addEventListener('change', updateSelectionDatalist);
@@ -9236,6 +9258,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
     const datalist = $('selectionSuggestions');
     const bt = currentBetType();
     const key = bt ? bt.name.toLowerCase() : '';
+    // Yes/No props (Double-Double, Anytime Goal, etc.) only ever have two
+    // valid answers -- overrides the generic "Over"/"Under" Player Prop
+    // suggestions, which don't apply to this shape of bet at all.
+    if (bt && bt.uses_prop_fields && isYesNoPropStat($('propStat').value)) {
+      datalist.innerHTML = ['Yes', 'No'].map(s => `<option value="${escapeHtml(s)}"></option>`).join('');
+      return;
+    }
     const staticSuggestions = SELECTION_SUGGESTIONS[key] || [];
     const sportId = $('pickSport').value;
     const teamNames = sportId ? teams.filter(t => String(t.sport_id) === String(sportId)).map(t => t.name) : [];
@@ -9751,10 +9780,15 @@ These are almost always the same day, so "Date entered" only fills in a starting
       line = null;
     } else if (isProp && isYesNoPropStat($('propStat').value)) {
       // Anytime Goal (and any future equivalent, see YES_NO_PROP_STATS'
-      // own comment): a plain yes/no bet, no opponent, no line -- fixed
-      // label, nothing for the user to type, same shape as Tournament
-      // Winner just above.
-      selection = 'Yes';
+      // own comment): a plain yes/no bet, no line. Direct feedback
+      // 2026-09-25: a real sportsbook sells both sides of these props, so
+      // this now reads the (visible, editable) Selection field instead of
+      // hardcoding "Yes" -- a capper calling the "No" side is a real,
+      // supported case, not an error.
+      const rawYesNo = normalizeForMatch($('pickSelection').value);
+      if (rawYesNo === 'no') selection = 'No';
+      else if (rawYesNo === 'yes' || rawYesNo === '') selection = 'Yes';
+      else { showMsg($('pickMsg'), 'Enter Yes or No for this prop.', 'error'); return; }
       line = null;
     } else if (isProp) {
       // The sign of the line IS the over/under call — no separate field.
@@ -27012,11 +27046,21 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     let propLineOverride = null;
     // Anytime Goal (and any future equivalent -- see YES_NO_PROP_STATS'
     // own comment): same "fixed answer, no line" shape as Golf's outright
-    // stats, just not golf-specific. Selection is always the literal "Yes"
-    // regardless of whatever text happened to be in the pasted row --
-    // these props are only ever sold backing the player TO do the thing.
+    // stats, just not golf-specific. Direct feedback 2026-09-25: a real
+    // sportsbook sells both sides of these props, and the specific pick
+    // that surfaced this (a real Double-Double at +953, a longshot price
+    // consistent with betting AGAINST a usually-reliable player) pasted in
+    // with a raw Selection of "0" -- almost certainly a spreadsheet's own
+    // boolean-style shorthand for "No" that this override used to silently
+    // discard by forcing "Yes" regardless. Recognizes a small set of
+    // explicit "No" markers (only meaningful here, since Yes/No is the
+    // only real answer space for this bet shape); anything else, including
+    // a blank cell, still defaults to "Yes" -- the common case and the
+    // pre-existing behavior for every row that isn't explicitly a "No".
     if (isPropBet && propStatRaw && isYesNoPropStat(propStatRaw)) {
-      propSelection = 'Yes';
+      const rawNorm = normalizeForMatch(row.selection);
+      const NO_MARKERS = ['no', 'n', '0', 'false'];
+      propSelection = NO_MARKERS.includes(rawNorm) ? 'No' : 'Yes';
       propLineOverride = null;
     } else if (isPropBet && propStatRaw && !isMatchupPropStat(propStatRaw) && !isGolfOutrightStat(propStatRaw)) {
       const lineNum = row.line !== undefined && row.line !== '' ? Number(row.line) : NaN;
@@ -28733,7 +28777,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 564; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 565; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
