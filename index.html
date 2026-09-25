@@ -15283,16 +15283,31 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // sport name normalized (normalizeForMatch, matches how `key` below is
   // built) -- otherwise this scan will never surface it even after the
   // cache tool itself exists.
+  // `certain` (added 2026-09-25, direct report: "I'd run all these tools
+  // even if there is no need to run them" -- a raw pending-pick count
+  // read as "N gaps" for Tennis/MMA/Soccer, when most of the time the
+  // real number of picks that actually need the cache is far lower, or
+  // zero, since most of what's pending there already grades live from
+  // ESPN. Confirmed real case: 39 pending Tennis picks and 8 pending
+  // Soccer picks on a real date, ALL of which turned out to already be
+  // covered live -- zero of either actually needed the cache that day.
+  // `certain: true` (Golf/KBO/CFL/CBA/Euro Basketball/Cricket) means
+  // every pending pick for that sport really does need the cache, no
+  // exceptions -- the count is a real, actionable number, shown as-is.
+  // `certain: false` (Tennis/MMA/Soccer) means real live coverage exists
+  // for MOST of what's pending, and this scan has no cheap way to tell
+  // which slice (if any) doesn't -- the raw count is not a gap count, so
+  // it's no longer shown at all, only the fact that the sport is present.
   const AUTOMATION_GAP_SPORTS = {
-    golf: { label: 'Golf', panelId: 'golfResultsToolsPanel', toggleBtnId: 'toggleGolfResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the Golf results cache.' },
-    kbo: { label: 'KBO', panelId: 'kboResultsToolsPanel', toggleBtnId: 'toggleKboResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the KBO results cache.' },
-    cfl: { label: 'CFL', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cfl', note: 'ESPN has no CFL data at all -- every pending pick needs the CFL results cache.' },
-    cba: { label: 'CBA', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cba', note: 'No live automation at all -- every pending pick needs the CBA results cache.' },
-    eurobasketball: { label: 'Euro Basketball', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'euro_basketball', note: 'No live automation at all -- every pending pick needs the Euro Basketball results cache.' },
-    cricket: { label: 'Cricket', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cricket', note: 'No live automation at all -- every pending pick needs the Cricket results cache.' },
-    tennis: { label: 'Tennis', panelId: 'tennisResultsToolsPanel', toggleBtnId: 'toggleTennisResultsToolsBtn', note: 'Tour-level (ATP/WTA) grades live from ESPN -- only a Challenger/ITF match ESPN never carried needs the cache. Worth a look before assuming a miss is a real bug.' },
-    mma: { label: 'MMA', panelId: 'mmaResultsToolsPanel', toggleBtnId: 'toggleMmaResultsToolsBtn', note: 'Moneyline grades live from ESPN -- only Method of Victory picks need the cache.' },
-    soccer: { label: 'Soccer', panelId: 'soccerResultsToolsPanel', toggleBtnId: 'toggleSoccerResultsToolsBtn', note: 'Most competitions (Club World Cup, Champions League, major leagues, etc.) grade live from ESPN -- only a competition outside that list needs the cache.' }
+    golf: { label: 'Golf', panelId: 'golfResultsToolsPanel', toggleBtnId: 'toggleGolfResultsToolsBtn', certain: true, note: 'No live automation at all -- every pending pick needs the Golf results cache.' },
+    kbo: { label: 'KBO', panelId: 'kboResultsToolsPanel', toggleBtnId: 'toggleKboResultsToolsBtn', certain: true, note: 'No live automation at all -- every pending pick needs the KBO results cache.' },
+    cfl: { label: 'CFL', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cfl', certain: true, note: 'ESPN has no CFL data at all -- every pending pick needs the CFL results cache.' },
+    cba: { label: 'CBA', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cba', certain: true, note: 'No live automation at all -- every pending pick needs the CBA results cache.' },
+    eurobasketball: { label: 'Euro Basketball', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'euro_basketball', certain: true, note: 'No live automation at all -- every pending pick needs the Euro Basketball results cache.' },
+    cricket: { label: 'Cricket', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cricket', certain: true, note: 'No live automation at all -- every pending pick needs the Cricket results cache.' },
+    tennis: { label: 'Tennis', panelId: 'tennisResultsToolsPanel', toggleBtnId: 'toggleTennisResultsToolsBtn', certain: false, note: 'Tour-level (ATP/WTA) grades live from ESPN -- only a Challenger/ITF match ESPN never carried needs the cache. Most days this turns out to need nothing at all -- worth a look, not a confirmed gap.' },
+    mma: { label: 'MMA', panelId: 'mmaResultsToolsPanel', toggleBtnId: 'toggleMmaResultsToolsBtn', certain: false, note: 'Moneyline grades live from ESPN -- only Method of Victory picks need the cache. Most days this turns out to need nothing at all -- worth a look, not a confirmed gap.' },
+    soccer: { label: 'Soccer', panelId: 'soccerResultsToolsPanel', toggleBtnId: 'toggleSoccerResultsToolsBtn', certain: false, note: 'Most competitions (Club World Cup, Champions League, major leagues, etc.) grade live from ESPN -- only a competition outside that list needs the cache. Most days this turns out to need nothing at all -- worth a look, not a confirmed gap.' }
   };
 
   function revealGradingToolPanel(panelId, toggleBtnId) {
@@ -15343,9 +15358,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         const idsHtml = ids.length
           ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${ids.map(i => escapeHtml(i)).join(', ')}${idSet.size > ids.length ? ` (+${idSet.size - ids.length} more)` : ''}</div>`
           : '';
+        // certain sports: the count IS the gap count, show it plainly.
+        // uncertain sports (Tennis/MMA/Soccer): the raw pending count
+        // isn't a gap count at all (most of it usually already grades
+        // live) -- showing "39 pending picks" here read as "39 problems"
+        // and drove wasted tool-opening, so this omits the number
+        // entirely and just names the sport as present/worth a glance.
+        const headerText = info.certain
+          ? `<strong>${escapeHtml(info.label)}</strong> -- ${picks.length} pending pick${picks.length === 1 ? '' : 's'} on ${escapeHtml(date)}`
+          : `<strong>${escapeHtml(info.label)}</strong> -- has pending picks on ${escapeHtml(date)} (not a confirmed gap count)`;
         return `<div style="border:1px solid var(--field);border-radius:4px;padding:8px 10px;margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-            <div><strong>${escapeHtml(info.label)}</strong> -- ${picks.length} pending pick${picks.length === 1 ? '' : 's'} on ${escapeHtml(date)}</div>
+            <div>${headerText}</div>
             <button type="button" class="ghost small" data-panel-id="${info.panelId}" data-toggle-btn-id="${info.toggleBtnId}"${info.sportSelectValue ? ` data-sport-select-value="${info.sportSelectValue}"` : ''}>Open ${escapeHtml(info.label)} cache tool &rarr;</button>
           </div>
           <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">${escapeHtml(info.note)}</div>
@@ -29511,7 +29535,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 571; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 572; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
