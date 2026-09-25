@@ -16368,6 +16368,16 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   $('autoGradeEspnBtn').addEventListener('click', async () => {
     const date = $('autoDate').value;
     if (!date) { alert('Pick a date first — this will not run without one.'); return; }
+    // ADDED 2026-09-25, direct request: "maybe a pop up when we hit the
+    // automatic grader that asks us if we remembered to hit the tool as a
+    // reminder with a yes/no option... a little cumbersome but better than
+    // wiring in checks and flags on everything." Deliberately a plain
+    // reminder, not a real per-sport/per-date check -- this button has no
+    // idea whether any pending pick today actually needs Golf/Tennis/MMA/
+    // Soccer/KBO/CFL/CBA/Euro Basketball/Cricket's cache (that's what the
+    // Automation Gaps tool itself is for); this is just a habit nudge, one
+    // extra click, no new state or wiring.
+    if (!confirm(`Before grading -- did you already run "Automation gaps for a date" (or the individual cache tools) for ${date}, if any of today's picks are Golf/Tennis/MMA/Soccer/KBO/CFL/CBA/Euro Basketball/Cricket?\n\nClick OK if yes, or Cancel to go check first.`)) return;
     const sportId = $('autoSport').value;
     const sportLabel = sportId ? (sports.find(s => String(s.id) === sportId)?.name || 'that sport') : 'ALL sports';
     if (!confirm(`This will grade Moneyline/Spread/Total picks for ${sportLabel} on ${date}, using ESPN's scores instead of TheRundown -- use this for dates too old for TheRundown's free plan to reach (older than about a week).\n\nThis writes real win/loss results and cannot be automatically undone (a manual Undo Grading tool is available separately, but it's a real fix, not a click-to-undo). Continue?`)) return;
@@ -29501,7 +29511,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 570; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 571; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
