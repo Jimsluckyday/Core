@@ -27542,6 +27542,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       return `<tr style="${v.dupWarning ? 'background:rgba(200,150,20,0.08);' : ''}${(!isHardInvalid && hasWarnings) ? 'background:rgba(200,150,20,0.05);' : ''}${v.isSynthesizedParlaySummary ? 'background:rgba(100,100,100,0.06);' : ''}">
         <td>${checkboxCell}</td>
         <td style="font-family:inherit;font-size:11px;color:var(--ink-soft);" title="This row's position in your pasted text -- row 1 is the header, matching what you'd count opening the same file in a spreadsheet">${v.sourceRowNumber ? `Row ${v.sourceRowNumber}` : (v.isSynthesizedParlaySummary ? '<em>auto</em>' : '—')}</td>
+        <td style="font-family:inherit;font-size:11px;color:var(--ink-soft);" title="From this row's own Source Image column, if the pasted data included one">${escapeHtml(v.raw.source_image || '—')}</td>
         <td>${escapeHtml(v.raw.date || '')}</td>
         <td>${escapeHtml(v.raw.capper || '')}</td>
         <td>${escapeHtml(v.raw.sport || '')}</td>
@@ -27583,7 +27584,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         ${tierNeedsReviewCount > 0 ? `<strong>${tierNeedsReviewCount}</strong> row${tierNeedsReviewCount === 1 ? '' : 's'} left at Tier 0 (new phrase or inconsistent history) -- these still import normally; see Reports &gt; Tier Consistency whenever you want to review them, no need to fix before importing.` : ''}
       </div>` : ''}
       <table class="picks-table">
-        <thead><tr><th></th><th>Row #</th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Event</th><th>Issue</th></tr></thead>
+        <thead><tr><th></th><th>Row #</th><th title="From the pasted data's own Source Image column, if it has one -- lets you find the exact Telegram screenshot this row came from.">Image #</th><th>Date</th><th>Capper</th><th>Sport</th><th>Bet type</th><th>Selection</th><th>Line</th><th>Event</th><th>Issue</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
       <button id="importValidRowsBtn" style="margin-top:10px;" ${valid.length === 0 ? 'disabled' : ''}>Import selected picks</button>
@@ -28616,7 +28617,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 560; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 561; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
