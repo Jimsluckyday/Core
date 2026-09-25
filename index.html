@@ -7805,6 +7805,16 @@ These are almost always the same day, so "Date entered" only fills in a starting
   // ever targets the ONE selected sport + ONE date -- never broadened
   // into a multi-sport or multi-date ask -- so this stays exactly as
   // narrow a lookup as the old single-sport boxes were.
+  //
+  // TO ADD A NEW SPORT (standing rule, added 2026-09-25 -- see
+  // valid_sports.txt's own header and grade_picks_espn_backfill.ts's
+  // ESPN_SPORT_MAP comment for the full policy): if the new sport is
+  // plain team-vs-team with a normal final score, add one entry here plus
+  // one <option> in the #teamSportResultsSport dropdown above, then a
+  // matching `<sport>_results_cache` table + grading branch -- do NOT
+  // give it its own standalone box. Only build a genuinely separate tool
+  // (like Golf's or MMA's) when the data shape is actually different
+  // (individual competitors, a tournament instead of a single date, etc).
   const TEAM_SPORT_RESULTS_CONFIG = {
     cfl: { label: 'CFL', table: 'cfl_results_cache', displayName: 'CFL (Canadian Football League)', teamHint: 'Use the real, full team names (e.g. "Calgary Stampeders", "Saskatchewan Roughriders", "Hamilton Tiger-Cats").', noDataNote: 'ESPN has no CFL data at all -- confirmed dead for every date tested, not a per-date gap.', allowTied: false },
     cba: { label: 'CBA', table: 'cba_results_cache', displayName: 'CBA (Chinese Basketball Association)', teamHint: 'Use the real, full team names as commonly reported (e.g. "Liaoning Flying Leopards", "Guangdong Southern Tigers").', noDataNote: 'ESPN does not cover the CBA.', allowTied: false },
@@ -15267,6 +15277,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // cfl/cba/eurobasketball/cricket (added 2026-09-25) -- sportSelectValue
   // additionally pre-selects the right sport in that tool's dropdown so
   // the jump-to button doesn't just open the box, it opens it ready to go.
+  //
+  // STANDING RULE: whenever a new sport gets the results-cache treatment
+  // (see valid_sports.txt's own header), add it here too, using its real
+  // sport name normalized (normalizeForMatch, matches how `key` below is
+  // built) -- otherwise this scan will never surface it even after the
+  // cache tool itself exists.
   const AUTOMATION_GAP_SPORTS = {
     golf: { label: 'Golf', panelId: 'golfResultsToolsPanel', toggleBtnId: 'toggleGolfResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the Golf results cache.' },
     kbo: { label: 'KBO', panelId: 'kboResultsToolsPanel', toggleBtnId: 'toggleKboResultsToolsBtn', note: 'No live automation at all -- every pending pick needs the KBO results cache.' },
@@ -29485,7 +29501,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 569; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 570; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
