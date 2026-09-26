@@ -623,6 +623,7 @@
               <button id="exportTennisDrawRequestBtn">&#8681; Export research request</button>
             </div>
           </div>
+          <div id="tennisDrawExportWarnWrap" style="margin-top:8px;"></div>
           <div style="margin-top:14px;">
             <label style="font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Paste the AI's response here to import</label>
             <textarea id="tennisDrawImportInput" rows="6" style="width:100%;font-family:monospace;font-size:12px;margin-top:6px;" placeholder="tour,tournament_name,round,player_a,player_b,match_date,start_time_et,tournament_play_start_et&#10;Challenger,Bratislava Open,R32,Alexander Shevchenko,Federico Cina,2025-06-10,,&#10;Challenger,Bratislava Open,QF,Alexander Shevchenko,Federico Cina,2025-06-13,,2025-06-13 05:00"></textarea>
@@ -7184,14 +7185,42 @@ These are almost always the same day, so "Date entered" only fills in a starting
   $('tennisDrawJustThisDate').addEventListener('change', () => {
     $('tennisDrawDaysAheadRow').style.display = $('tennisDrawJustThisDate').checked ? 'flex' : 'none';
   });
-  $('exportTennisDrawRequestBtn').addEventListener('click', () => {
+  $('exportTennisDrawRequestBtn').addEventListener('click', async () => {
     const date = $('tennisDrawExportDate').value;
     if (!date) { alert('Pick a date to research first.'); return; }
     const justThisDate = $('tennisDrawJustThisDate').checked;
     const daysAhead = Number($('tennisDrawDaysAhead').value) || 3;
     const endDate = justThisDate
       ? new Date(new Date(date).getTime() + daysAhead * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-      : null;
+      : new Date(new Date(date).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const btn = $('exportTennisDrawRequestBtn');
+    btn.disabled = true;
+    btn.textContent = 'Checking what\'s already cached...';
+    let coverage = null;
+    try {
+      // Widened by 3 days on each side of the range being exported -- a
+      // tournament that started a few days before "date" (e.g. a Challenger
+      // whose R32 was two days ago) should still show up as "already
+      // cached" even though its earliest cached match falls outside the
+      // exact [date, endDate] window.
+      const padStart = new Date(new Date(date).getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const padEnd = new Date(new Date(endDate).getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      coverage = await fetchTennisDrawCoverage(padStart, padEnd);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⇩ Export research request';
+    }
+
+    const coverageBlock = coverage && coverage.length
+      ? [
+          `ALREADY CACHED -- these tournaments already have real matches on file from a prior research pass covering part of this date range:`,
+          ...coverage.map(c => `- ${c.tournament_name} (${c.tour}): already have ${c.count} match${c.count === 1 ? '' : 'es'} on file, latest dated ${c.maxDate}`),
+          '',
+          `Do NOT re-research a tournament listed above for dates on or before its "latest dated" date -- that work is already done. Only report NEW matches for it: a later round, or a date AFTER the one shown. If a tournament above hasn't reached a new round yet as of its listed date, it may have nothing new to report -- that's fine, just leave it out rather than re-listing what's already covered. Any tournament NOT listed above is not yet covered at all -- research it fully as normal.`,
+          ''
+        ].join('\r\n')
+      : '';
 
     const instructions = [
       '=== INSTRUCTIONS FOR RESEARCHING TENNIS DRAWS (read this whole block first) ===',
@@ -7200,6 +7229,7 @@ These are almost always the same day, so "Date entered" only fills in a starting
         ? `Please research real professional tennis matches actually played or scheduled between ${date} and ${endDate} inclusive (Eastern Time, USA) -- not the whole week's draws, just this date range's real matches, across any tournament active during it. This range intentionally extends a few days past today to catch a pick already posted for a match that hasn't happened yet.`
         : `Please research real professional tennis tournaments active during the WEEK containing ${date} (Eastern Time, USA).`,
       '',
+      coverageBlock,
       'Scope: ONLY ATP tour, WTA tour, and ATP Challenger Tour events. Do NOT include ITF-level events, exhibitions, or juniors -- that tier is explicitly out of scope.',
       '',
       'IMPORTANT -- there are typically SEVERAL Challenger-level events running concurrently in any given week worldwide, not just the headline ATP/WTA events. Do not stop after finding one or two. Check official ATP/WTA draw/schedule pages for the week, and cross-reference against a comprehensive week-by-week source (e.g. Wikipedia\'s "[year] ATP Challenger Tour" page and the WTA 125 equivalent) to catch concurrent Challenger events a single general search would miss.',
@@ -7230,6 +7260,13 @@ These are almost always the same day, so "Date entered" only fills in a starting
       justThisDate ? `tennis-draw-request-${date}-to-${endDate}.csv` : `tennis-draw-request-week-of-${date}.csv`,
       ['tour', 'tournament_name', 'round', 'player_a', 'player_b', 'match_date', 'start_time_et', 'tournament_play_start_et'], [], instructions
     );
+
+    const exportWarnWrap = $('tennisDrawExportWarnWrap');
+    exportWarnWrap.innerHTML = coverage === null
+      ? `<div class="msg error">Could not check what's already cached (query failed) -- request exported anyway, but it does NOT include an "already cached" flag this time.</div>`
+      : coverage.length
+        ? `<div class="msg ok">Flagged ${coverage.length} already-cached tournament${coverage.length === 1 ? '' : 's'} in the request so the researcher can skip re-checking them.</div>`
+        : '';
   });
 
   const TENNIS_DRAW_TOURS = ['ATP', 'WTA', 'Challenger'];
@@ -7381,6 +7418,32 @@ These are almost always the same day, so "Date entered" only fills in a starting
     try {
       return await rest(`tennis_draw_cache?select=tour,tournament_name,round,player_a_name,player_b_name&match_date=eq.${date}&order=tour,tournament_name,round`);
     } catch (e) { return []; }
+  }
+
+  // Coverage summary for the "Whole tour sweep" export -- lets the NEXT
+  // research request (a fresh chatbot session with zero memory of this one)
+  // know which tournaments were already covered last time, so an
+  // overlapping re-run (e.g. today Jun 17-20, tomorrow Jun 18-21) only has
+  // to check for matches PAST the already-cached date instead of
+  // re-verifying the whole tournament from scratch. Direct request: "can we
+  // flag a tournament you already covered so when I run this tomorrow...
+  // you just need to know that you saw this tournament and skip it for
+  // that day." Grouped by tour+tournament_name (not per-row) since the ask
+  // is "already looked at this tournament through date X", not a full
+  // match-by-match dump -- keeps the export lean even for a large sweep.
+  async function fetchTennisDrawCoverage(from, to) {
+    try {
+      const rows = await rest(`tennis_draw_cache?select=tour,tournament_name,match_date&match_date=gte.${from}&match_date=lte.${to}`);
+      const byTournament = new Map();
+      rows.forEach(r => {
+        const key = `${r.tour}|${r.tournament_name}`;
+        const entry = byTournament.get(key) || { tour: r.tour, tournament_name: r.tournament_name, maxDate: r.match_date, count: 0 };
+        if (r.match_date > entry.maxDate) entry.maxDate = r.match_date;
+        entry.count++;
+        byTournament.set(key, entry);
+      });
+      return [...byTournament.values()].sort((a, b) => a.tournament_name.localeCompare(b.tournament_name));
+    } catch (e) { return null; }
   }
 
   $('exportTennisResultsRequestBtn').addEventListener('click', async () => {
@@ -29587,7 +29650,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 573; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 574; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
