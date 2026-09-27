@@ -1846,6 +1846,41 @@ These are almost always the same day, so "Date entered" only fills in a starting
                 </div>
               </div>
 
+              <!-- ADDED 2026-09-27, direct concern right after the "Luis
+                   Robert" vs "Luis Robert Jr." grading failure: "a name
+                   issue is something we should have had tools pick up
+                   before we get to grading... errors shouldn't be
+                   something we have to correct at the stage of doing the
+                   final grading." Unlike the Automation Gaps tool above
+                   (which only knows whether a SPORT needs a cache tool),
+                   this checks each individual Player Prop pick's NAME
+                   against that date's real ESPN box score/roster --
+                   calling the same grading Edge Function's new
+                   ?checkNames=true dry-run mode, which reuses the exact
+                   playerNameMatches() logic the real grading run uses, so
+                   this can never say "fine" while grading later disagrees. -->
+              <div style="border:1.5px solid var(--stamp-amber);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <strong style="font-size:12px;">Player prop name check <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this before grading, catches a name ESPN won't recognize</span></strong>
+                  <button type="button" class="ghost small" id="togglePlayerNameCheckBtn">Show tool</button>
+                </div>
+                <div id="playerNameCheckPanel" style="display:none;margin-top:10px;">
+                  <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
+                    Checks every pending Player Prop pick for this date (MLB/NBA/WNBA/NHL/Soccer) against that date's REAL ESPN box score/roster names -- the same check grading itself does. Catches a missing Jr./Sr./II/III/IV, a misspelling, or a player ESPN has no record of for this date, before "Find &amp; Update Results" ever runs.
+                  </div>
+                  <div class="row">
+                    <div class="field" style="flex:0 0 auto;">
+                      <label>Date being graded</label>
+                      <input id="playerNameCheckDate" type="date" />
+                    </div>
+                    <div style="align-self:flex-end;">
+                      <button id="runPlayerNameCheckBtn">Check player names</button>
+                    </div>
+                  </div>
+                  <div id="playerNameCheckResults" style="margin-top:12px;"></div>
+                </div>
+              </div>
+
               <div style="border:1.5px solid var(--field);border-radius:4px;padding:10px 12px;margin-bottom:10px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
                   <strong style="font-size:12px;">Tennis: Import results <span style="font-weight:normal;text-transform:none;letter-spacing:0;">— run this first if grading Tennis picks</span></strong>
@@ -15365,6 +15400,12 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     panel.style.display = showing ? 'none' : 'block';
     $('toggleAutomationGapsBtn').textContent = showing ? 'Show tool' : 'Hide tool';
   });
+  $('togglePlayerNameCheckBtn').addEventListener('click', () => {
+    const panel = $('playerNameCheckPanel');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('togglePlayerNameCheckBtn').textContent = showing ? 'Show tool' : 'Hide tool';
+  });
 
   // ---------- Automation gaps for a date ----------
   // ADDED 2026-09-25, direct request: "maybe we could run something that
@@ -15504,6 +15545,83 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     } finally {
       btn.disabled = false;
       btn.textContent = 'Check for gaps';
+    }
+  });
+
+  // ---------- Player prop name check ----------
+  // ADDED 2026-09-27, direct concern: "a name issue is something we should
+  // have had tools pick up before we get to grading... errors shouldn't be
+  // something we have to correct at the stage of doing the final grading."
+  // Real case that triggered this: a real "Luis Robert" Player Prop pick
+  // failed grading because ESPN's own box score lists him as "Luis Robert
+  // Jr." -- fixed at the matching layer (see grade_picks_espn_backfill.ts's
+  // playerNameMatches), but that fix alone still means the human only
+  // finds out at the final grading stage. This calls the same Edge
+  // Function's new ?checkNames=true dry-run mode, which checks every
+  // pending Player Prop pick for this date against that date's REAL ESPN
+  // box score/roster data using the SAME name-matching logic grading
+  // itself uses -- so there is zero chance this check says "fine" while
+  // grading later disagrees. Never writes a grade; only PATCHes
+  // prop_player directly, and only when the user clicks a specific
+  // suggested fix below.
+  $('runPlayerNameCheckBtn').addEventListener('click', async () => {
+    const date = $('playerNameCheckDate').value;
+    const wrap = $('playerNameCheckResults');
+    if (!date) { wrap.innerHTML = '<div class="msg error">Pick a date first.</div>'; return; }
+    const btn = $('runPlayerNameCheckBtn');
+    btn.disabled = true;
+    btn.textContent = 'Checking against ESPN...';
+    wrap.innerHTML = '<div class="empty-state">Fetching real box scores/rosters from ESPN and comparing every pending Player Prop name for this date...</div>';
+    try {
+      const data = await invokeEdgeFunction('grade_picks_espn_backfill', `?date=${date}&checkNames=true`);
+      const check = data.name_check || { checked: 0, matched: [], unmatched: [], sports_skipped: [] };
+      const unmatched = check.unmatched || [];
+      const skipped = check.sports_skipped || [];
+      if (!check.checked) {
+        wrap.innerHTML = `<div class="msg ok">No pending Player Prop picks found for ${escapeHtml(date)} across MLB/NBA/WNBA/NHL/Soccer -- nothing to check.</div>`;
+        return;
+      }
+      if (!unmatched.length) {
+        wrap.innerHTML = `<div class="msg ok">All ${check.checked} pending Player Prop name${check.checked === 1 ? '' : 's'} for ${escapeHtml(date)} matched a real ESPN box score/roster entry. Safe to proceed to grading.</div>`;
+        return;
+      }
+      const rowsHtml = unmatched.map(u => `<tr>
+        <td style="padding:4px 8px 4px 0;">${escapeHtml(u.sport || '')}</td>
+        <td style="padding:4px 8px 4px 0;">${escapeHtml(u.prop_player || '(blank)')}</td>
+        <td style="padding:4px 8px 4px 0;font-size:11px;color:var(--ink-soft);">${escapeHtml(u.reason || '')}</td>
+        <td style="padding:4px 0;">${u.suggestion ? `<button type="button" class="ghost small" data-fix-id="${escapeHtml(u.id)}" data-fix-name="${escapeHtml(u.suggestion)}">Fix to "${escapeHtml(u.suggestion)}"</button>` : '—'}</td>
+      </tr>`).join('');
+      wrap.innerHTML = `
+        <div class="msg error">${unmatched.length} of ${check.checked} pending Player Prop name${check.checked === 1 ? '' : 's'} for ${escapeHtml(date)} did NOT match a real ESPN name -- fix these now, or they'll come back "no player found" (or worse, silently match the wrong person) at the grading stage.</div>
+        <table style="width:100%;font-size:12px;margin-top:8px;border-collapse:collapse;">
+          <thead><tr style="text-align:left;"><th>Sport</th><th>Entered name</th><th>Why</th><th></th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+        ${skipped.length ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:8px;">Skipped (couldn't check): ${skipped.map(s => escapeHtml(`${s.sport} (${s.reason})`)).join(', ')}</div>` : ''}
+      `;
+      wrap.querySelectorAll('button[data-fix-id]').forEach(fixBtn => {
+        fixBtn.addEventListener('click', async () => {
+          const id = fixBtn.getAttribute('data-fix-id');
+          const name = fixBtn.getAttribute('data-fix-name');
+          if (!confirm(`Update this pick's player name to "${name}"?`)) return;
+          fixBtn.disabled = true;
+          fixBtn.textContent = 'Fixing...';
+          try {
+            await rest(`picks?id=eq.${id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ prop_player: name }) });
+            fixBtn.closest('tr').style.opacity = '0.5';
+            fixBtn.textContent = 'Fixed';
+          } catch (e) {
+            alert('Could not update: ' + e.message);
+            fixBtn.disabled = false;
+            fixBtn.textContent = `Fix to "${name}"`;
+          }
+        });
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div class="msg error">Could not check: ${escapeHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Check player names';
     }
   });
 
@@ -16516,7 +16634,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     // Soccer/KBO/CFL/CBA/Euro Basketball/Cricket's cache (that's what the
     // Automation Gaps tool itself is for); this is just a habit nudge, one
     // extra click, no new state or wiring.
-    if (!confirm(`Before grading -- did you already run "Automation gaps for a date" (or the individual cache tools) for ${date}, if any of today's picks are Golf/Tennis/MMA/Soccer/KBO/CFL/CBA/Euro Basketball/Cricket?\n\nClick OK if yes, or Cancel to go check first.`)) return;
+    if (!confirm(`Before grading -- did you already run "Automation gaps for a date" (or the individual cache tools) for ${date}, if any of today's picks are Golf/Tennis/MMA/Soccer/KBO/CFL/CBA/Euro Basketball/Cricket? And "Player prop name check", if today has any Player Prop picks (MLB/NBA/WNBA/NHL/Soccer)?\n\nClick OK if yes, or Cancel to go check first.`)) return;
     const sportId = $('autoSport').value;
     const sportLabel = sportId ? (sports.find(s => String(s.id) === sportId)?.name || 'that sport') : 'ALL sports';
     if (!confirm(`This will grade Moneyline/Spread/Total picks for ${sportLabel} on ${date}, using ESPN's scores instead of TheRundown -- use this for dates too old for TheRundown's free plan to reach (older than about a week).\n\nThis writes real win/loss results and cannot be automatically undone (a manual Undo Grading tool is available separately, but it's a real fix, not a click-to-undo). Continue?`)) return;
@@ -29650,7 +29768,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 574; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 575; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
