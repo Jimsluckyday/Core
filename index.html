@@ -29779,10 +29779,28 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           }).join('')}</tbody>
         </table>
       </div>` : '';
+    // ADDED 2026-09-27, direct concern: "how did this slip through from a
+    // pick we put in that long ago and no flags surfaced?" It WASN'T
+    // actually silent -- a direct DB check confirmed this exact parlay had
+    // carried grading_status='ambiguous' (and so had been counted right
+    // here) continuously since the day it first failed to grade. What was
+    // genuinely missing was any sense of URGENCY or AGE: a flat "12 picks
+    // stuck" reads the same whether every one of them is from yesterday or
+    // one of them has been sitting for 469 days -- there was no way to
+    // tell a genuinely old, easy-to-forget problem apart from routine,
+    // about-to-resolve-itself backlog just from the count. The neighboring
+    // futures banner already solves exactly this (see its own "oldest
+    // placed X days ago" -- same rows[0]-is-oldest-since-query-is-already-
+    // event_date-ascending convention, reused here) -- this brings that
+    // same treatment here instead of inventing a second pattern.
+    const oldestFlagged = flagged[0];
+    const flaggedDaysAgo = oldestFlagged
+      ? Math.max(0, Math.floor((Date.now() - new Date(oldestFlagged.event_date + 'T00:00:00Z').getTime()) / 86400000))
+      : 0;
     banner.style.display = 'block';
     banner.innerHTML = `
       <div style="background:#f7dede;color:#7a1f2b;border-left:4px solid var(--e-red, #b23b3b);border-radius:0 3px 3px 0;font-size:12px;padding:6px 12px;">
-        <span style="cursor:pointer;font-weight:bold;" id="dataQualityBannerToggle">&#9888; ${flagged.length} pick${flagged.length === 1 ? '' : 's'} stuck on a spelling/schedule/grading problem -- fix or mark resolved before calling today's data done ${dataQualityBannerExpanded ? '&#9650;' : '&#9660;'}</span>
+        <span style="cursor:pointer;font-weight:bold;" id="dataQualityBannerToggle">&#9888; ${flagged.length} pick${flagged.length === 1 ? '' : 's'} stuck on a spelling/schedule/grading problem -- oldest is ${escapeHtml(oldestFlagged.event_date)} (${flaggedDaysAgo} day${flaggedDaysAgo === 1 ? '' : 's'} ago) -- fix or mark resolved before calling today's data done ${dataQualityBannerExpanded ? '&#9650;' : '&#9660;'}</span>
         ${dataQualityBannerExpanded ? '<div style="font-size:10.5px;margin:4px 0 2px;">"Edit pick" opens the plain manual editor -- there\'s no auto-correct button here, you type the real name/date/whatever is wrong yourself. After fixing a name specifically, re-run that sport\'s "Find & Update" tool afterward to confirm it actually grades now -- "Mark resolved" just hides the row, it does not check anything, so save it for the ones that truly can\'t be fixed (an unsupported bet type, etc).</div>' : ''}
         ${listHtml}
       </div>`;
@@ -29855,7 +29873,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 576; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 577; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
