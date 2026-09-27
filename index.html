@@ -14842,7 +14842,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
 
   const exportBtn = document.getElementById('exportCsvBtn');
   if (exportBtn) {
-    exportBtn.addEventListener('click', () => {
+    exportBtn.addEventListener('click', async () => {
       // CONFIRMED FIX: this used to be missing "Date entered" entirely,
       // which silently shifted every column after it by one against the
       // real table -- e.g. the "Capper" header sat over Date Entered's
@@ -14864,7 +14864,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // masking this gap until Missing Data (v215) made this the only
       // export path for that workflow. Added as the first column, reading
       // the same data-pick-id attribute the row itself already carries.
-      const cols = ['ID', 'Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team', 'DH game', 'Notes', 'Source Image'];
+      const cols = ['ID', 'Date entered', 'Event date', 'Capper', 'Sport', 'Type', 'Player', 'Stat', 'Pick', "Capper's usual", 'Tier', 'Unit size', 'Odds', 'Result', 'Event name', 'Start time', 'Missing', 'Home/Away', 'Sync note', 'Prop team', 'DH game', 'Notes', 'Source Image', 'Parlay legs'];
       function csvField(val) {
         const s = String(val == null ? '' : val);
         return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -14873,6 +14873,62 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       if (!table || !table.tBodies[0]) { alert('Could not find the picks table to export.'); return; }
       const visibleRows = Array.from(table.tBodies[0].querySelectorAll('tr')).filter(row => row.style.display !== 'none' && !row.hasAttribute('data-parlay-legs-for'));
       if (!visibleRows.length) { alert('No rows to export -- check your current filters.'); return; }
+      // ADDED 2026-09-27, direct report: "when you said you did the odds
+      // check that parlay legs got a -110 regardless as you couldn't see
+      // the leg and that's not the proper solution as we need to be able
+      // to see the legs and what they are as a moneyline bet will not
+      // always be -110." This export used to show a Parlay wrapper row as
+      // just its own placeholder text ("Parlay #5 - 2 Legs") with zero
+      // indication of what its real legs actually are -- the "-110 per
+      // leg" fallback wasn't a considered choice, it was the only option
+      // available given no visibility into the real legs at all. A "Show
+      // legs" expand feature already exists on-screen for a parlay row
+      // (see the parlay-legs-for rendering elsewhere in this file), but
+      // this export deliberately filters those expanded rows OUT (line
+      // above) rather than including them, and even if it didn't, it would
+      // only work for a row someone had already manually expanded before
+      // exporting. Fetches every visible Parlay row's real legs directly
+      // from the DB instead, unconditionally, so this column is always
+      // populated regardless of what's been expanded on screen.
+      const parlayWrapperIds = visibleRows
+        .filter(row => (row.children[4] ? row.children[4].textContent.trim() : '') === 'Parlay')
+        .map(row => row.dataset.pickId)
+        .filter(Boolean);
+      const parlayLegsTextById = {};
+      if (parlayWrapperIds.length) {
+        const op = opener();
+        if (op) {
+          try {
+            // Plain string concatenation, NOT template literals -- this
+            // whole export function is itself text inside the outer
+            // template literal that builds this entire pop-out document,
+            // so an actual backtick anywhere in this region (even inside a
+            // comment) breaks that outer literal's own parsing, the exact
+            // trap already documented elsewhere in this file (e.g. the
+            // Pick/i===7 branch above).
+            const links = await op.rest('parlay_legs?select=parlay_pick_id,leg_pick_id&parlay_pick_id=in.(' + parlayWrapperIds.join(',') + ')');
+            const legIds = [...new Set(links.map(l => l.leg_pick_id))];
+            const legPicks = legIds.length
+              ? await op.rest('picks?select=id,selection,line,sports(name),bet_types(name)&id=in.(' + legIds.join(',') + ')')
+              : [];
+            const legById = {};
+            legPicks.forEach(l => { legById[l.id] = l; });
+            links.forEach(link => {
+              const leg = legById[link.leg_pick_id];
+              if (!leg) return;
+              const legDesc = leg.selection + (leg.line !== null && leg.line !== undefined ? ' ' + leg.line : '') +
+                ' (' + (leg.sports ? leg.sports.name : '?') + ' ' + (leg.bet_types ? leg.bet_types.name : '?') + ', id ' + leg.id + ')';
+              parlayLegsTextById[link.parlay_pick_id] = parlayLegsTextById[link.parlay_pick_id]
+                ? parlayLegsTextById[link.parlay_pick_id] + ' + ' + legDesc
+                : legDesc;
+            });
+          } catch (e) {
+            // Soft-fail -- a failed leg lookup shouldn't block the whole
+            // export; the "Parlay legs" column is just blank for these rows,
+            // same as before this feature existed.
+          }
+        }
+      }
       const dataRows = visibleRows.map(row => {
         // Table columns 0-12 (Event date through Result) read directly by
         // position, same as before. Tier (9) and Unit size (10) hold a
@@ -14996,8 +15052,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         const notesCell = row.children[21];
         const notesVal = csvField(notesCell ? (notesCell.querySelector('input') ? notesCell.querySelector('input').value.trim() : '') : '');
         const sourceImage = csvField(row.dataset.sourceImage || '');
-        const id = csvField(row.dataset.pickId || '');
-        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, propTeamVal, doubleheaderVal, notesVal, sourceImage];
+        const rawId = row.dataset.pickId || '';
+        const id = csvField(rawId);
+        const parlayLegsVal = csvField(parlayLegsTextById[rawId] || '');
+        return [id, ...cellValues, eventNameVal, startTimeVal, missingVal, homeAwayVal, syncNoteVal, propTeamVal, doubleheaderVal, notesVal, sourceImage, parlayLegsVal];
       });
       // Direct request 2026-08-28: "we need this built into the ruleset of
       // the file we export so this can be cross compatible with any
@@ -15021,7 +15079,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       // inline, which would just drift out of sync with it) means this
       // reminder travels with the file itself into any future chat/AI
       // session, not just this one.
-      const prefixText = 'This is a read-only reference export. To WRITE odds back onto these picks: build a separate CSV with just the columns "id,opening_odds,closing_odds" (id = the first column in this file, one row per pick needing odds), then upload or paste that file into Data Tools -> Bulk Upload Manual Changes in this app -- it matches strictly by id and writes opening_odds/closing_odds onto exactly those picks, ignoring any other column name. Do not edit the plain "Odds" column in this export and re-upload it -- Bulk Upload Manual Changes does not read that column, only opening_odds/closing_odds. If you are an AI assistant researching missing values for this file, check RESEARCH-SOURCES.md (in the telegram-pipeline project folder) FIRST for the tested sources and rules already documented there -- in particular, for any pick more than about a week old, use ONE researched number for both opening_odds and closing_odds rather than sourcing them as if they were separately findable.';
+      const prefixText = 'This is a read-only reference export. To WRITE odds back onto these picks: build a separate CSV with just the columns "id,opening_odds,closing_odds" (id = the first column in this file, one row per pick needing odds), then upload or paste that file into Data Tools -> Bulk Upload Manual Changes in this app -- it matches strictly by id and writes opening_odds/closing_odds onto exactly those picks, ignoring any other column name. Do not edit the plain "Odds" column in this export and re-upload it -- Bulk Upload Manual Changes does not read that column, only opening_odds/closing_odds. If you are an AI assistant researching missing values for this file, check RESEARCH-SOURCES.md (in the telegram-pipeline project folder) FIRST for the tested sources and rules already documented there -- in particular, for any pick more than about a week old, use ONE researched number for both opening_odds and closing_odds rather than sourcing them as if they were separately findable. For a Parlay row (Type = Parlay), the "Parlay legs" column names its real legs -- research each legs own real moneyline/spread/total odds individually and combine them (convert each to decimal odds, multiply, convert the product back to American) rather than assuming a flat -110 for every leg -- a real leg is very often NOT close to a coinflip price. Only fall back to a flat -110-per-leg estimate when a legs own real bet genuinely cannot be identified or found (the "Parlay legs" column is blank, or the leg itself is a bet type/sport with no researchable odds source), and say plainly when that fallback was used instead of a real researched number.';
       const csvContent = prefixText + '\\r\\n\\r\\n' + [cols.map(csvField), ...dataRows].map(r => r.join(',')).join('\\r\\n');
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -29621,6 +29679,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     if (note.includes('ambiguous')) return 'Ambiguous match -- multiple candidates';
     return 'Flagged -- hover for detail';
   }
+  // ADDED 2026-09-27, direct report: "it was a parlay wrapper that doesn't
+  // tell me what parlay leg is wrong... I can't tell what to fix from
+  // these descriptions or how to do this." Clicking "Edit pick" on a
+  // flagged PARLAY WRAPPER opened the wrapper's own editor -- which has no
+  // team/date/name field wrong on it at all, since the actual problem
+  // lives on a separate, linked LEG pick. grade_picks_espn_backfill.ts's
+  // parlay rollup now writes the real blocking leg's own id directly into
+  // the wrapper's grading_note (see that file's own "Ambiguous parlay's
+  // grading_note now names the actual blocking leg" notes entry) -- this
+  // just extracts it back out so "Edit pick" can jump straight to the leg
+  // that actually needs fixing instead of the wrapper. Returns every id
+  // found (a shared leg can block more than one parlay, and a wrapper's
+  // note could in principle name more than one ambiguous leg) rather than
+  // just the first -- an old pre-redeploy grading_note with no id embedded
+  // simply returns an empty array, and the caller falls back to editing
+  // the wrapper itself, same as before this change.
+  function dataQualityExtractLegIds(note) {
+    if (!note) return [];
+    const matches = note.match(/id ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi) || [];
+    return [...new Set(matches.map(m => m.replace(/^id /i, '')))];
+  }
   // Direct question 2026-09-12, after confirming a real pick's failure was
   // genuinely a bet-type-automation gap and NOT the misspelled name that
   // was ALSO sitting on that same pick: "if there are multiple reasons for
@@ -29676,7 +29755,14 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       <div style="max-height:260px;overflow-y:auto;margin-top:6px;font-size:11px;">
         <table class="picks-table" style="width:100%;">
           <thead><tr><th>Event date</th><th>Capper</th><th>Sport</th><th>Selection</th><th>Issue</th><th></th><th></th></tr></thead>
-          <tbody>${flagged.map(p => `<tr>
+          <tbody>${flagged.map(p => {
+            const isParlay = !!(p.bet_types && p.bet_types.name === 'Parlay');
+            const legIds = isParlay ? dataQualityExtractLegIds(p.grading_note) : [];
+            const editButtonsHtml = legIds.length
+              ? legIds.map((legId, i) => `<button type="button" class="dataQualityEditBtn" data-id="${escapeHtml(legId)}" style="font-size:11px;padding:1px 8px;margin-bottom:2px;" title="This parlay wrapper itself has nothing to fix -- opens the actual LINKED LEG this note names, in the manual editor on the Add Picks tab.">Edit blocking leg${legIds.length > 1 ? ' ' + (i + 1) : ''}</button>`).join('<br>')
+                + `<br><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:10px;padding:0 6px;margin-top:2px;color:var(--ink-soft);" title="Opens the parlay wrapper pick itself, not the leg -- only useful if the WRAPPER's own date/selection text is what's wrong.">(edit wrapper instead)</button>`
+              : `<button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Opens this pick in the manual editor on the Add Picks tab -- nothing is auto-corrected, you type the fix yourself.">Edit pick</button>`;
+            return `<tr>
             <td>${escapeHtml(p.event_date)}</td>
             <td>${escapeHtml(p.cappers ? p.cappers.name : '—')}</td>
             <td>${escapeHtml(p.sports ? p.sports.name : '—')}</td>
@@ -29687,9 +29773,10 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
                 ? `<ul style="margin:0;padding-left:14px;">${labels.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
                 : escapeHtml(labels[0]);
             })()}</td>
-            <td><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Opens this pick in the manual editor on the Add Picks tab -- nothing is auto-corrected, you type the fix yourself.">Edit pick</button></td>
+            <td>${editButtonsHtml}</td>
             <td><button type="button" class="dataQualityDismissBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Only for the genuinely unfixable ones (unsupported bet type, etc). If you just corrected a name, re-run the relevant Find & Update tool instead so it actually re-checks -- Mark resolved only hides this warning, it doesn't verify anything.">Mark resolved</button></td>
-          </tr>`).join('')}</tbody>
+          </tr>`;
+          }).join('')}</tbody>
         </table>
       </div>` : '';
     banner.style.display = 'block';
@@ -29768,7 +29855,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 575; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 576; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
