@@ -5,6 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pick Tracker</title>
 <style>
+  /* STANDING RULE, added 2026-09-27, direct request after this exact
+     mistake shipped live: "we keep using text colors/fonts I can't
+     read and every once and awhile have to ask you to fix it... never
+     use these colors together." Real case: a button got an inline
+     color:var(--ink-soft) (a muted dark brown/gray, #55584d, meant for
+     plain text ON the light --paper page background) while its
+     background was left to inherit the default BUTTON background,
+     var(--field) (#234d35, dark green) -- dark-on-dark, nearly
+     unreadable, and this was already a KNOWN pattern (see
+     --stamp-red-on-dark below, added for the identical reason on a
+     different color). NEVER change a color on any element without
+     either (a) also setting its background in the same rule/style, or
+     (b) reusing an EXISTING class that already pairs them correctly
+     (.ghost/.ghost.small = --field text on transparent, correct on
+     the page's own light background; the default button = --paper
+     text on --field, correct on any background). Confirmed BAD pairs so
+     far -- never use these together: --ink or --ink-soft as text on
+     --field/--field-dark; plain --stamp-red as text on --field (use
+     --stamp-red-on-dark instead, see below). When touching any color on
+     a colored (non --paper) background, compute or reason through the
+     actual contrast before shipping -- don't assume a token that reads
+     fine on the page background will also read fine on a button/chip. */
   :root {
     --paper: #eae5d6;
     --paper-dark: #ddd6c3;
@@ -29760,7 +29782,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
             const legIds = isParlay ? dataQualityExtractLegIds(p.grading_note) : [];
             const editButtonsHtml = legIds.length
               ? legIds.map((legId, i) => `<button type="button" class="dataQualityEditBtn" data-id="${escapeHtml(legId)}" style="font-size:11px;padding:1px 8px;margin-bottom:2px;" title="This parlay wrapper itself has nothing to fix -- opens the actual LINKED LEG this note names, in the manual editor on the Add Picks tab.">Edit blocking leg${legIds.length > 1 ? ' ' + (i + 1) : ''}</button>`).join('<br>')
-                + `<br><button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:10px;padding:0 6px;margin-top:2px;color:var(--ink-soft);" title="Opens the parlay wrapper pick itself, not the leg -- only useful if the WRAPPER's own date/selection text is what's wrong.">(edit wrapper instead)</button>`
+                + `<br><button type="button" class="dataQualityEditBtn ghost small" data-id="${p.id}" style="margin-top:2px;" title="Opens the parlay wrapper pick itself, not the leg -- only useful if the WRAPPER's own date/selection text is what's wrong.">(edit wrapper instead)</button>`
               : `<button type="button" class="dataQualityEditBtn" data-id="${p.id}" style="font-size:11px;padding:1px 8px;" title="Opens this pick in the manual editor on the Add Picks tab -- nothing is auto-corrected, you type the fix yourself.">Edit pick</button>`;
             return `<tr>
             <td>${escapeHtml(p.event_date)}</td>
@@ -29873,7 +29895,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 577; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 578; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
