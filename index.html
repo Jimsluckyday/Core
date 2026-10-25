@@ -3597,6 +3597,10 @@ These are almost always the same day, so "Date entered" only fills in a starting
         <div style="font-size:10px;color:var(--ink-soft);margin-bottom:10px;">
           This date range matches a pick whose EVENT date falls in it, or whose ENTERED date does -- so a KBO/Tennis pick entered on one day for a game the next (or previous) day shows up either way you're thinking about it, without needing to guess which one applies before you search.
         </div>
+        <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--ink);margin-bottom:10px;">
+          <input id="mdIncludeLaterEvents" type="checkbox" />
+          Also show picks entered in this range whose event date is AFTER the To date (a pick posted early for a later day)
+        </label>
         <div class="field" style="margin-bottom:10px;">
           <label>Find picks missing:</label>
           <div style="font-size:10px;color:var(--stamp-amber);font-weight:bold;margin:6px 0 10px;padding:8px;border:1px dashed var(--stamp-amber);border-radius:3px;">
@@ -24195,12 +24199,27 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
       const checkedIds = MD_CHECKBOX_IDS.filter(id => $(id).checked);
       picks = filterMissingDataRows(picks, checkedIds);
 
+      // Direct request 2026-10-25: picks posted a day early (entered the 18th
+      // for a game on the 19th, event_date corrected by hand) kept showing up
+      // when resolving the 18th, only because the date_entered half of the
+      // union above matched them. Hidden by default now when event_date is
+      // past the To date -- the count is named in the tab title so nothing
+      // disappears silently. Late-night-risk is exempt: that check exists
+      // precisely to surface picks whose event_date may be off by a day.
+      let hiddenLaterCount = 0;
+      if (to && !$('mdIncludeLaterEvents').checked && !checkLateNightRisk) {
+        const kept = picks.filter(p => !(p.event_date && p.event_date > to));
+        hiddenLaterCount = picks.length - kept.length;
+        picks = kept;
+      }
+
       if (!picks.length) {
-        alert('Nothing matches these filters -- data is complete.');
+        alert('Nothing matches these filters -- data is complete.' + (hiddenLaterCount ? ' (' + hiddenLaterCount + ' pick(s) with an event date after ' + to + ' were hidden -- tick "Also show picks entered in this range whose event date is AFTER the To date" to see them.)' : ''));
         return;
       }
       const checkedLabels = checkedIds.map(id => MD_FIELD_LABELS[id]);
-      openAllPicksTab(picks, `Missing data — ${checkedLabels.join(', ')}`, query, undefined, true, checkedLabels, checkedIds);
+      const hiddenLaterNote = hiddenLaterCount ? ` (${hiddenLaterCount} later-dated hidden)` : '';
+      openAllPicksTab(picks, `Missing data — ${checkedLabels.join(', ')}${hiddenLaterNote}`, query, undefined, true, checkedLabels, checkedIds);
     } catch (e) {
       alert('Could not load picks: ' + e.message);
     } finally {
@@ -29907,7 +29926,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 579; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 580; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
