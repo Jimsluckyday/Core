@@ -15551,7 +15551,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   // which slice (if any) doesn't -- the raw count is not a gap count, so
   // it's no longer shown at all, only the fact that the sport is present.
   const AUTOMATION_GAP_SPORTS = {
-    golf: { label: 'Golf', panelId: 'golfResultsToolsPanel', toggleBtnId: 'toggleGolfResultsToolsBtn', certain: true, note: 'No live automation at all -- every pending pick needs the Golf results cache.' },
+    golf: { label: 'Golf', panelId: 'golfResultsToolsPanel', toggleBtnId: 'toggleGolfResultsToolsBtn', certain: true, note: 'No live automation at all. Only flagged once the tournament has finished (outright/Top N/Matchup picks) or on the round day itself (Round picks) -- Round picks are still graded by hand, the cache only stores final standings.' },
     kbo: { label: 'KBO', panelId: 'kboResultsToolsPanel', toggleBtnId: 'toggleKboResultsToolsBtn', certain: true, note: 'No live automation at all -- every pending pick needs the KBO results cache.' },
     cfl: { label: 'CFL', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cfl', certain: true, note: 'ESPN has no CFL data at all -- every pending pick needs the CFL results cache.' },
     cba: { label: 'CBA', panelId: 'teamSportResultsToolsPanel', toggleBtnId: 'toggleTeamSportResultsToolsBtn', sportSelectValue: 'cba', certain: true, note: 'No live automation at all -- every pending pick needs the CBA results cache.' },
@@ -15583,20 +15583,59 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
     btn.textContent = 'Checking...';
     try {
       const rows = await restAllPages(
-        `picks?select=selection,prop_player,event_name,sports(name)&event_date=eq.${date}&result=eq.pending`
+        `picks?select=selection,prop_player,prop_stat,event_name,event_date,sports(name),bet_types(name)&event_date=eq.${date}&result=eq.pending`
       );
+      // Direct report 2026-10-25: Golf was flagged on 2025-06-18 for five
+      // Travelers Championship outright picks, but that tournament runs
+      // Thu-Sun (ends 06-22) -- run live, the cache would be hunting for
+      // results that don't exist yet. Golf is now handled separately below:
+      // a tournament-long pick (outright/Top N/Tournament Matchup) only
+      // needs the cache once its tournament has ended, and shows up on THAT
+      // date even though the pick's own event_date is earlier; a round-level
+      // pick (Round Matchup/Winner/Strokes) is still flagged on its own day.
+      // The end date is assumed to be the Sunday on/after the pick's date
+      // (shown on the card so it can be sanity-checked) -- no live lookup.
+      const GOLF_BACK_DAYS = 13;
+      const dateObj = new Date(date + 'T00:00:00Z');
+      const earliest = new Date(dateObj.getTime() - GOLF_BACK_DAYS * 86400000).toISOString().slice(0, 10);
+      const earlierGolf = await restAllPages(
+        `picks?select=selection,prop_player,prop_stat,event_name,event_date,sports!inner(name),bet_types(name)&sports.name=eq.Golf&event_date=gte.${earliest}&event_date=lt.${date}&result=eq.pending`
+      );
+      const isRoundLevelGolf = p => /round/i.test(p.prop_stat || '');
+      const assumedGolfEnd = eventDate => {
+        const d = new Date(eventDate + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() + ((7 - d.getUTCDay()) % 7));
+        return d.toISOString().slice(0, 10);
+      };
+      const golfReady = [];
+      const golfWaiting = {};
+      rows.concat(earlierGolf).forEach(p => {
+        if (!p.sports || normalizeForMatch(p.sports.name) !== 'golf') return;
+        if (isRoundLevelGolf(p)) { if (p.event_date === date) golfReady.push(p); return; }
+        const end = assumedGolfEnd(p.event_date);
+        if (end <= date) golfReady.push(p);
+        else if (p.event_date === date) {
+          const k = (p.event_name || 'Golf') + '|' + end;
+          golfWaiting[k] = (golfWaiting[k] || 0) + 1;
+        }
+      });
       const bySport = {};
       rows.forEach(p => {
         const sportName = p.sports ? p.sports.name : null;
         if (!sportName) return;
         const key = normalizeForMatch(sportName);
-        if (!AUTOMATION_GAP_SPORTS[key]) return;
+        if (!AUTOMATION_GAP_SPORTS[key] || key === 'golf') return;
         if (!bySport[key]) bySport[key] = [];
         bySport[key].push(p);
       });
+      if (golfReady.length) bySport.golf = golfReady;
+      const golfWaitingHtml = Object.keys(golfWaiting).map(k => {
+        const [name, end] = k.split('|');
+        return `<div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">Golf -- ${golfWaiting[k]} pending pick${golfWaiting[k] === 1 ? '' : 's'} for ${escapeHtml(name)} not flagged: the tournament runs through about ${escapeHtml(end)} (assumed Sunday finish), so there is nothing to cache yet. It will show up here on ${escapeHtml(end)} or later.</div>`;
+      }).join('');
       const keysPresent = Object.keys(bySport);
       if (!keysPresent.length) {
-        wrap.innerHTML = `<div class="msg ok">Nothing to flag for ${escapeHtml(date)} -- no pending picks in a sport that needs a results-cache tool. Safe to run "Find &amp; Update Results" directly.</div>`;
+        wrap.innerHTML = `<div class="msg ok">Nothing to flag for ${escapeHtml(date)} -- no pending picks in a sport that needs a results-cache tool. Safe to run "Find &amp; Update Results" directly.</div>${golfWaitingHtml}`;
         return;
       }
       const cardsHtml = keysPresent.map(key => {
@@ -15616,8 +15655,9 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
         // live) -- showing "39 pending picks" here read as "39 problems"
         // and drove wasted tool-opening, so this omits the number
         // entirely and just names the sport as present/worth a glance.
+        const golfEarlier = key === 'golf' ? picks.filter(p => p.event_date !== date).length : 0;
         const headerText = info.certain
-          ? `<strong>${escapeHtml(info.label)}</strong> -- ${picks.length} pending pick${picks.length === 1 ? '' : 's'} on ${escapeHtml(date)}`
+          ? `<strong>${escapeHtml(info.label)}</strong> -- ${picks.length} pending pick${picks.length === 1 ? '' : 's'} on ${escapeHtml(date)}${golfEarlier ? ` (${golfEarlier} of them dated earlier, for a tournament that has now finished)` : ''}`
           : `<strong>${escapeHtml(info.label)}</strong> -- has pending picks on ${escapeHtml(date)} (not a confirmed gap count)`;
         return `<div style="border:1px solid var(--field);border-radius:4px;padding:8px 10px;margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
@@ -15628,7 +15668,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
           ${idsHtml}
         </div>`;
       }).join('');
-      wrap.innerHTML = `<div style="font-size:12px;margin-bottom:8px;">${keysPresent.length} sport${keysPresent.length === 1 ? '' : 's'} worth checking before running "Find &amp; Update Results" for ${escapeHtml(date)}:</div>${cardsHtml}`;
+      wrap.innerHTML = `<div style="font-size:12px;margin-bottom:8px;">${keysPresent.length} sport${keysPresent.length === 1 ? '' : 's'} worth checking before running "Find &amp; Update Results" for ${escapeHtml(date)}:</div>${cardsHtml}${golfWaitingHtml}`;
       wrap.querySelectorAll('button[data-panel-id]').forEach(b => {
         b.addEventListener('click', () => {
           const sportSelectValue = b.getAttribute('data-sport-select-value');
@@ -29926,7 +29966,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 580; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 581; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
