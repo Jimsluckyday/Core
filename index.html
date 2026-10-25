@@ -14993,6 +14993,18 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
             const inp = cell.querySelector('input');
             return csvField(inp ? inp.value : '');
           }
+          if (i === 5) {
+            // Player (table col 5) holds a live input for a Player Prop
+            // (the inline prop-player editor) -- textContent returns
+            // nothing for an input, so every prop row exported with a
+            // BLANK Player column, hiding who the pick is even about from
+            // anyone (or any AI) researching odds from this file. Found
+            // 2026-10-25 when a prop-pick export came back with every
+            // Player cell empty despite the names being in the database.
+            // Non-prop rows hold plain text, so fall back to textContent.
+            const inp = cell.querySelector('input');
+            return csvField(inp ? inp.value.trim() : cell.textContent.trim());
+          }
           if (i === 8) {
             const lines = cell.innerHTML.split(/<br[^>]*>/i).map(h => {
               const tmp = document.createElement('div');
@@ -29895,7 +29907,7 @@ var __highlightLegId = ${JSON.stringify(highlightLegId || null)};
   }
 
   // ---------- version check ----------
-  const LOCAL_VERSION = 578; // bump this, and the matching row in Supabase, whenever this file is updated
+  const LOCAL_VERSION = 579; // bump this, and the matching row in Supabase, whenever this file is updated
   // HARD RULE, confirmed 2026-09-06 after BOTH of the files below fell
   // 178-179 versions behind (last real entry v271/v272, Aug 16) without
   // anyone noticing -- each one already had its own "update this
